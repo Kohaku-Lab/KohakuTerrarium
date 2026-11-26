@@ -16,7 +16,10 @@ from kohakuterrarium.studio.persistence.projects.ops import (
     session_scope,
     update_project,
 )
-from kohakuterrarium.studio.persistence.projects.paths import project_id
+from kohakuterrarium.studio.persistence.projects.paths import (
+    normalize_path,
+    project_id,
+)
 from kohakuterrarium.studio.persistence.projects.store import (
     load_records,
     projects_path,
@@ -25,6 +28,11 @@ from kohakuterrarium.studio.persistence.session_index.entry import (
     SessionIndexEntry,
 )
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
+
+
+def local_id(folder) -> str:
+    """The id of the project at a local folder, keyed the way the code keys it."""
+    return project_id("", normalize_path(str(folder), "")[1])
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +97,7 @@ class TestList:
         }
         assert result["projects"] == [
             {
-                "id": project_id("", str(repo)),
+                "id": local_id(repo),
                 "path": str(repo),
                 "node": None,
                 "name": "repo-x",
@@ -163,7 +171,7 @@ class TestUpdate:
         self, config, index, repo
     ):
         _session(index, "s1", str(repo))
-        pid = project_id("", str(repo))
+        pid = local_id(repo)
         project = update_project(index, pid, {"pinned": True})
         assert (project["id"], project["saved"], project["pinned"]) == (
             pid,
@@ -203,7 +211,7 @@ class TestUpdate:
 class TestForget:
     def test_forget_removes_only_the_record(self, config, index, repo):
         _session(index, "s1", str(repo))
-        pid = project_id("", str(repo))
+        pid = local_id(repo)
         update_project(index, pid, {"hidden": True, "name": "Gone"})
         assert list_projects(index)["projects"] == []
         assert forget_project(pid) == {"status": "forgotten", "id": pid}
@@ -216,7 +224,7 @@ class TestForget:
     def test_forgetting_an_unsaved_id_is_not_found(self, config, index, repo):
         _session(index, "s1", str(repo))
         with pytest.raises(NotFoundError):
-            forget_project(project_id("", str(repo)))
+            forget_project(local_id(repo))
         assert not projects_path().exists()
 
     def test_forget_keeps_unknown_fields_of_other_records(self, config, index, repo):
@@ -236,7 +244,7 @@ class TestSessionScope:
         _session(index, "b", str(repo / "frontend"))
         _session(index, "c", str(tmp_path / "other"))
         _session(index, "d", "")
-        pid = project_id("", str(repo))
+        pid = local_id(repo)
         view, locations = session_scope(index, pid)
         page = index.list(locations=locations, sort="name", order="asc")
         annotate_rows(view, page.rows)
@@ -261,7 +269,7 @@ class TestSessionScope:
         rows = index.list().rows
         annotate_rows(view, rows)
         assert rows[0]["project"] == {
-            "id": project_id("", str(repo)),
+            "id": local_id(repo),
             "name": "Repo X",
         }
 
