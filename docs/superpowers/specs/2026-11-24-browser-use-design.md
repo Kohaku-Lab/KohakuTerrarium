@@ -28,8 +28,8 @@ hard way. The research behind each decision is summarised in "Evidence" below.
 - Works with native and text tool formats, and with providers that require
   every argument (strict function calling), on Windows / macOS / Linux.
 - Playwright stays optional: a framework install without it starts normally.
-- Deterministic tests that run without a browser in CI, browser-backed tests
-  that run wherever Chromium exists, and a reproducible real-model benchmark.
+- Deterministic tests that run without a browser in CI, and browser-backed
+  tests that run wherever Chromium exists.
 
 ## Non-goals
 
@@ -160,8 +160,9 @@ Post-processing, in order:
    interactive or holds no elements. A lifted line remembers the wrapper it
    came out of, so the delta places it as before and a wrapper that folds or
    unfolds between two reads moves nothing. Together these cut the page text
-   of navigation results by 3.6% over the 29 benchmark start pages and two
-   long generated pages; the interactive view is unchanged.
+   of navigation results by 3.6% over the 29 start pages of the development
+   benchmark (kept outside this repository) and two long generated pages;
+   the interactive view is unchanged.
 6. Apply `ref` / `depth` / `query` / `interactive` / `boxes`.
 7. Cap at `snapshot_max_chars` (1000–1,000,000), ending with a line that says
    how much was cut and how to narrow.
@@ -176,7 +177,8 @@ batch that lands on a new document, and a tab a batch opened all show the
 page's cleaned snapshot when it fits `PAGE_TEXT_MAX_CHARS` (8000 characters,
 never more than `snapshot_max_chars`), else its interactive elements plus a
 fixed note that the text was left out and how to read it. The cap came from
-the benchmark: every one of its 29 start pages fits (largest 6577, median
+the development benchmark (kept outside this repository): every one of its
+29 start pages fits (largest 6577, median
 about 800), while a long article or a 60-item listing does not (12000 to
 20000 and more). A model that sees the text skips a snapshot round; a page
 over the cap would cost more tokens than that round saves.
@@ -532,12 +534,13 @@ The existing `browser` extra keeps meaning Crawl4AI for `web_fetch`.
 - **Boundary guards.** The dependency allowlist of `browser/`, the layer map,
   and a subprocess check that importing the facade loads no submodule and no
   Playwright.
-- **Benchmark, real model, not in CI.** `scripts/browser_bench/`: 29 local
-  micro-tasks, each with a programmatic check on server-side state,
-  including infeasible tasks, injection canaries and egress probes, a
-  scripted self-test proving each task sound, and a real-model harness that
-  reports pass rate, false-success rate, steps, tokens and wall time over
-  repeated runs, with harness errors counted separately from failures.
+- **Development benchmark, outside the repository.** The tool design was
+  checked against 29 local micro-tasks, each with a programmatic check on
+  server-side state (including infeasible tasks, injection canaries and
+  egress probes), a scripted self-test proving each task sound, and a
+  real-model harness reporting pass rate, false-success rate, steps, tokens
+  and wall time. It was a development aid, is not part of this repository or
+  its test suite, and is maintained separately.
 
 ## Evidence
 
@@ -551,7 +554,7 @@ The existing `browser` extra keeps meaning Crawl4AI for `web_fetch`.
 - `route()`-only policy is the redirect bypass behind a published 2026 CVE.
 - Hidden page text is the Comet attack vector.
 - Most web-agent failures in a 2026 audit were false success claims, which is
-  why the benchmark scores false success separately.
+  why the development benchmark scored false success separately.
 
 ## Settled during the build
 
