@@ -593,6 +593,11 @@ def site():
         "/fields-number",
         "<!doctype html><title>Number</title><label>PIN <input type=number></label>",
     )
+    server.html(
+        "/to-backslash",
+        "<!doctype html><title>Odd</title>"
+        '<a href="http://evil.test\\@ok.test/">Odd link</a>',
+    )
     server.html("/tallbox", TALL_BOX)
     server.file(
         "/report.csv",
@@ -845,6 +850,41 @@ async def test_a_click_refused_at_connect_reads_as_a_blocked_landing(live, site)
         "the page did not load."
     ) in result.text
     assert "Blocked 1 request" not in result.text
+
+
+@LIVE
+async def test_chromium_reads_a_backslash_authority_as_the_host_before_it(
+    site, browser_env, downloads
+):
+    asked = []
+
+    def allow_only_the_site(host: str, port: int) -> str | None:
+        asked.append((host, port))
+        return None if host in ("127.0.0.1", "ok.test") else f"{host} not allowed"
+
+    session = Bounded(
+        BrowserSession(
+            BrowserOptions.from_mapping(
+                {"allow_loopback": True, "action_timeout_s": 5}
+            ),
+            downloads_dir=downloads,
+            external_check=allow_only_the_site,
+        )
+    )
+    try:
+        text = (await start(session, site.url("/to-backslash"))).text
+        odd = ref_of(text, "link", "Odd link")
+        result = await session.act([{"kind": "click", "ref": odd}])
+    finally:
+        await session.close()
+    assert result.is_error, result.text
+    assert (
+        f"1. click {odd}: failed — it led to evil.test:80, which the browser "
+        "network policy blocked (evil.test denied: evil.test not allowed)"
+    ) in result.text
+    assert "→ http://evil.test/@ok.test/; the page did not load." in result.text
+    assert ("evil.test", 80) in asked
+    assert not [host for host, _ in asked if host == "ok.test"], asked
 
 
 CHECKED = "checked-Value-77"

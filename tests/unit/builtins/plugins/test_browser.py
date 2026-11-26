@@ -19,7 +19,7 @@ import pytest
 import kohakuterrarium as kt
 from kohakuterrarium.browser import profiles as profiles_module
 from kohakuterrarium.browser import proxy as proxy_module
-from kohakuterrarium.browser.errors import BrowserClosedError
+from kohakuterrarium.browser.errors import BrowserClosedError, NavigationBlockedError
 from kohakuterrarium.browser.launch import Candidate
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.builtins.plugin_catalog import is_default_on, lookup_plugin
@@ -710,6 +710,43 @@ class TestSandboxWiring:
         await proxied_get(session, "evil.test")
         assert len(external_blocks(session, "evil.test")) == before, "not live"
         await manager.unload_all()
+        assert driver.alive() == []
+
+    async def test_a_backslash_in_the_authority_reaches_neither_host(self, tmp_path):
+        plugin, driver = scripted_plugin()
+        sandbox = SandboxPlugin(options={"network_allowlist": ["ok.test"]})
+        manager = PluginManager()
+        manager.register(sandbox)
+        manager.register(plugin)
+        await manager.load_all(plugin_context(tmp_path, manager))
+        tools = {tool.tool_name: tool for tool in plugin.contribute_tools()}
+        context = manager_context(manager, tmp_path)
+        url = "https://evil.test\\@ok.test/"
+        try:
+            for name, args in (
+                ("browser_navigate", {"url": url}),
+                ("browser_tabs", {"action": "new", "url": url}),
+            ):
+                with pytest.raises(PluginBlockError, match="unparseable URL"):
+                    await wrapped(manager, tools[name], context)(args, context)
+            assert driver.plans == [], "the hook let the browser start"
+            snapshot = await wrapped(manager, tools["browser_snapshot"], context)(
+                {}, context
+            )
+            assert snapshot.success
+            session = plugin.session
+            with pytest.raises(NavigationBlockedError, match="embedded credentials"):
+                await session.navigate(url)
+            await proxied_get(session, "evil.test")
+            await proxied_get(session, "ok.test")
+            evil, ok = external_blocks(session, "evil.test"), external_blocks(
+                session, "ok.test"
+            )
+            page = driver.browser.page
+        finally:
+            await manager.unload_all()
+        assert not [c for c in page.calls if c[0] == "goto"]
+        assert evil and not ok, "the proxy judged the hosts wrongly"
         assert driver.alive() == []
 
     async def test_service_is_read_again_on_every_call(self, tmp_path):
