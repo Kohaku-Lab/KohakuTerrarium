@@ -13,9 +13,11 @@ from fastapi import HTTPException
 from kohakuterrarium.api.routes.identity.llm import ProfileRequest, create_profile
 from kohakuterrarium.llm.discovery import DiscoveredModel
 from kohakuterrarium.llm.presets.store import load_presets
+from kohakuterrarium.llm.profiles.backends import load_yaml_store, save_yaml_store
 
 from kohakuterrarium.studio.identity.llm.profiles import (
     get_profile_for_identifier,
+    list_profiles_payload,
     save_discovered_model,
     save_profile_record,
     split_identifier,
@@ -125,3 +127,73 @@ async def test_concurrent_create_only_never_replaces_winning_model():
     assert winners == [load_presets()[("qwen", "race")].model]
     conflicts = [result for result in results if isinstance(result, HTTPException)]
     assert [error.status_code for error in conflicts] == [409, 409, 409]
+
+
+class TestContextWindowOnSave:
+    def test_editor_save_without_the_field_keeps_the_stored_window(self):
+        save_profile_record(
+            "wide", "m", "openai", max_context=300000, context_window=400000
+        )
+        save_profile_record("wide", "m", "openai", max_context=350000)
+        (preset,) = [
+            p for key, p in load_presets().items() if key == ("openai", "wide")
+        ]
+        assert (preset.max_context, preset.context_window) == (350000, 400000)
+
+    def test_overriding_a_builtin_keeps_its_window(self):
+        save_profile_record("gpt-6-astra", "gpt-6-astra", "codex", max_context=500000)
+        preset = load_presets()[("codex", "gpt-6-astra")]
+        assert (preset.max_context, preset.context_window) == (500000, 1000000)
+
+    def test_discovered_model_saves_its_draft_fields(self):
+        model = DiscoveredModel(
+            "gpt-6.9-sol",
+            max_context=500000,
+            reasoning_levels=("low", "medium", "high"),
+        )
+        preset, created = save_discovered_model("codex", model)
+        assert created
+        assert preset.context_window == 500000
+        assert preset.max_context == 500000
+        assert list(preset.variation_groups["reasoning"]) == ["low", "medium", "high"]
+        assert preset.reasoning_effort == "medium"
+        stored = load_presets()[("codex", "gpt-6.9-sol")]
+        assert stored.variation_groups == preset.variation_groups
+
+
+class TestLegacyContextGroupOnSave:
+    GROUPS = {
+        "context": {"200k": {"max_context": 200000}, "long": {"max_context": 900000}},
+        "reasoning": {"high": {"reasoning_effort": "high"}},
+    }
+
+    def _store_legacy(self):
+        legacy = {"model": "m", "max_context": 200000, "variation_groups": self.GROUPS}
+        save_yaml_store({"version": 3, "presets": {"openai": {"cc": legacy}}})
+
+    def test_payload_shows_the_folded_preset(self):
+        self._store_legacy()
+        (row,) = [p for p in list_profiles_payload() if p["name"] == "cc"]
+        assert row["variation_groups"] == {"reasoning": self.GROUPS["reasoning"]}
+        assert row["context_window"] == 900000
+
+    def test_editor_save_keeps_the_stored_group_and_its_aliases(self):
+        self._store_legacy()
+        shown = {"reasoning": self.GROUPS["reasoning"]}
+        save_profile_record(
+            "cc", "m", "openai", max_output=4096, variation_groups=shown
+        )
+        stored = load_yaml_store()["presets"]["openai"]["cc"]
+        assert stored["variation_groups"] == self.GROUPS
+        assert "context_window" not in stored
+        assert get_profile_for_identifier("openai/cc@context=long").max_context == (
+            900000
+        )
+
+    def test_editor_save_that_drops_a_group_keeps_the_aliases(self):
+        self._store_legacy()
+        save_profile_record("cc", "m", "openai", variation_groups={})
+        stored = load_yaml_store()["presets"]["openai"]["cc"]
+        assert "variation_groups" not in stored
+        assert stored["context_aliases"] == {"long": 900000}
+        assert get_profile_for_identifier("openai/cc@long").max_context == 900000

@@ -195,6 +195,14 @@ class MyProvider(BaseLLMProvider):
   KohakuTerrarium 不会为它索取、保存或检查 API 密钥，`kt login <name>`
   只打印一条提示。
 - 发现阶段只读取清单；模块在第一次构建该后端的 profile 时才导入。
+- 在后端条目里写 `model_discovery: true`，并在类上提供异步类方法
+  `discover_models(cls, backend) -> list[DiscoveredModel]`
+  (`kohakuterrarium.llm.discovery.DiscoveredModel`)，设置页和 CLI 就能列出该后端的模型。
+  `DiscoveredModel` 可以带 `preset=`，即建议的 preset 字段字典：`variation_groups`、
+  `reasoning_effort`、`service_tier`、`max_context`、`max_output`、`context_window`、
+  `temperature`、`extra_body`、`provider_native_tools`。用户从目录保存模型时，这些字段
+  优先于 KT 推断的值（同一后端上最接近的同系列 preset，或上报的推理档位）。它们和用户
+  preset 经过同样的检查；无效的建议会被丢弃并记录警告，改用推断出的草稿。其他键会被忽略。
 - 与内置后端类型同名的条目会被忽略。两个包声明同一个名字会报错。
 
 ## 安装方式

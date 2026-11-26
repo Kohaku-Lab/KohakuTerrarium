@@ -17,7 +17,7 @@ from kohakuterrarium.llm.codex.auth import valid_subscription_tokens
 from kohakuterrarium.llm.codex.claims import account_id_from_id_token
 from kohakuterrarium.llm.codex.image.budget import CODEX_BASE_URL
 from kohakuterrarium.llm.grok.auth import GrokTokens
-from kohakuterrarium.llm.presets.catalog import get_all_presets
+from kohakuterrarium.llm.presets.drafts import suggest_drafts
 from kohakuterrarium.llm.profiles.api_keys import backend_api_key
 from kohakuterrarium.llm.profiles.backends import load_backends
 from kohakuterrarium.llm.profiles.backend_registry import (
@@ -51,6 +51,8 @@ class DiscoveredModel:
     input_modalities: tuple[str, ...] = ()
     output_modalities: tuple[str, ...] = ()
     reasoning_levels: tuple[str, ...] = ()
+    # Package backends may suggest preset fields; see llm/presets/drafts.py.
+    preset: dict | None = None
 
 
 def _catalog_kind(backend: LLMBackend, base_url: str) -> str:
@@ -241,6 +243,11 @@ async def _fetch_catalog(client, kind, base_url):
                     ),
                     input_modalities=_strings(architecture.get("input_modalities")),
                     output_modalities=outputs,
+                    reasoning_levels=(
+                        _OPENROUTER_EFFORTS
+                        if "reasoning" in _strings(row.get("supported_parameters"))
+                        else ()
+                    ),
                 )
             )
         return models
@@ -288,6 +295,10 @@ async def _fetch_catalog(client, kind, base_url):
         for row in rows
     ]
 
+
+# OpenRouter lists only whether a model takes ``reasoning``; these efforts it
+# accepts for every reasoning model.
+_OPENROUTER_EFFORTS = ("low", "medium", "high")
 
 _NON_CHAT_OPENAI = re.compile(
     r"(?:^|[-:])(embedding|moderation|whisper|tts|transcribe|realtime|dall-e|image|sora|babbage|davinci)(?:[-:]|$)"
@@ -468,37 +479,5 @@ async def discover_models(
 
 
 def suggested_presets(provider: str, models: list[DiscoveredModel]) -> list[dict]:
-    """Suggest drafts in catalog order, using curated limits for dated snapshots."""
-    templates = {}
-    for (owner, name), data in get_all_presets().items():
-        if owner == provider and data.get("model") == name:
-            templates[name] = data
-    backend = load_backends().get(provider)
-    kind = (
-        catalog_kind(interpolate_env_vars(backend.base_url))
-        if backend and backend.backend_type == "openai"
-        else ""
-    )
-    return [_preset_fields(provider, model, kind, templates) for model in models]
-
-
-def _preset_fields(provider, model, kind, templates):
-    fields = {
-        "provider": provider,
-        "name": re.sub(r"[/@]", "-", model.id),
-        "model": model.id,
-    }
-    family = re.fullmatch(r"(.+)-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{8})", model.id)
-    template = templates.get(family[1], {}) if family else {}
-    for key in ("max_context", "max_output"):
-        limit = getattr(model, key) or _positive(template.get(key))
-        if limit is not None:
-            fields[key] = limit
-    if kind == "deepseek" and model.reasoning_levels:
-        fields["variation_groups"] = {
-            "reasoning": {
-                level: {"extra_body.reasoning_effort": level}
-                for level in model.reasoning_levels
-            }
-        }
-    return fields
+    """Preset drafts in catalog order for the models ``provider`` reported."""
+    return suggest_drafts(provider, models)
