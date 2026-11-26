@@ -51,8 +51,9 @@ export function sessionStatus(session) {
  * its one-line summary, else the recipe/creature it started from
  * (`labelFrom` says which); `key` is the storage name, never shown; `recipe` is shown as a chip when it is
  * not the label. `line` is the summary when not already the label, else the
- * latest prompt. Plus the config, member count, working directory, status,
- * turn count and the latest exchange.
+ * latest prompt. Plus the config, member count, working directory, the
+ * project it belongs to (as the server says), status, turn count and the
+ * latest exchange.
  */
 export function historyRow(session) {
   const recipe = savedSessionLabel(session)
@@ -75,6 +76,8 @@ export function historyRow(session) {
     agents: session?.agents?.length || 0,
     pwd: session?.pwd || "",
     pwdName: baseName(session?.pwd),
+    projectId: session?.project?.id || "",
+    projectName: session?.project?.name || "",
     preview,
     lastUser,
     lastReply: (session?.last_reply || "").trim(),
@@ -102,4 +105,18 @@ export function whenLabel(value, t, now = new Date()) {
   if (days === 1) return t("sessions.yesterday")
   if (days < 7) return t("sessions.daysAgo", { count: days })
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
+/**
+ * A page of rows under project headings, in the order each project first
+ * appears: `[{ id, name, rows }]`, with "" as the id of rows in no project.
+ */
+export function groupByProject(rows) {
+  const groups = new Map()
+  for (const row of rows) {
+    const id = row.projectId || ""
+    if (!groups.has(id)) groups.set(id, { id, name: row.projectName || "", rows: [] })
+    groups.get(id).rows.push(row)
+  }
+  return [...groups.values()]
 }

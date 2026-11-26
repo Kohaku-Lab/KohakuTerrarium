@@ -73,6 +73,21 @@ describe("RailPane collapse", () => {
   })
 })
 
+describe("RailPane projects", () => {
+  const navs = descendants(root).filter((node) => node.tag === "nav")
+
+  it("puts Projects after the nav and before Running, and offers it in the strip", () => {
+    const tags = descendants(navs[1])
+      .map((n) => n.tag)
+      .filter((tag) => ["RailNav", "RailProjects", "RailGroupAttached"].includes(tag))
+    expect(tags).toEqual(["RailNav", "RailProjects", "RailGroupAttached"])
+    const strip = descendants(navs[0]).find((n) =>
+      n.props.some((p) => p.name === "data-test" && p.value?.content === "rail-strip-projects"),
+    )
+    expect(strip).toBeTruthy()
+  })
+})
+
 describe("RailPane in the phone drawer", () => {
   beforeEach(() => {
     setActivePinia(createPinia())

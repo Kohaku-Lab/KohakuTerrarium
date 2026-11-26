@@ -199,6 +199,15 @@ export const useTabsStore = defineStore("tabs", {
       this._dirty()
     },
 
+    /** Remember the History tab's project filter and grouping across reloads. */
+    setHistoryView(id, { project, groupByProject } = {}) {
+      const tab = this.byId[id]
+      if (tab?.kind !== "saved-sessions") return
+      if (typeof project === "string") tab.project = project
+      if (typeof groupByProject === "boolean") tab.groupByProject = groupByProject
+      this._dirty()
+    },
+
     /** Add or activate a tab. New tabs land in the focused group. */
     openTab(spec) {
       this._ensureTree()
@@ -206,6 +215,10 @@ export const useTabsStore = defineStore("tabs", {
         if (spec.kind === "settings" && typeof spec.section === "string") {
           this.byId[spec.id].section = spec.section
           this.byId[spec.id].sectionRequest = (this.byId[spec.id].sectionRequest || 0) + 1
+        }
+        if (spec.kind === "saved-sessions" && typeof spec.project === "string") {
+          this.byId[spec.id].project = spec.project
+          this.byId[spec.id].projectRequest = (this.byId[spec.id].projectRequest || 0) + 1
         }
         if (["attach", "inspector"].includes(spec.kind)) this.updateSurfaceMeta(spec.target, spec)
         const gid = this._groupOf(spec.id)
@@ -696,6 +709,8 @@ export const useTabsStore = defineStore("tabs", {
         entity: t.entity,
         entityKind: t.entityKind,
         module_kind: t.module_kind,
+        project: t.project,
+        groupByProject: t.groupByProject,
       }
     },
 

@@ -22,7 +22,12 @@ const messages = vi.hoisted(() => ({
   prompt: vi.fn(),
 }))
 
-vi.mock("@/utils/api", () => ({ attachAPI: { getCreaturePolicies: vi.fn() }, sessionAPI: api }))
+const projectsApi = vi.hoisted(() => ({ list: vi.fn() }))
+vi.mock("@/utils/api", () => ({
+  attachAPI: { getCreaturePolicies: vi.fn() },
+  sessionAPI: api,
+  projectsAPI: projectsApi,
+}))
 vi.mock("@/stores/instances", () => ({ useInstancesStore: () => instances }))
 vi.mock("@/stores/cluster", () => ({ useClusterStore: () => cluster }))
 vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: (key) => key }) }))
@@ -69,7 +74,7 @@ const stubs = {
 }
 
 const row = (w, key) => w.find(`[data-test="history-row-${key}"]`)
-const mountPage = () => mount(HistoryPage, { global: { stubs } })
+const mountPage = (props = {}) => mount(HistoryPage, { props, global: { stubs } })
 
 let uninstall
 beforeEach(() => {
@@ -95,6 +100,13 @@ beforeEach(() => {
     session_name: "Saved team",
   })
   instances.fetchOne.mockRejectedValue(new Error("detail unavailable"))
+  projectsApi.list.mockResolvedValue({
+    projects: [
+      { id: "p-app", name: "app", path: "/work/app", session_count: 2 },
+      { id: "p-lib", name: "lib", path: "/work/lib", session_count: 1 },
+    ],
+    unassigned: { session_count: 1, running_count: 0, last_active: null },
+  })
 })
 afterEach(() => {
   uninstall?.()
@@ -359,5 +371,152 @@ describe("HistoryPage: row actions", () => {
     await flushPromises()
     expect(api.delete).toHaveBeenCalledWith("saved")
     expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ refresh: true }))
+  })
+})
+
+describe("HistoryPage: projects", () => {
+  const page = {
+    sessions: [
+      { name: "a1", title: "A one", pwd: "/work/app", project: { id: "p-app", name: "app" } },
+      { name: "loose", title: "Loose", pwd: "/tmp/x", project: null },
+      { name: "l1", title: "L one", pwd: "/work/lib/src", project: { id: "p-lib", name: "lib" } },
+      { name: "a2", title: "A two", pwd: "/work/app/sub", project: { id: "p-app", name: "app" } },
+    ],
+    total: 4,
+  }
+
+  function openHistory(spec = {}) {
+    const tabs = useTabsStore()
+    tabs.openTab({ kind: "saved-sessions", id: "saved-sessions", ...spec })
+    return tabs
+  }
+
+  it("filters by project, keeps the filter on the tab, and offers every project plus No project", async () => {
+    api.list.mockResolvedValue(page)
+    const tabs = openHistory()
+    const w = mountPage({ tab: tabs.byId["saved-sessions"] })
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ project: expect.anything() }),
+    )
+    const options = w
+      .findAll('[data-test="history-project"] option')
+      .map((o) => o.attributes("value"))
+    expect(options).toEqual(["", "p-app", "p-lib", "none"])
+    await w.find('[data-test="history-project"]').setValue("p-lib")
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ project: "p-lib", offset: 0 }),
+    )
+    expect(tabs.byId["saved-sessions"].project).toBe("p-lib")
+    expect(tabs.serializeToStorage().tabs.find((t) => t.id === "saved-sessions").project).toBe(
+      "p-lib",
+    )
+    await w.find('[data-test="history-project"]').setValue("none")
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ project: "none" }))
+    await w.find('[data-test="history-project"]').setValue("")
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ project: expect.anything() }),
+    )
+  })
+
+  it("lands filtered from the sidebar, follows a later Show all, and restores after a reload", async () => {
+    api.list.mockResolvedValue(page)
+    const tabs = openHistory({ project: "p-app" })
+    const w = mountPage({ tab: tabs.byId["saved-sessions"] })
+    await flushPromises()
+    expect(api.list).toHaveBeenCalledTimes(1)
+    expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ project: "p-app" }))
+    openHistory({ project: "p-lib" })
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ project: "p-lib" }))
+    expect(w.find('[data-test="history-project"]').element.value).toBe("p-lib")
+    w.unmount()
+
+    const snapshot = JSON.parse(JSON.stringify(tabs.serializeToStorage()))
+    setActivePinia(createPinia())
+    const restored = useTabsStore()
+    restored.loadFromStorage(snapshot)
+    api.list.mockClear()
+    mountPage({ tab: restored.byId["saved-sessions"] })
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ project: "p-lib" }))
+  })
+
+  it("names an unknown filtered project from its rows", async () => {
+    api.list.mockResolvedValue({
+      sessions: [{ name: "h1", project: { id: "p-hidden", name: "secret" } }],
+      total: 1,
+    })
+    const tabs = openHistory({ project: "p-hidden" })
+    const w = mountPage({ tab: tabs.byId["saved-sessions"] })
+    await flushPromises()
+    const option = w.find('[data-test="history-project"] option[value="p-hidden"]')
+    expect(option.text()).toBe("secret")
+    expect(w.find('[data-test="history-empty"]').exists()).toBe(false)
+  })
+
+  it("says a filtered project is empty instead of the no-sessions hint", async () => {
+    api.list.mockResolvedValue({ sessions: [], total: 0 })
+    const tabs = openHistory({ project: "p-app" })
+    const w = mountPage({ tab: tabs.byId["saved-sessions"] })
+    await flushPromises()
+    expect(w.find('[data-test="history-empty"]').text()).toContain("lab.history.projectEmpty")
+    expect(w.find('[data-test="history-empty"]').text()).not.toContain("sessions.noSavedHint")
+  })
+
+  it("groups the current page under project headings, keeps paging, and remembers the toggle", async () => {
+    api.list.mockResolvedValue({ ...page, total: 64 })
+    const tabs = openHistory()
+    const w = mountPage({ tab: tabs.byId["saved-sessions"] })
+    await flushPromises()
+    expect(w.find('[data-test^="history-group-"]').exists()).toBe(false)
+    const flat = w.findAll('[data-test^="history-row-"]').map((r) => r.attributes("data-test"))
+    expect(flat).toEqual([
+      "history-row-a1",
+      "history-row-loose",
+      "history-row-l1",
+      "history-row-a2",
+    ])
+    await w.find('[data-test="history-group"]').trigger("click")
+    expect(tabs.byId["saved-sessions"].groupByProject).toBe(true)
+    const order = w
+      .findAll('[data-test^="history-group-"], [data-test^="history-row-"]')
+      .map((r) => r.attributes("data-test"))
+    expect(order).toEqual([
+      "history-group-p-app",
+      "history-row-a1",
+      "history-row-a2",
+      "history-group-none",
+      "history-row-loose",
+      "history-group-p-lib",
+      "history-row-l1",
+    ])
+    expect(w.find('[data-test="history-group-p-app"]').text()).toContain("2")
+    expect(w.find('[data-test="history-group-none"]').text()).toContain("lab.history.noProject")
+    const calls = api.list.mock.calls.length
+    expect(calls).toBe(1)
+    await w.find('[data-test="history-next"]').trigger("click")
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 30, limit: 30 }))
+    expect(w.find('[data-test="history-group-p-app"]').exists()).toBe(true)
+  })
+
+  it("shows each row's project as a chip that filters by it, and the folder name without one", async () => {
+    api.list.mockResolvedValue(page)
+    const tabs = openHistory()
+    const w = mountPage({ tab: tabs.byId["saved-sessions"] })
+    await flushPromises()
+    const chip = row(w, "a2").find('[data-test="history-project-chip"]')
+    expect(chip.text()).toBe("app")
+    expect(chip.attributes("title")).toBe("/work/app/sub")
+    expect(row(w, "loose").find('[data-test="history-project-chip"]').exists()).toBe(false)
+    expect(row(w, "loose").text()).toContain("x")
+    await chip.trigger("click")
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ project: "p-app" }))
+    expect(tabs.byId["saved-sessions"].project).toBe("p-app")
   })
 })
