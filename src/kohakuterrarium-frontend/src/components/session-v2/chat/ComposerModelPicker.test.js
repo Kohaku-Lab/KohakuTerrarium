@@ -128,4 +128,33 @@ describe("ComposerModelPicker", () => {
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(pill(wrapper).text()).toContain("codex/other")
   })
+
+  it("prefills the context field from the open creature's live length and window", async () => {
+    const chat = reactive({
+      activeTab: "worker",
+      _rootSourceName: null,
+      modelByTab: { worker: { llmName: "codex/other", maxContext: 300000, contextWindow: 400000 } },
+    })
+    const instance = {
+      ...INSTANCE,
+      creatures: INSTANCE.creatures.map((c) =>
+        c.name === "boss" ? { ...c, max_context: 128000, context_window: 200000 } : c,
+      ),
+    }
+    const { wrapper } = mountPicker(chat, instance)
+    await flushPromises()
+    await pill(wrapper).trigger("click")
+    await flushPromises()
+    const field = () => wrapper.find("[data-test='model-context-input']")
+    expect(field().attributes("model-value")).toBe("300k")
+    expect(wrapper.find("[data-test='model-context-note']").text()).toContain("Model window: 400k")
+
+    chat.activeTab = "boss"
+    await flushPromises()
+    await pill(wrapper).trigger("click")
+    await pill(wrapper).trigger("click")
+    await flushPromises()
+    expect(field().attributes("model-value")).toBe("128k")
+    expect(wrapper.find("[data-test='model-context-note']").text()).toContain("Model window: 200k")
+  })
 })

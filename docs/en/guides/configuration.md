@@ -93,7 +93,8 @@ kt config llm show deepseek/MODEL_ID
 
 ### GPT-6 through Codex OAuth
 
-After `kt login codex`, select `codex/gpt-6.1-sol`, `codex/gpt-6-sol`,
+After `kt login codex`, select `codex/gpt-6.2-sol`, `codex/gpt-6.2-astra`,
+`codex/gpt-6.1-sol`, `codex/gpt-6.1-terra`, `codex/gpt-6-sol`,
 `codex/gpt-6-luna`, or `codex/gpt-6-astra`. Model availability still depends
 on the account and rollout; a local preset does not grant access. See the
 [official Codex model documentation](https://learn.chatgpt.com/docs/models).
@@ -103,10 +104,12 @@ controller:
   llm: codex/gpt-6.1-sol@reasoning=high,speed=fast
 ```
 
-The added Sol and Luna presets default to medium reasoning and a conservative
-272K operating context. `context=1m` opts into the existing larger-context
-variation. This operating limit controls KT's compaction threshold, not the
-model's advertised API context size. Astra's existing defaults are unchanged.
+The GPT-6 and GPT-6.1 Sol and Luna presets default to medium reasoning and a
+conservative 272K operating context; GPT-6.2 Sol and GPT-6.1 Terra use the
+catalog's 500K, GPT-6.2 Astra its 272K. `context=<size>` (for example
+`context=1m` or `context=700000`) picks any other budget. This operating limit
+controls KT's compaction threshold, not the model's advertised API context
+size; the presets record the 1M window as `context_window`. Astra's existing defaults are unchanged.
 GPT-6 Sol and GPT-6.1 Sol expose low through ultra reasoning; Luna stops at max.
 These are subscription controls, separate from direct OpenAI API settings.
 Existing aliases such as `sol` continue to resolve to their previous models;

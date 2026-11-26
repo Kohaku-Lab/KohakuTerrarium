@@ -8,6 +8,7 @@ from kohakuterrarium.core.token_ledger import (
     context_window,
     empty_token_usage,
     ledger_for,
+    model_context_window,
     reset_context_tokens,
     token_snapshot,
 )
@@ -145,3 +146,16 @@ class TestContextWindow:
 
     def test_mock_values_are_ignored(self):
         assert context_window(MagicMock()) == (0, 0)
+
+
+class TestModelContextWindow:
+    def test_reports_the_profile_window(self):
+        agent = SimpleNamespace(llm=SimpleNamespace(_profile_context_window=1_000_000))
+        assert model_context_window(agent) == 1_000_000
+
+    def test_unknown_window_is_none(self):
+        assert model_context_window(SimpleNamespace(llm=SimpleNamespace())) is None
+        assert model_context_window(SimpleNamespace()) is None
+        assert model_context_window(MagicMock()) is None
+        agent = SimpleNamespace(llm=SimpleNamespace(_profile_context_window=0))
+        assert model_context_window(agent) is None

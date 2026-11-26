@@ -12,6 +12,7 @@ from websockets.frames import Close
 from openai.resources.responses import responses as sdk_responses
 
 from kohakuterrarium.llm.responses.ws import (
+    MIN_OPENAI_FOR_WS,
     ResponsesWSError,
     ResponsesWSSession,
     event_bytes,
@@ -736,3 +737,39 @@ class TestFailureRecovery:
         with pytest.raises(StopAsyncIteration):
             await gen.__anext__()
         assert not h.session.busy
+
+
+class TestSdkSignatureMismatch:
+    async def test_connect_type_error_disables_ws_without_retry(self, caplog):
+        calls = []
+
+        def factory():
+            calls.append(1)
+            raise TypeError("connect() got an unexpected keyword argument 'x'")
+
+        session = ResponsesWSSession(factory, fallback_after=0)
+        with pytest.raises(ResponsesWSError) as caught:
+            async for _ in session.stream_turn({"model": "m"}, [USER1], lambda x: x):
+                pass
+        assert not caught.value.transport
+        assert not caught.value.submitted
+        assert calls == [1]
+        assert session.disabled
+        session.note_http_fallback()
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert [w for w in warnings if MIN_OPENAI_FOR_WS in w] == [
+            f"Responses WebSocket mode needs openai>={MIN_OPENAI_FOR_WS}; "
+            "using HTTP for this conversation"
+        ]
+        assert not any("disabled for this conversation" in w for w in warnings)
+
+    async def test_other_connect_errors_stay_transient(self):
+        def factory():
+            raise ConnectionError("no upgrade")
+
+        session = ResponsesWSSession(factory)
+        with pytest.raises(ResponsesWSError) as caught:
+            async for _ in session.stream_turn({"model": "m"}, [USER1], lambda x: x):
+                pass
+        assert caught.value.transport
+        assert not session.disabled

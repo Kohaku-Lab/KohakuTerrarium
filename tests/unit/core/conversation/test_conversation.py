@@ -621,6 +621,15 @@ class TestSealing:
             conv.adopt_contents(Conversation())
         assert [m.content for m in conv.get_messages()] == ["sys", "hello"]
 
+    def test_check_writable_is_the_public_seal_gate(self):
+        conv = Conversation()
+        conv.check_writable()
+        conv.seal()
+        with pytest.raises(ConversationSealedError):
+            conv.check_writable()
+        conv.unseal()
+        conv.check_writable()
+
     def test_unsealed_conversation_accepts_writes_again(self):
         conv = Conversation()
         conv.seal()

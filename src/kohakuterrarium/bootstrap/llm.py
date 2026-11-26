@@ -330,9 +330,10 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
 
 def _apply_backend_native_identity(provider: LLMProvider, profile: LLMProfile) -> None:
-    """Apply canonical selector, backend identity, and tool capabilities."""
+    """Apply canonical selector, known window, backend identity, and tool capabilities."""
     if isinstance(profile, LLMProfile):
         provider._llm_identifier = profile_to_identifier(profile)
+        provider._profile_context_window = profile.context_window
     backend_name = getattr(profile, "backend_provider_name", "")
     if backend_name:
         provider.provider_name = backend_name

@@ -148,6 +148,28 @@ Rules:
 - Cross-group collisions on the same dotted path raise: two selections
   cannot both claim `extra_body.reasoning.effort`.
 
+`context=<size>` works on every preset without a group. It sets
+`max_context`, the history budget KT compacts against; it is never sent to
+the provider. The size is a whole number of tokens or `<n>k` / `<n>m`
+(case-insensitive, `k` = 1,000, `m` = 1,000,000, decimals allowed when the
+result is whole: `1.5m`). It combines with other groups:
+
+```text
+codex/gpt-6.1-sol@reasoning=high,context=500k
+codex/gpt-6.1-sol@context=500000                # same budget
+```
+
+The canonical identifier writes the size in its shortest form
+(`context=500k`, `context=1m`), so a stored selector re-resolves to the same
+number. A `context` group whose every option sets only `max_context` (the
+older `200k` / `1m` spelling, still shipped by some packages) is read as this
+numeric selection: it is not listed as a group, `context_window` defaults to
+its largest option, and an option whose name is not a size (`long`) still
+resolves to its number. A `context` group whose options patch anything else
+keeps its named options; any other value is read as a size. Presets carry an
+informational `context_window` (the model's known window, when KT knows it).
+It caps nothing: UIs use it to warn when `max_context` is larger.
+
 See [Variation groups in builtins.md](builtins.md#variation-groups) for the
 per-preset catalogue of groups and options.
 
@@ -1193,7 +1215,7 @@ prompts:
   - name: git-safety
     path: prompts/git-safety.md
 framework_hints:
-  framework.execution_model.dynamic: "..."
+  framework.execution_model: "..."
 llm_presets:
   - name: my_preset
 python_dependencies:

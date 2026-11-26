@@ -797,12 +797,20 @@ class TestPrivateHelpers:
         sess = _session(
             has_root=True,
             creatures=[
-                {"name": "root", "model": "x", "pwd": "/p"},
+                {
+                    "name": "root",
+                    "model": "x",
+                    "pwd": "/p",
+                    "max_context": 500000,
+                    "context_window": 1000000,
+                },
                 {"name": "alice"},
             ],
         )
         out = active_mod._session_legacy_terrarium_response(sess)
         assert out["root_model"] == "x"
+        assert out["root_max_context"] == 500000
+        assert out["root_context_window"] == 1000000
 
     async def test_resolve_session(self, monkeypatch):
         monkeypatch.setattr(

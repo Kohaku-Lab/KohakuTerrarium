@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest"
 import ElementPlus from "element-plus"
 
 vi.mock("@/utils/i18n", () => ({
-  useI18n: () => ({ t: (key, params) => (params?.name ? `${key}:${params.name}` : key) }),
+  useI18n: () => ({
+    t: (key, params) =>
+      params?.name ? `${key}:${params.name}` : params?.size ? `${key}:${params.size}` : key,
+  }),
 }))
 
 import ModelEditor from "./ModelEditor.vue"
@@ -137,5 +140,56 @@ describe("ModelEditor", () => {
     expect(wrapper.find("[data-selector]").text()).toBe("anthropic/fast@speed=fast")
     expect(wrapper.find("[data-diff]").text()).toContain("service_tier")
     expect(wrapper.find("[data-diff]").text()).toContain('"priority"')
+  })
+
+  it("shows the model window as a hint and warns above it, while still saving the larger length", async () => {
+    const wrapper = mountEditor({
+      preset: { ...USER, max_context: 400000, context_window: 1000000 },
+      mode: "edit",
+    })
+    expect(wrapper.get("[data-context-window]").text()).toBe("settings.models.contextWindow:1M")
+    expect(wrapper.find("[data-context-warning]").exists()).toBe(false)
+
+    await wrapper.get('[data-field="max_context"] input').setValue("1500000")
+    await wrapper.get('[data-field="max_context"] input').trigger("change")
+
+    expect(wrapper.get("[data-context-warning]").text()).toContain("settings.models.contextOver:1M")
+    expect(action(wrapper, "save").attributes("disabled")).toBeUndefined()
+    await action(wrapper, "save").trigger("click")
+    expect(wrapper.emitted("save")[0][0].max_context).toBe(1500000)
+  })
+
+  it("shows no window hint or warning when the window is unknown", () => {
+    const wrapper = mountEditor({
+      preset: { ...USER, max_context: 5000000, context_window: null },
+      mode: "edit",
+    })
+    expect(wrapper.find("[data-context-window]").exists()).toBe(false)
+    expect(wrapper.find("[data-context-warning]").exists()).toBe(false)
+  })
+
+  it("keeps the window of a discovered draft and offers no context knob", async () => {
+    const wrapper = mountEditor({
+      preset: {
+        name: "gpt-6-sol",
+        model: "gpt-6-sol",
+        provider: "anthropic",
+        max_context: 2000000,
+        context_window: 1000000,
+        variation_groups: {
+          reasoning: { low: { reasoning_effort: "low" }, high: { reasoning_effort: "high" } },
+        },
+      },
+      mode: "new",
+    })
+    expect(wrapper.get("[data-context-warning]").exists()).toBe(true)
+    expect(wrapper.text()).not.toContain("settings.models.variations.tpl.context")
+    await action(wrapper, "save").trigger("click")
+    expect(wrapper.emitted("save")[0][0]).toMatchObject({
+      max_context: 2000000,
+      variation_groups: {
+        reasoning: { low: { reasoning_effort: "low" }, high: { reasoning_effort: "high" } },
+      },
+    })
   })
 })

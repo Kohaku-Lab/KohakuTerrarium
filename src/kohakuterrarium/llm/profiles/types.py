@@ -1,7 +1,19 @@
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from typing import Any
 
+from kohakuterrarium.llm.profiles.context import (
+    CONTEXT_SELECTION_KEY,
+    context_aliases,
+    fold_legacy_context,
+)
+
 _LEGACY_BACKEND_TYPES = {"openai", "codex", "codex-oauth", "anthropic"}
+
+
+def _window(value: Any) -> int | None:
+    """A stored ``context_window``, or ``None`` when absent or malformed."""
+    return value if type(value) is int and value > 0 else None
 
 
 @dataclass
@@ -58,6 +70,61 @@ class LLMPreset:
     retry_policy: dict[str, Any] | None = None
     provider_native_tools: list[str] | None = None
     variation_groups: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    # Known size of the model's window; informational, never caps max_context.
+    context_window: int | None = None
+    # ``context=<name>`` selections that are not plain sizes, as token counts.
+    context_aliases: dict[str, int] = field(default_factory=dict)
+    # Groups, window and aliases as given, when a legacy context group was folded.
+    folded_from: tuple[Any, int | None, dict[str, int]] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        folded = fold_legacy_context(
+            self.variation_groups, self.context_window, self.context_aliases
+        )
+        if folded is None:
+            return
+        self.folded_from = (
+            deepcopy(self.variation_groups),
+            self.context_window,
+            dict(self.context_aliases),
+        )
+        self.variation_groups, self.context_window, self.context_aliases = folded
+
+    def inherit_context_fold(self, previous: "LLMPreset | None") -> None:
+        """Keep the aliases and stored group of the preset this one edits."""
+        if previous is None:
+            return
+        self.context_aliases = {**previous.context_aliases, **self.context_aliases}
+        if self.folded_from is None:
+            self.folded_from = previous.folded_from
+
+    def to_stored_dict(self) -> dict[str, Any]:
+        """``to_dict`` that keeps a folded legacy group as written while unchanged."""
+        data = self.to_dict()
+        if self.folded_from is None:
+            return data
+        groups, window, aliases = self.folded_from
+        refolded = replace(
+            self,
+            variation_groups=deepcopy(groups),
+            context_window=self.context_window,
+            context_aliases=dict(aliases),
+            folded_from=None,
+        )
+        if refolded != self:
+            return data
+        data["variation_groups"] = deepcopy(groups)
+        data.pop("context_aliases", None)
+        if aliases:
+            data["context_aliases"] = dict(aliases)
+        derived = max(
+            patch["max_context"] for patch in groups[CONTEXT_SELECTION_KEY].values()
+        )
+        if window is None and self.context_window == derived:
+            data.pop("context_window", None)
+        return data
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -65,6 +132,10 @@ class LLMPreset:
             "max_context": self.max_context,
             "max_output": self.max_output,
         }
+        if self.context_window is not None:
+            data["context_window"] = self.context_window
+        if self.context_aliases:
+            data["context_aliases"] = dict(self.context_aliases)
         if self.provider:
             data["provider"] = self.provider
         if self.temperature is not None:
@@ -106,6 +177,8 @@ class LLMPreset:
                 else None
             ),
             variation_groups=data.get("variation_groups", {}) or {},
+            context_window=_window(data.get("context_window")),
+            context_aliases=context_aliases(data.get("context_aliases")),
         )
 
 
@@ -129,6 +202,7 @@ class LLMProfile:
     selected_variations: dict[str, str] = field(default_factory=dict)
     backend_provider_name: str = ""
     backend_native_tools: list[str] = field(default_factory=list)
+    context_window: int | None = None
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "LLMProfile":
@@ -157,6 +231,7 @@ class LLMProfile:
             selected_variations=data.get("selected_variations", {}) or {},
             backend_provider_name=data.get("backend_provider_name", ""),
             backend_native_tools=[str(tool) for tool in native_tools if tool],
+            context_window=_window(data.get("context_window")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -165,6 +240,8 @@ class LLMProfile:
             "max_context": self.max_context,
             "max_output": self.max_output,
         }
+        if self.context_window is not None:
+            data["context_window"] = self.context_window
         if self.provider:
             data["provider"] = self.provider
         if self.backend_type:

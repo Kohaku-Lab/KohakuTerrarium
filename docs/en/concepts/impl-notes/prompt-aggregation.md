@@ -85,7 +85,7 @@ provider-side prompt caching sees a stable prefix:
 | 9 | `## Untrusted content` | `include_hints_in_prompt` |
 | 10 | `## Calling functions` | `tool_format != "native"` |
 | 11 | `## Output format` | `include_hints_in_prompt` and `tool_format != "native"` |
-| 12 | `## Execution model` | `include_hints_in_prompt` |
+| 12 | `## Execution model` | `include_hints_in_prompt` and a visible tool or sub-agent; see below |
 
 Sections 7 and 8 are rendered by `terrarium/runtime_prompt.py` into a
 sentinel-bounded block and refreshed on every topology change, so they cannot go
@@ -113,6 +113,23 @@ Six canonical, overrideable blocks in `prompt/framework_hints.py`:
 `framework.group_growth`. Package-level `framework_hints:` in `kohaku.yaml`
 merge under creature-level `framework_hint_overrides`; an empty string omits a
 block entirely.
+
+An override replaces a block's text but not its gate: the block still appears
+only when its subject exists. `## Execution model` is built from parts, each
+kept only while its subject is visible (after plugin visibility, missing
+renderers and turned-off tools):
+
+| Part | Kept when |
+| --- | --- |
+| Tool results arrive in the next invocation; the call-discipline line | always (while the section exists) |
+| Sub-agents run in the background by default | a visible sub-agent |
+| Tools that accept `run_in_background` | a visible tool declaring `supports_background` |
+| Background work gives no extra turn; do not poll or duplicate it | either of the two above |
+| Servers, watchers and daemons may never finish | a visible background-capable tool |
+| Sub-agent calls are context-isolated | a visible sub-agent |
+
+A `framework.execution_model` override is literal text. It replaces all of
+these parts and is not split by the part gates.
 
 Call-syntax examples are **generated** from the active format definition rather
 than written by hand, so they cannot drift from what the parser accepts.

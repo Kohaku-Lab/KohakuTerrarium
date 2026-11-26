@@ -198,7 +198,8 @@ class TestPresetsDataIntegrity:
         assert preset["max_context"] == 1_000_000
         assert preset["max_output"] == 128_000
         assert preset["reasoning_effort"] == "medium"
-        assert set(preset["variation_groups"]) == {"context", "reasoning"}
+        assert set(preset["variation_groups"]) == {"reasoning"}
+        assert preset["context_window"] == 1_000_000
         assert "ultra" not in preset["variation_groups"]["reasoning"]
         assert "max" in preset["variation_groups"]["reasoning"]
         assert "websocket_mode" not in preset.get("extra_body", {})
@@ -260,32 +261,45 @@ class TestPresetsDataIntegrity:
             assert "ultra" not in group, name
             assert "max" in group, name
 
-    def test_codex_context_defaults_and_variants(self):
+    def test_codex_context_defaults_and_windows(self):
         # ``max_context`` drives the compaction threshold, so it is behaviour,
-        # not metadata. The 5.6 family and GPT-6 expose the window as a
-        # selectable variant; the rest are fixed at the catalog's window.
+        # not metadata. Any preset takes ``@context=<n>``, so no codex preset
+        # carries a context group; ``context_window`` records the full window.
         assert PRESETS["gpt-6-astra"]["max_context"] == 1_000_000
         for name in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
             assert PRESETS[name]["max_context"] == 400_000, name
+        for name in ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"):
+            assert PRESETS[name]["max_context"] == 272_000, name
 
-        for name in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
-            group = PRESETS[name]["variation_groups"]["context"]
-            assert list(group) == ["272k", "400k", "700k", "1m"], name
-            assert group["1m"] == {"max_context": 1_000_000}, name
-            # The default must be one of the offered options.
-            assert PRESETS[name]["max_context"] in {
-                patch["max_context"] for patch in group.values()
-            }, name
+        for name, data in PRESETS.items():
+            if data.get("provider") == "codex":
+                assert "context" not in data.get("variation_groups", {}), name
+        for name in (
+            "gpt-6-astra",
+            "gpt-6.1-sol",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-daybreak-blue-latest",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ):
+            assert PRESETS[name]["context_window"] == 1_000_000, name
 
-        # Models whose catalog window has no headroom get no context group,
-        # and stay at the catalog value. gpt-5.4-mini used to claim 400k —
-        # above even its own 272k ceiling.
+        # Models whose catalog window has no headroom stay at the catalog
+        # value and record no separate window.
         for name in ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini"):
             assert PRESETS[name]["max_context"] == 272000, name
-            assert "context" not in PRESETS[name]["variation_groups"], name
+            assert "context_window" not in PRESETS[name], name
 
         # The direct-API routes keep their own, larger documented context.
         assert PRESETS["gpt-5.6-sol-api"]["max_context"] > 400_000
+
+    def test_no_builtin_preset_offers_a_context_group(self):
+        for key, data in get_all_presets().items():
+            assert "context" not in data.get("variation_groups", {}), key
+            window = data.get("context_window")
+            assert window is None or (type(window) is int and window > 0), key
 
     def test_astra_mirrors_the_codex_catalog(self):
         # Codex catalog (codex-rs/models-manager/models.json), 2026-09:
@@ -296,7 +310,7 @@ class TestPresetsDataIntegrity:
         assert preset["provider"] == "codex"
         assert preset["model"] == "gpt-6-astra"
         assert preset["extra_body"]["websocket_mode"] is True
-        assert set(preset["variation_groups"]) == {"context", "reasoning", "speed"}
+        assert set(preset["variation_groups"]) == {"reasoning", "speed"}
 
         # Same shape as the 5.6 flagship it sits above, with two differences:
         # GPT-6 defaults to the full window, and it is the only one that
@@ -305,9 +319,7 @@ class TestPresetsDataIntegrity:
         assert preset["max_context"] == 1_000_000
         assert sol["max_context"] == 400_000
         assert preset["max_output"] == sol["max_output"]
-        assert (
-            preset["variation_groups"]["context"] == sol["variation_groups"]["context"]
-        )
+        assert preset["context_window"] == sol["context_window"]
         assert set(preset["variation_groups"]["reasoning"]) == set(
             sol["variation_groups"]["reasoning"]
         ) | {"ultra"}

@@ -219,6 +219,9 @@ class TestGetStatusBranches:
         # fires, i.e. the compaction window x threshold.
         assert out["max_context"] == 8000
         assert out["compact_threshold"] == 3000
+        assert out["context_window"] is None
+        agent.llm._profile_context_window = 16000
+        assert c.get_status()["context_window"] == 16000
 
     def test_status_reports_persisted_token_totals(self):
         agent = _FakeAgent(name="alice")

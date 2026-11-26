@@ -7,6 +7,7 @@ this module validates and orchestrates Studio operations.
 
 from typing import Any
 
+from kohakuterrarium.llm.catalog_cache import invalidate_discovery
 from kohakuterrarium.llm.discovery import supports_discovery
 from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP, backend_api_key
 from kohakuterrarium.llm.profiles.backend_registry import (
@@ -113,12 +114,15 @@ def save_backend_record(
         provider_native_tools=list(provider_native_tools or []),
     )
     save_backend(backend)
+    invalidate_discovery(name)
     return backend
 
 
 def remove_backend(name: str) -> bool:
     """Delete a backend, rejecting built-in or currently referenced records."""
-    return delete_backend(name)
+    deleted = delete_backend(name)
+    invalidate_discovery(name)
+    return deleted
 
 
 def is_provider_known(name: str) -> bool:

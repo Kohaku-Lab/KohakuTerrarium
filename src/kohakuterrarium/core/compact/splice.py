@@ -56,8 +56,10 @@ def splice_conversation(
     Returns ``False`` (conversation untouched) when the list no
     longer matches what was summarized — the summary LLM call runs
     for a while and a rewind / edit / emergency drop may land in
-    the gap.
+    the gap. Raises ``ConversationSealedError`` (conversation
+    untouched) when a shutdown sealed the conversation.
     """
+    conversation.check_writable()
     messages = conversation.get_messages()
 
     if boundary > len(messages) or boundary <= 1:
@@ -89,10 +91,6 @@ def splice_conversation(
             None,
         )
 
-    conversation._messages.clear()
-    conversation._messages.append(system_msg)
-
-    # Add summary as an assistant message with a marker
     summary_msg = create_message(
         "assistant",
         f"[Previous context summary (compact round {compact_round})]\n\n{summary}",
@@ -106,12 +104,8 @@ def splice_conversation(
         sorted([t, b] for t, b in source_path) if source_path else None
     )
     summary_msg.metadata["compact_result_event_ids"] = sorted(result_event_ids or ())
-    conversation._messages.append(summary_msg)
-    if retained_user is not None:
-        conversation._messages.append(retained_user)
-
-    # Restore live zone
-    conversation._messages.extend(live_zone)
+    retained = [retained_user] if retained_user is not None else []
+    conversation._messages = [system_msg, summary_msg, *retained, *live_zone]
 
     # Contain any residual mis-cut once, in memory only. The splice
     # runs MID-TURN: the live tail's final announcement may have

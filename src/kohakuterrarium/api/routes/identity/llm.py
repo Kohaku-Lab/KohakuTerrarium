@@ -1,19 +1,16 @@
 """Manage LLM backends, profiles, model defaults, and native-tool metadata."""
 
 import asyncio
-from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.auth import verify_admin_token
+from kohakuterrarium.llm.catalog_cache import cached_discover_models
+from kohakuterrarium.llm.discovery import ModelDiscoveryError
+from kohakuterrarium.llm.presets.drafts import catalog_rows
 from kohakuterrarium.llm.profiles.resolve import PresetAlreadyExists
-from kohakuterrarium.llm.discovery import (
-    ModelDiscoveryError,
-    discover_models,
-    suggested_presets,
-)
 from kohakuterrarium.studio.identity.llm.backends import (
     list_backend_types,
     list_backends,
@@ -56,11 +53,14 @@ class ProfileRequest(BaseModel):
     create_only: bool = False
     max_context: int = 128000
     max_output: int = 16384
+    context_window: int | None = None
     temperature: float | None = None
     reasoning_effort: str = ""
     service_tier: str = ""
     extra_body: dict | None = None
+    provider_native_tools: list[str] | None = None
     variation_groups: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
+    context_aliases: dict[str, int] = Field(default_factory=dict)
 
 
 class DefaultModelRequest(BaseModel):
@@ -80,18 +80,18 @@ async def get_backends():
 
 
 @router.post("/backends/{name}/models", dependencies=[Depends(verify_admin_token)])
-async def discover_backend_models(name: str):
-    """Read the named host provider's catalog without saving presets."""
+async def discover_backend_models(name: str, refresh: bool = False):
+    """Read the named host provider's catalog without saving presets.
+
+    Catalogs are cached in-process; ``refresh=true`` bypasses and replaces
+    the cached entry. ``fetched_at`` is when the list was read upstream.
+    """
     try:
-        models = await discover_models(name)
+        snapshot = await cached_discover_models(name, refresh=refresh)
     except ModelDiscoveryError as exc:
         raise HTTPException(exc.status, str(exc)) from None
-    drafts = await asyncio.to_thread(suggested_presets, name, models)
-    return {
-        "models": [
-            {**asdict(model), "preset": draft} for model, draft in zip(models, drafts)
-        ]
-    }
+    rows = await asyncio.to_thread(catalog_rows, name, list(snapshot.models))
+    return {"models": rows, "fetched_at": snapshot.fetched_at_iso}
 
 
 @router.get("/backend-types")
@@ -154,11 +154,14 @@ async def create_profile(req: ProfileRequest):
             provider=req.provider,
             max_context=req.max_context,
             max_output=req.max_output,
+            context_window=req.context_window,
             temperature=req.temperature,
             reasoning_effort=req.reasoning_effort,
             service_tier=req.service_tier,
             extra_body=req.extra_body or {},
+            provider_native_tools=req.provider_native_tools,
             variation_groups=req.variation_groups or {},
+            context_aliases=req.context_aliases,
         )
     except PresetAlreadyExists as exc:
         raise HTTPException(409, str(exc)) from exc

@@ -327,11 +327,11 @@ class TestApiStudioJourney:
             "claude-sonnet-5-5",
             "gpt-oss-120b",
         }
-        for model, output, contexts in (
-            ("gemini-4-argon", 65536, ["256k", "512k", "900k"]),
-            ("gemini-3.8-flash", 65536, ["256k", "1048k"]),
-            ("claude-opus-5-5", 128000, ["256k", "840k"]),
-            ("claude-sonnet-5-5", 128000, ["256k", "840k"]),
+        for model, output, window in (
+            ("gemini-4-argon", 65536, 900000),
+            ("gemini-3.8-flash", 65536, 1048576),
+            ("claude-opus-5-5", 128000, 840000),
+            ("claude-sonnet-5-5", 128000, 840000),
         ):
             entry = agy_models[model]
             assert (entry["max_context"], entry["max_output"]) == (256000, output)
@@ -340,8 +340,10 @@ class TestApiStudioJourney:
                 "medium",
                 "high",
             ]
-            assert list(entry["variation_groups"]["context"]) == contexts
-        assert list(agy_models["gpt-oss-120b"]["variation_groups"]) == ["context"]
+            assert "context" not in entry["variation_groups"]
+            assert entry["context_window"] == window
+        assert agy_models["gpt-oss-120b"]["variation_groups"] == {}
+        assert agy_models["gpt-oss-120b"]["context_window"] == 131072
 
         # Embedding presets + plugin-hook catalog round out the catalog.
         resp = client.get("/api/studio/catalog/embedding_presets")

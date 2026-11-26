@@ -505,6 +505,7 @@ def _session_legacy_terrarium_response(sess) -> dict:
         out["root_llm_name"] = root_status.get("llm_name", "")
         out["root_session_id"] = root_status.get("session_id", "")
         out["root_max_context"] = root_status.get("max_context", 0)
+        out["root_context_window"] = root_status.get("context_window")
         out["root_compact_threshold"] = root_status.get("compact_threshold", 0)
     return out
 

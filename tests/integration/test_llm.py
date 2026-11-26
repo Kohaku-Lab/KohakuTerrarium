@@ -77,7 +77,11 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
-from kohakuterrarium.llm.discovery import discover_models, suggested_presets
+from kohakuterrarium.llm.discovery import (
+    DiscoveredModel,
+    discover_models,
+    suggested_presets,
+)
 from kohakuterrarium.studio.identity.llm.profiles import save_profile_record
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
@@ -376,10 +380,33 @@ class TestLlmIntegration:
         )
         assert get_profile("deepseek-new", "deepseek") is None
         (draft,) = suggested_presets("deepseek", [found])
+        assert draft["context_window"] == 64000
         save_profile_record(**draft)
         selected = resolve_controller_llm({}, "deepseek/deepseek-new@reasoning=high")
         assert (selected.model, selected.max_context) == ("deepseek-new", 64000)
         assert selected.extra_body == {"reasoning_effort": "high"}
+        # Context is a number the user picks, recorded in the identifier and
+        # re-resolved from it; context_window stays informational.
+        wide = resolve_controller_llm(
+            {"variation_selections": {"context": "96000"}},
+            "deepseek/deepseek-new@reasoning=high",
+        )
+        assert (wide.max_context, wide.context_window) == (96000, 64000)
+        ident = profile_to_identifier(wide)
+        assert ident == "deepseek/deepseek-new@context=96k,reasoning=high"
+        assert resolve_controller_llm({}, ident).max_context == 96000
+        # Re-saving through the editor without the field keeps the window.
+        save_profile_record(**{**draft, "max_context": 32000, "context_window": None})
+        again = resolve_controller_llm({}, "deepseek/deepseek-new")
+        assert (again.max_context, again.context_window) == (32000, 64000)
+        # A newer model of a known family inherits its sibling's groups.
+        (sibling_draft,) = suggested_presets(
+            "codex",
+            [DiscoveredModel("gpt-6.8-astra", reasoning_levels=("high", "xhigh"))],
+        )
+        assert sibling_draft["reasoning_effort"] == "xhigh"
+        assert list(sibling_draft["variation_groups"]["reasoning"]) == ["high", "xhigh"]
+        assert sibling_draft["max_context"] == 272000
         assert delete_profile("deepseek-new", provider="deepseek")
         ak.save_api_key("deepseek", "")
 
@@ -937,6 +964,23 @@ class TestLlmIntegration:
                             "provider": "codex",
                             "model": "hijacked",
                         },
+                        # A kt-claude-code-shaped legacy ``context`` group.
+                        {
+                            "name": "cc-opus",
+                            "provider": "openai",
+                            "model": "claude-opus",
+                            "max_context": 200000,
+                            "variation_groups": {
+                                "context": {
+                                    "200k": {"max_context": 200000},
+                                    "400k": {"max_context": 400000},
+                                    "700k": {"max_context": 700000},
+                                    "1m": {"max_context": 1000000},
+                                    "long": {"max_context": 900000},
+                                },
+                                "reasoning": {"high": {"reasoning_effort": "high"}},
+                            },
+                        },
                     ],
                 }
             ],
@@ -952,6 +996,48 @@ class TestLlmIntegration:
         assert by_key[("codex", "gpt-5.4")]["model"] != "hijacked"
         # Same installed-package set -> the cached catalogue is reused.
         assert presets_mod.get_all_presets() is presets_mod.get_all_presets()
+
+        # 12. The legacy ``context`` group reads as the numeric context: it is
+        #     gone from the listing, its sizes and alias resolve to its numbers,
+        #     and the stored identifier re-resolves the same way on resume.
+        cc_entry = next(e for e in list_all() if e["name"] == "cc-opus")
+        assert set(cc_entry["variation_groups"]) == {"reasoning"}
+        assert cc_entry["context_window"] == 1000000
+        assert get_profile("openai/cc-opus@context=1m").max_context == 1000000
+        assert get_profile("openai/cc-opus@context=200k").max_context == 200000
+        long_profile = get_profile("openai/cc-opus@context=long,reasoning=high")
+        assert long_profile.max_context == 900000
+        ident = profile_to_identifier(long_profile)
+        assert ident == "openai/cc-opus@context=900k,reasoning=high"
+        resumed = resolve_controller_llm({"llm": ident})
+        assert (resumed.max_context, resumed.reasoning_effort) == (900000, "high")
+
+        # 13. The same group in a user preset survives an unrelated save as
+        #     written, and an edit of the preset itself keeps the alias.
+        user_legacy = {
+            "model": "claude-mine",
+            "max_context": 200000,
+            "max_output": 65536,
+            "variation_groups": {
+                "context": {
+                    "200k": {"max_context": 200000},
+                    "max": {"max_context": 1000000},
+                }
+            },
+        }
+        backends_mod.save_yaml_store(
+            {"version": 3, "presets": {"openai": {"mine": user_legacy}}}
+        )
+        save_profile(LLMPreset(name="unrelated", model="u", provider="openai"))
+        stored = backends_mod.load_yaml_store()["presets"]["openai"]
+        assert stored["mine"] == user_legacy
+        save_profile_record("mine", "claude-mine", "openai", max_context=300000)
+        stored = backends_mod.load_yaml_store()["presets"]["openai"]["mine"]
+        assert stored["variation_groups"] == user_legacy["variation_groups"]
+        assert stored["max_context"] == 300000
+        mine = get_profile("openai/mine@context=max")
+        assert (mine.max_context, mine.context_window) == (1000000, 1000000)
+        assert get_profile(profile_to_identifier(mine)).max_context == 1000000
         # Reset so the autouse-fixture teardown leaves a clean slate.
         presets_mod._all_presets_cache = None
         presets_mod._all_presets_key = None
@@ -2645,7 +2731,7 @@ class TestLlmIntegration:
                 (4096, {"thinkingLevel": "MEDIUM"}),
             ),
             (
-                "google-antigravity/gemini-4-hydrogen@reasoning=xhigh,context=1048k",
+                "google-antigravity/gemini-4-hydrogen@reasoning=xhigh,context=1048576",
                 "gemini-4-hydrogen-xhigh",
                 1048576,
                 False,

@@ -28,7 +28,8 @@ classifiers = [
 dependencies = [
     # Core
     "httpx>=0.27.0",
-    "openai>=2.0.0",
+    # 2.32.0 is the first SDK whose responses.connect() takes max_retries.
+    "openai>=2.32.0",
     "anthropic>=1.0.0,<2",
     # Pinned <2.13 to match the pydantic-core Android wheel we ship.
     "pydantic>=2.12.0,<2.13",

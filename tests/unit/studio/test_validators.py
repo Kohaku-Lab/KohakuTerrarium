@@ -25,6 +25,12 @@ from kohakuterrarium.studio.editors.validators import (
 )
 
 
+class TestAgentConfigInVariationSelections:
+    def test_numeric_context_selection_is_accepted(self):
+        cfg = AgentConfigIn(name="a", variation_selections={"context": 500000})
+        assert cfg.variation_selections == {"context": 500000}
+
+
 class TestAgentConfigInDefaults:
     def test_minimal_body_fills_documented_defaults(self):
         cfg = AgentConfigIn(name="alice")

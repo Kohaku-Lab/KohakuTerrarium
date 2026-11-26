@@ -81,7 +81,7 @@ prompts:
     path: prompts/git-safety.md
 
 framework_hints:
-  framework.execution_model.dynamic: |
+  framework.execution_model: |
     Use background work aggressively, but never duplicate it.
 
 llm_presets:
@@ -208,6 +208,31 @@ class MyProvider(BaseLLMProvider):
   known `max_context`, `max_output`, modalities, and reasoning levels. An empty
   list represents a successful query with zero models. Raise an exception if
   the catalog could not be read. Packages that omit the hook can use static presets.
+- A `DiscoveredModel` may also carry `preset=`, a dict of suggested preset
+  fields: `variation_groups`, `reasoning_effort`, `service_tier`,
+  `max_context`, `max_output`, `context_window`, `temperature`, `extra_body`,
+  `provider_native_tools`. When the user saves a model from the catalog,
+  these fields win over what KT infers (the nearest same-family preset of the
+  backend, or the reported reasoning levels). They go through the same checks
+  as a user preset; an invalid suggestion is dropped with a logged warning and
+  the inferred draft is used. Other keys are ignored.
+
+  ```python
+  DiscoveredModel(
+      id="real-model-2",
+      max_context=400000,
+      reasoning_levels=("low", "high"),
+      preset={
+          "reasoning_effort": "high",
+          "variation_groups": {
+              "reasoning": {
+                  "low": {"extra_body.effort": "low"},
+                  "high": {"extra_body.effort": "high"},
+              }
+          },
+      },
+  )
+  ```
 - A name equal to a built-in backend type is ignored. Two packages declaring
   the same name is an error.
 

@@ -51,15 +51,16 @@ accepted too, and an effort that conflicts with the ID fails before
 authentication. Gemini 4 Argon requires a Google AI Ultra (or eligible
 Enterprise) account. The catalog marks GPT-OSS for removal on 2026-11-02.
 
-The `context` variation sets the profile's `max_context`, the history budget KT
+`context=<size>` sets the profile's `max_context`, the history budget KT
 compacts against. Hydrogen and Orchestrator use a conservative 256k default with the catalog's
-1,048,576-token maximum available as `context=1048k`. Other defaults are agy's
-compaction limits; the larger
-choices are agy's Argon context picker (512k / 900k), agy's Claude long-context
-limit (840k), and the catalog maximum (Flash 1048k, GPT-OSS 131k). The choice is
-not sent upstream; a larger window costs more quota per turn only because each
-request carries more input. Groups combine, for example
-`google-antigravity/gemini-4-argon@reasoning=medium,context=512k`.
+1,048,576-token maximum available as `context=1048576`. Other defaults are agy's
+compaction limits; each preset records its largest known window as
+`context_window`: agy's Argon context picker (900k), agy's Claude long-context
+limit (840k), and the catalog maximum (Flash 1,048,576, GPT-OSS 131,072). The
+size is not sent upstream; a larger window costs more quota per turn only
+because each request carries more input. Sizes combine with groups, for example
+`google-antigravity/gemini-4-argon@reasoning=medium,context=512k`. `k` means
+1,000, so `context=1048k` is 1,048,000.
 
 Retired presets resolve to their successor with a logged warning:
 `gemini-3.6-flash`, `gemini-3.7-flash`, `gemini-3-flash` → `gemini-3.8-flash`;

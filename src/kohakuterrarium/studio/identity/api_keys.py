@@ -3,6 +3,7 @@
 import os
 from typing import Any
 
+from kohakuterrarium.llm.catalog_cache import invalidate_discovery
 from kohakuterrarium.llm.catalog_endpoints import CATALOG_KEY_ENVS
 from kohakuterrarium.llm.profiles.api_keys import (
     KEYS_PATH,
@@ -101,6 +102,7 @@ def set_key(provider: str, key: str) -> None:
     if _provider_credentials()[provider][0] == "google-antigravity":
         raise ValueError("Antigravity credentials are managed by agy")
     save_api_key(provider, key)
+    invalidate_discovery(provider)
 
 
 def remove_key(provider: str) -> None:
@@ -110,6 +112,7 @@ def remove_key(provider: str) -> None:
     if _provider_credentials()[provider][0] == "google-antigravity":
         raise ValueError("Antigravity credentials are managed by agy")
     save_api_key(provider, "")
+    invalidate_discovery(provider)
 
 
 def get_existing_key(provider: str) -> str:

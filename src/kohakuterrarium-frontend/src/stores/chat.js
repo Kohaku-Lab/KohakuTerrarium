@@ -2206,7 +2206,7 @@ const _chatStoreOptions = {
      * creature — before this map existed, every display surface read
      * the global object, so switching to another creature's tab kept
      * showing the primary's model.
-     * @type {Object<string, {model: string, llmName: string, configName: string, configRef: string, maxContext: number, compactThreshold: number}>}
+     * @type {Object<string, {model: string, llmName: string, configName: string, configRef: string, maxContext: number, contextWindow: number | null, compactThreshold: number}>}
      */
     modelByTab: {},
     /** Real creature name behind the ``root`` tab alias (recipe
@@ -2438,6 +2438,7 @@ const _chatStoreOptions = {
         configName: info.configName || state.sessionInfo.configName || "",
         configRef: info.configRef || state.sessionInfo.configRef || "",
         maxContext: info.maxContext || state.sessionInfo.maxContext || 0,
+        contextWindow: info.contextWindow || state.sessionInfo.contextWindow || null,
         compactThreshold: info.compactThreshold || state.sessionInfo.compactThreshold || 0,
       }
     },
@@ -2594,6 +2595,7 @@ const _chatStoreOptions = {
         configRef: instance.config_ref || instance.creatures?.[0]?.config_ref || "",
         compactThreshold: instance.compact_threshold || 0,
         maxContext: instance.max_context || 0,
+        contextWindow: instance.context_window || null,
         // Cluster site this session runs on.  Backend payload now
         // carries ``home_node`` at both the session and per-creature
         // level (lifecycle.py).  Default ``_host`` keeps standalone
@@ -2616,6 +2618,7 @@ const _chatStoreOptions = {
           configName: c.config_name || "",
           configRef: c.config_ref || "",
           maxContext: c.max_context || 0,
+          contextWindow: c.context_window || null,
           compactThreshold: c.compact_threshold || 0,
         }
         this.modelByTab[c.name] = info
@@ -3997,6 +4000,7 @@ const _chatStoreOptions = {
         if (data.config_name) info.configName = data.config_name
         if (data.config_ref) info.configRef = data.config_ref
         if (data.max_context != null) info.maxContext = data.max_context
+        if (data.context_window !== undefined) info.contextWindow = data.context_window
         if (data.compact_threshold != null) info.compactThreshold = data.compact_threshold
         const tab = source || data.agent_name || ""
         if (tab && data.branch_view) this._adoptAuthoritativeBranchView(tab, data.branch_view)
@@ -4019,6 +4023,8 @@ const _chatStoreOptions = {
           if (data.config_name) this.sessionInfo.configName = data.config_name
           if (data.config_ref) this.sessionInfo.configRef = data.config_ref
           if (data.max_context != null) this.sessionInfo.maxContext = data.max_context
+          if (data.context_window !== undefined)
+            this.sessionInfo.contextWindow = data.context_window
           if (data.compact_threshold != null)
             this.sessionInfo.compactThreshold = data.compact_threshold
         }
@@ -6429,6 +6435,7 @@ const _chatStoreOptions = {
         configRef: "",
         compactThreshold: 0,
         maxContext: 0,
+        contextWindow: null,
         homeNode: "_host",
       }
       this.modelByTab = {}

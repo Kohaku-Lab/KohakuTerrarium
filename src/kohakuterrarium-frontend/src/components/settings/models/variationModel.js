@@ -327,15 +327,6 @@ export const VARIATION_TEMPLATES = [
       ]),
   },
   {
-    id: "context",
-    build: () =>
-      knob("context", "max_context", "number", [
-        ["272k", "272000"],
-        ["400k", "400000"],
-        ["1m", "1000000"],
-      ]),
-  },
-  {
     id: "thinking",
     build: () =>
       knob("thinking", "extra_body.reasoning.enabled", "bool", [

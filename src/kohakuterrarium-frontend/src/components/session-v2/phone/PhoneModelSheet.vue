@@ -24,7 +24,7 @@
     </div>
 
     <div class="flex gap-2 overflow-x-auto scrollbar-none px-4 py-3" data-test="phone-model-providers">
-      <button v-for="p in providers" :key="p.name" type="button" class="h-9 px-3.5 shrink-0 rounded-full border flex items-center gap-1.5 text-sm" :class="[p.name === provider ? 'bg-iolite/12 border-iolite/60 text-iolite dark:text-iolite-light font-medium' : 'kt-v2-edge text-warm-700 dark:text-warm-200', p.available ? '' : 'opacity-50']" :data-test="`phone-provider-${p.name}`" @click="pickProvider(p.name)">
+      <button v-for="p in providers" :key="p.name" type="button" class="h-9 px-3.5 shrink-0 rounded-full border flex items-center gap-1.5 text-sm whitespace-nowrap" :class="[p.name === provider ? 'bg-iolite/12 border-iolite/60 text-iolite dark:text-iolite-light font-medium' : 'kt-v2-edge text-warm-700 dark:text-warm-200', p.available ? '' : 'opacity-50']" :data-test="`phone-provider-${p.name}`" @click="pickProvider(p.name)">
         {{ p.name }}<span class="text-[11px] text-warm-400">{{ p.count }}</span>
       </button>
     </div>
@@ -47,12 +47,23 @@
 
     <div v-if="groups.length" class="px-4 pb-4 flex flex-col gap-3" data-test="phone-model-variations">
       <div class="text-[11px] font-semibold uppercase tracking-wider text-warm-500">{{ t("phone.variations") }}</div>
-      <div v-for="g in groups" :key="g.name" class="flex flex-col gap-1.5">
-        <span class="text-xs text-warm-500">{{ g.name }}</span>
+      <div v-for="g in groups" :key="g.name" class="flex flex-col gap-1.5 min-w-0">
+        <span class="truncate text-xs text-warm-500" :title="g.name">{{ g.name }}</span>
         <div class="flex flex-wrap gap-2">
-          <button v-for="o in g.options" :key="o" type="button" class="h-9 px-3.5 rounded-full border text-sm" :class="selections[g.name] === o ? 'bg-iolite/12 border-iolite/60 text-iolite dark:text-iolite-light font-medium' : 'kt-v2-edge text-warm-700 dark:text-warm-200'" :data-test="`phone-var-${g.name}-${o}`" @click="toggle(g.name, o)">{{ o }}</button>
+          <button v-for="o in g.options" :key="o" type="button" class="h-9 px-3.5 max-w-full truncate rounded-full border text-sm" :title="o" :class="selections[g.name] === o ? 'bg-iolite/12 border-iolite/60 text-iolite dark:text-iolite-light font-medium' : 'kt-v2-edge text-warm-700 dark:text-warm-200'" :data-test="`phone-var-${g.name}-${o}`" @click="toggle(g.name, o)">{{ o }}</button>
         </div>
       </div>
+    </div>
+
+    <div v-if="entry && !contextClash" class="px-4 pb-4 flex flex-col gap-1.5" data-test="phone-model-context">
+      <div class="text-[11px] font-semibold uppercase tracking-wider text-warm-500">{{ t("phone.context") }}</div>
+      <input :value="contextInput" type="text" inputmode="decimal" autocomplete="off" class="kt-v2-edge kt-v2-panel w-full h-11 px-3 rounded-xl border text-[15px] font-mono text-warm-800 dark:text-warm-100 placeholder-warm-400 focus:outline-none focus:border-iolite" :placeholder="contextPlaceholder ? t('phone.contextDefault', { size: contextPlaceholder }) : t('phone.contextDefaultBare')" :aria-label="t('phone.context')" data-test="phone-model-context-input" @input="contextDraft.edit($event.target.value)" />
+      <div class="flex flex-wrap gap-2">
+        <button v-for="count in contextSuggestions" :key="count" type="button" class="h-9 px-3.5 rounded-full border text-sm" :class="contextPinned && contextValue === count ? 'bg-iolite/12 border-iolite/60 text-iolite dark:text-iolite-light font-medium' : 'kt-v2-edge text-warm-700 dark:text-warm-200'" :data-test="`phone-context-${count}`" @click="contextDraft.pick(count)">{{ count === contextWindow ? t("phone.contextModel", { size: formatContext(count) }) : formatContext(count) }}</button>
+      </div>
+      <p v-if="contextInvalid" class="text-xs text-coral" role="alert">{{ t("phone.contextInvalid") }}</p>
+      <p v-else-if="contextExceeds" class="text-xs text-amber" role="status" data-test="phone-model-context-warning">{{ t("phone.contextOver", { size: formatContext(contextWindow) }) }}</p>
+      <p v-else class="text-xs text-warm-500">{{ contextNote }}</p>
     </div>
 
     <template #footer>
@@ -70,13 +81,15 @@ import { computed, onMounted, ref, watch } from "vue"
 import { ElMessage } from "element-plus"
 
 import { buildSelector, findEntry, keepOffered, parseSelector, presetsFor, providerList, providerOf, variationGroups } from "@/components/session-v2/model/phone/modelPick"
-import { modelOfCreature } from "@/components/session-v2/model/phone/phoneModel"
+import { contextOfCreature, modelOfCreature } from "@/components/session-v2/model/phone/phoneModel"
 import { creatureNames } from "@/components/session-v2/model/settings/settingsModel"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import PhoneSheet from "@/components/session-v2/phone/PhoneSheet.vue"
 import { switchCreatureModel } from "@/components/session-v2/phone/switchCreatureModel"
+import { useContextDraft } from "@/composables/useContextDraft"
 import { useModelInventory } from "@/composables/useModelInventory"
+import { formatContext, takeContext, withContext } from "@/utils/contextLength"
 
 /**
  * The phone model picker: which agent (starting on `agent`, or none in a
@@ -105,8 +118,42 @@ const providers = computed(() => providerList(models.value, query.value))
 const presets = computed(() => presetsFor(models.value, provider.value, query.value))
 const entry = computed(() => models.value.find((m) => providerOf(m) === provider.value && m.name === preset.value) || null)
 const groups = computed(() => variationGroups(entry.value))
-const selector = computed(() => buildSelector(provider.value, preset.value, selections.value))
-const canSwitch = computed(() => !!agent.value && !!selector.value && selector.value !== current.value && !applying.value)
+
+const currentEntry = computed(() => findEntry(models.value, current.value))
+const currentPick = computed(() => {
+  const parsed = parseSelector(current.value)
+  return { ...parsed, ...takeContext(parsed.selections, currentEntry.value?.variation_groups) }
+})
+// The current model in the form `selector` builds, so an untouched draft reads as unchanged.
+const currentNormalized = computed(() => {
+  const { provider: p, name, selections: picks, context } = currentPick.value
+  return withContext(buildSelector(p, name, picks), context)
+})
+const sameAsCurrent = computed(() => !!entry.value && entry.value === currentEntry.value)
+// A preset with its own `context` variation group keeps `context=` as that group's choice.
+const contextClash = computed(() => !!entry.value?.variation_groups && "context" in entry.value.variation_groups)
+const liveContext = computed(() => contextOfCreature(ctx.instance.value, ctx.chat, agent.value))
+const defaultContext = computed(() => {
+  if (!entry.value) return 0
+  if (sameAsCurrent.value && liveContext.value.maxContext && !currentPick.value.context) return liveContext.value.maxContext
+  return entry.value.max_context || 0
+})
+const contextWindowOf = computed(() => entry.value?.context_window || (sameAsCurrent.value && liveContext.value.contextWindow) || null)
+const contextDraft = useContextDraft(defaultContext, contextWindowOf)
+const { text: contextInput, pinned: contextPinned, value: contextValue, invalid: contextInvalid, exceeds: contextExceeds, window: contextWindow, suggestions: contextSuggestions, placeholder: contextPlaceholder } = contextDraft
+
+// The window and default-hint sentences, joined as the locale writes two sentences.
+const contextNote = computed(() => {
+  const window = contextWindow.value ? t("phone.contextWindow", { size: formatContext(contextWindow.value) }) : ""
+  const hint = contextPinned.value ? "" : t("phone.contextHint")
+  return window && hint ? t("phone.contextNote", { window, hint }) : window || hint
+})
+
+const selector = computed(() => {
+  const built = buildSelector(provider.value, preset.value, selections.value)
+  return contextClash.value ? built : withContext(built, contextDraft.override.value)
+})
+const canSwitch = computed(() => !!agent.value && !!selector.value && selector.value !== current.value && selector.value !== currentNormalized.value && !contextInvalid.value && !applying.value)
 
 function resetDraft() {
   const parsed = parseSelector(current.value)
@@ -114,6 +161,7 @@ function resetDraft() {
   provider.value = found ? providerOf(found) : parsed.provider || providers.value[0]?.name || ""
   preset.value = found?.name || ""
   selections.value = found ? keepOffered(found, parsed.selections) : {}
+  contextDraft.start(currentPick.value.context)
   error.value = ""
 }
 

@@ -11,6 +11,7 @@ from kohakuterrarium.core.agent import model as am
 from kohakuterrarium import Agent, Terrarium
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.agent.history.compact import AgentCompactMixin
+from kohakuterrarium.core.agent.history.selection import restore_selections
 from kohakuterrarium.core.agent.model import AgentModelMixin
 from kohakuterrarium.llm.profiles.backends import save_yaml_store
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
@@ -353,3 +354,66 @@ class TestLLMIdentifier:
         a.llm.model = "fallback"
         a.llm_identifier()
         assert captured["data"]["llm"] == "override/profile"
+
+
+class TestContextSelectionRoundTrip:
+    """``@context=<n>`` survives a switch, its persisted selector and a restore."""
+
+    @staticmethod
+    def _real_profile_llm(monkeypatch):
+        def build(selector):
+            profile = am.resolve_controller_llm({}, llm=selector)
+            return types.SimpleNamespace(
+                model=profile.model,
+                _profile_max_context=profile.max_context,
+                _profile_context_window=profile.context_window,
+            )
+
+        monkeypatch.setattr(am, "create_llm_from_profile_name", build)
+        monkeypatch.setattr(am, "sync_provider_tools", lambda agent: None)
+        monkeypatch.setattr(
+            AgentCompactMixin, "_build_compact_llm", lambda self, cfg: self.llm
+        )
+
+    @pytest.mark.parametrize(
+        "selector,identifier,tokens",
+        [
+            (
+                "codex/gpt-6.1-sol@reasoning=high,context=500000",
+                "codex/gpt-6.1-sol@context=500k,reasoning=high",
+                500_000,
+            ),
+            # Saved selections from the removed context groups.
+            (
+                "codex/gpt-6-astra@context=272k",
+                "codex/gpt-6-astra@context=272k",
+                272_000,
+            ),
+            ("codex/gpt-5.6-sol@1m", "codex/gpt-5.6-sol@context=1m", 1_000_000),
+        ],
+    )
+    def test_switch_persist_and_restore_keep_the_number(
+        self, monkeypatch, selector, identifier, tokens
+    ):
+        self._real_profile_llm(monkeypatch)
+        store = types.SimpleNamespace(state={}, meta={})
+        a = _build_agent()
+        a.session_store = store
+        assert a.switch_model(selector) == identifier
+        assert a.llm._profile_max_context == tokens
+        assert a.compact_manager.config.max_tokens == tokens
+        _kind, _msg, meta = a.output_router.calls[-1]
+        assert meta["llm_name"] == identifier
+        assert meta["max_context"] == tokens
+        assert meta["context_window"] == 1_000_000
+        assert store.state["alice:model_selection"] == identifier
+
+        resumed = _build_agent()
+        restore_selections(resumed, store)
+        assert resumed.llm_identifier() == identifier
+        assert resumed.llm._profile_max_context == tokens
+
+    def test_config_variation_selections_resolve_the_identifier(self):
+        a = _build_agent(llm_profile="codex/gpt-6.1-sol")
+        a.config.variation_selections = {"context": "400000"}
+        assert a.llm_identifier() == "codex/gpt-6.1-sol@context=400k"

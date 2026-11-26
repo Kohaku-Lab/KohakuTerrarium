@@ -98,6 +98,10 @@ class AgentRuntimeToolsMixin:
                 "total_tokens",
             ):
                 accum[k] = accum.get(k, 0) + int(usage.get(k, 0) or 0)
+            if usage.get("reasoning_tokens") is not None:
+                accum["reasoning_tokens"] = accum.get("reasoning_tokens", 0) + int(
+                    usage["reasoning_tokens"]
+                )
 
         cache_write = int(usage.get("cache_creation_input_tokens", 0) or 0)
         cache_read = int(

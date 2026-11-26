@@ -6,6 +6,12 @@ Parse and apply provider-independent preset variation selectors.
 from copy import deepcopy
 from typing import Any
 
+from kohakuterrarium.llm.profiles.context import (
+    CONTEXT_SELECTION_KEY,
+    context_size_or_none,
+    format_context_size,
+    parse_context_size,
+)
 from kohakuterrarium.llm.profiles.types import LLMPreset
 
 # Variation patches are constrained to model-facing preset fields.
@@ -66,6 +72,32 @@ def _validate_patch_target(path: str) -> None:
         )
 
 
+def check_variation_groups(groups: Any) -> None:
+    """Reject a ``variation_groups`` map that is not group -> option -> patch."""
+    if not isinstance(groups, dict):
+        raise ValueError("variation_groups must be an object of group -> option")
+    for group_name, options in groups.items():
+        if not isinstance(group_name, str) or not group_name:
+            raise ValueError("Variation group names must be non-empty strings")
+        if not isinstance(options, dict):
+            raise ValueError(f"Variation group '{group_name}' must map options")
+        for option_name, patch in options.items():
+            if not isinstance(option_name, str) or not option_name:
+                raise ValueError(
+                    f"Options of variation group '{group_name}' need non-empty names"
+                )
+            if not isinstance(patch, dict):
+                raise ValueError(
+                    f"Variation option '{group_name}={option_name}' must be a patch object"
+                )
+            for path in patch:
+                if not isinstance(path, str) or not all(path.split(".")):
+                    raise ValueError(
+                        f"Invalid patch path {path!r} in '{group_name}={option_name}'"
+                    )
+                _validate_patch_target(path)
+
+
 def _set_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
     parts = path.split(".")
     cur = target
@@ -107,18 +139,32 @@ def normalize_variation_selections(
             for group_name, options in groups.items()
             if shorthand in (options or {})
         ]
-        if not matching_groups:
+        if not matching_groups and (
+            shorthand in preset.context_aliases
+            or context_size_or_none(shorthand) is not None
+        ):
+            selections.setdefault(CONTEXT_SELECTION_KEY, shorthand)
+        elif not matching_groups:
             raise ValueError(
                 f"Unknown variation option '{shorthand}' for preset '{preset.name}'"
             )
-        if len(matching_groups) > 1:
+        elif len(matching_groups) > 1:
             raise ValueError(
                 f"Ambiguous variation option '{shorthand}' for preset '{preset.name}'. "
                 f"Specify one of: {', '.join(f'{g}={shorthand}' for g in matching_groups)}"
             )
-        normalized[matching_groups[0]] = shorthand
+        else:
+            normalized[matching_groups[0]] = shorthand
 
     for group_name, option_name in selections.items():
+        if group_name == CONTEXT_SELECTION_KEY and option_name not in (
+            groups.get(group_name) or {}
+        ):
+            tokens = preset.context_aliases.get(option_name)
+            normalized[group_name] = format_context_size(
+                tokens or parse_context_size(option_name)
+            )
+            continue
         if group_name not in groups:
             raise ValueError(
                 f"Unknown variation group '{group_name}' for preset '{preset.name}'"
@@ -144,7 +190,7 @@ def apply_variation_groups(
     written_paths: dict[str, tuple[str, str]] = {}
 
     for group_name, option_name in selections.items():
-        patch = ((variation_groups or {}).get(group_name) or {}).get(option_name) or {}
+        patch = _selection_patch(variation_groups, group_name, option_name)
         for path in patch:
             _validate_patch_target(path)
             prior = written_paths.get(path)
@@ -158,6 +204,19 @@ def apply_variation_groups(
         result = apply_patch_map(result, patch)
 
     return result
+
+
+def _selection_patch(
+    variation_groups: dict[str, dict[str, dict[str, Any]]],
+    group_name: str,
+    option_name: str,
+) -> dict[str, Any]:
+    options = (variation_groups or {}).get(group_name) or {}
+    if option_name in options:
+        return options[option_name] or {}
+    if group_name == CONTEXT_SELECTION_KEY:
+        return {"max_context": parse_context_size(option_name)}
+    return {}
 
 
 def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

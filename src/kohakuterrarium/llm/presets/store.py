@@ -161,7 +161,7 @@ def serialize_user_data(
     if presets:
         nested: dict[str, dict[str, Any]] = {}
         for (provider, name), preset in presets.items():
-            body = preset.to_dict()
+            body = preset.to_stored_dict()
             body.pop("provider", None)
             nested.setdefault(provider, {})[name] = body
         data["presets"] = nested

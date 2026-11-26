@@ -8,6 +8,9 @@ back-fill invariant the docstring promises.
 
 import logging
 
+import pytest
+from openai.types import CompletionUsage
+
 from kohakuterrarium.llm.openai.helpers import (
     delta_field,
     delta_field_present,
@@ -80,6 +83,40 @@ class TestExtractUsage:
         out = extract_usage(_Usage(prompt=None, completion=None, total=None))
         assert out["prompt_tokens"] == 0
         assert out["completion_tokens"] == 0
+
+    def test_reasoning_tokens_copied_from_completion_details(self):
+        usage = CompletionUsage.model_validate(
+            {
+                "prompt_tokens": 410,
+                "completion_tokens": 180,
+                "total_tokens": 590,
+                "prompt_tokens_details": {"cached_tokens": 256, "audio_tokens": 0},
+                "completion_tokens_details": {
+                    "reasoning_tokens": 128,
+                    "audio_tokens": 0,
+                    "accepted_prediction_tokens": 0,
+                    "rejected_prediction_tokens": 0,
+                },
+            }
+        )
+        assert extract_usage(usage) == {
+            "prompt_tokens": 410,
+            "completion_tokens": 180,
+            "total_tokens": 590,
+            "cached_tokens": 256,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 128,
+        }
+
+    @pytest.mark.parametrize(
+        "details", [None, {"audio_tokens": 0}], ids=["no-details", "no-reasoning"]
+    )
+    def test_reasoning_tokens_absent_when_not_reported(self, details):
+        payload = {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
+        if details is not None:
+            payload["completion_tokens_details"] = details
+        out = extract_usage(CompletionUsage.model_validate(payload))
+        assert "reasoning_tokens" not in out
 
 
 class TestDeltaField:

@@ -189,4 +189,28 @@ describe("ModelSwitcher inventory refresh", () => {
 
     expect(buttonByText(wrapper, "Switch").attributes("disabled")).toBeDefined()
   })
+
+  it("prefills the context field from the tracked creature and switches with context=<n>", async () => {
+    __chatTest.modelByTab = {
+      agent: { llmName: "codex/current", maxContext: 300000, contextWindow: 400000 },
+    }
+    const wrapper = mountSwitcher()
+    await flushPromises()
+    await wrapper.find(".model-pill").trigger("click")
+    await flushPromises()
+
+    const field = wrapper.find("[data-test='model-context-input']")
+    expect(field.attributes("model-value")).toBe("300k")
+    expect(wrapper.find("[data-test='model-context-note']").text()).toContain("Model window: 400k")
+    await wrapper.find("[data-context-pick='1000000']").trigger("click")
+    expect(wrapper.find("[data-test='model-context-warning']").text()).toContain("400k")
+    await buttonByText(wrapper, "Switch").trigger("click")
+    await flushPromises()
+
+    expect(__apiTest.switchCreatureModel).toHaveBeenCalledWith(
+      "session-1",
+      "agent",
+      "codex/current@context=1000000",
+    )
+  })
 })

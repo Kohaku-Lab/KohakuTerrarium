@@ -1,10 +1,11 @@
 """Run a command under a Linux Landlock write policy.
 
-Usage: ``python -I -S landlock_exec.py '<json list of paths>' -- argv...``.
-The listed paths (directories or files) stay writable; every other write is
-refused by the kernel for the command and all of its descendants. Reads,
-execution and network are left open. Any failure to apply the policy exits
-126 instead of running the command unconfined.
+Usage: ``python -I -S landlock_exec.py --grants-fd N -- argv...``, where
+file descriptor ``N`` holds a JSON list of paths; it is closed before the
+command starts. The listed paths (directories or files) stay writable; every
+other write is refused by the kernel for the command and all of its
+descendants. Reads, execution and network are left open. Any failure to apply
+the policy exits 126 instead of running the command unconfined.
 
 Runs by file path before the command starts, so it imports only the stdlib.
 """
@@ -22,6 +23,8 @@ _RESTRICT_SELF = 446
 _CREATE_RULESET_VERSION = 1
 _RULE_PATH_BENEATH = 1
 _PR_SET_NO_NEW_PRIVS = 38
+
+GRANTS_FD_FLAG = "--grants-fd"
 
 WRITE_FILE = 1 << 1
 REMOVE_DIR = 1 << 4
@@ -134,17 +137,26 @@ def _add_path(libc: ctypes.CDLL, ruleset: int, path: str, handled: int) -> None:
         os.close(fd)
 
 
+def read_grants(fd: int) -> list[str]:
+    """The JSON list of paths read from ``fd`` to its end; closes ``fd``."""
+    with open(fd, "rb", closefd=True) as stream:
+        paths = json.loads(stream.read())
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        raise ValueError("grants must be a JSON list of paths")
+    return paths
+
+
 def main(args: list[str]) -> int:
-    """Apply the policy in ``args[0]``, then exec the command after ``--``."""
-    if len(args) < 3 or args[1] != "--":
-        sys.stderr.write("usage: landlock_exec.py PATHS_JSON -- argv...\n")
+    """Apply the policy behind ``--grants-fd``, then exec the command after ``--``."""
+    if len(args) < 4 or args[0] != GRANTS_FD_FLAG or args[2] != "--":
+        sys.stderr.write(f"usage: landlock_exec.py {GRANTS_FD_FLAG} N -- argv...\n")
         return 2
     try:
-        restrict_writes(json.loads(args[0]))
+        restrict_writes(read_grants(int(args[1])))
     except (OSError, ValueError, TypeError) as exc:
         sys.stderr.write(f"kt sandbox: cannot apply Landlock policy: {exc}\n")
         return 126
-    command = args[2:]
+    command = args[3:]
     try:
         os.execvp(command[0], command)
     except OSError as exc:

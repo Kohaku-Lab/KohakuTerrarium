@@ -20,13 +20,18 @@ def extract_usage(usage: Any) -> dict[str, int]:
     if details:
         cached = getattr(details, "cached_tokens", 0) or 0
         cache_write = getattr(details, "cache_write_tokens", 0) or 0
-    return {
+    result = {
         "prompt_tokens": usage.prompt_tokens or 0,
         "completion_tokens": usage.completion_tokens or 0,
         "total_tokens": usage.total_tokens or 0,
         "cached_tokens": cached,
         "cache_write_tokens": cache_write,
     }
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    reasoning = getattr(completion_details, "reasoning_tokens", None)
+    if reasoning is not None:
+        result["reasoning_tokens"] = reasoning
+    return result
 
 
 def delta_field(obj: Any, name: str) -> Any:

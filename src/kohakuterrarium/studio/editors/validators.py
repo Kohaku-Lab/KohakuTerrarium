@@ -85,7 +85,7 @@ class AgentConfigIn(BaseModel):
     llm_profile: str = ""
     model: str = ""
     provider: str = ""
-    variation_selections: dict[str, str] = Field(default_factory=dict)
+    variation_selections: dict[str, str | int] = Field(default_factory=dict)
     variation: str = ""
     auth_mode: str = ""
     api_key_env: str = ""

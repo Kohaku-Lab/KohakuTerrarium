@@ -95,14 +95,17 @@ class TestOpenRouterKeepsUp:
 
 
 class TestOpenRouterContextPresets:
-    def test_large_window_models_offer_local_context_budgets(self):
+    def test_large_window_models_record_their_window(self):
         large = {
             key: data
             for key, data in PRESETS.items()
             if key[0] == "openrouter" and data["max_context"] >= 500_000
         }
         assert large
-        for data in large.values():
+        for key, data in large.items():
+            assert data["context_window"] == max(1_000_000, data["max_context"]), key
+            assert "context" not in data.get("variation_groups", {}), key
+            # Any budget is still selectable without a group.
             assert _context_budget(data, "400k") == 400_000
 
     def test_small_window_models_are_left_alone(self):
@@ -112,10 +115,10 @@ class TestOpenRouterContextPresets:
             if provider == "openrouter" and data["max_context"] < 500_000
         ]
         assert small
-        assert all("context" not in d.get("variation_groups", {}) for d in small)
+        assert all("context_window" not in d for d in small)
 
 
 def _context_budget(data: dict, option: str) -> int:
-    return apply_variation_groups(data, data["variation_groups"], {"context": option})[
-        "max_context"
-    ]
+    return apply_variation_groups(
+        data, data.get("variation_groups", {}), {"context": option}
+    )["max_context"]

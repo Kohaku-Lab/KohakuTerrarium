@@ -1287,7 +1287,8 @@ and `ts` (Unix seconds).
     `tools_used`, `result`, `output`, `turns`, `duration`, `task`,
     `trigger_id`, `event_type`, `channel`, `sender`, `content`,
     `prompt_tokens`, `completion_tokens`, `total_tokens`,
-    `cached_tokens`, `round`, `summary`, `messages_compacted`,
+    `cached_tokens`, `reasoning_tokens` (only when the provider reports
+    it), `round`, `summary`, `messages_compacted`,
     `session_id`, `model`, `agent_name`, `max_context`,
     `compact_threshold`, `error_type`, `error`, `messages_cleared`,
     `background`, `subagent`, `tool`, `interrupted`, `final_state`.

@@ -356,7 +356,12 @@ def persist_compacted(
     *,
     captured: tuple[list[dict], dict, int] | None = None,
 ) -> None:
-    """Persist a compacted conversation and its matching branch checkpoint."""
+    """Persist a compacted conversation and its matching branch checkpoint.
+
+    Raises ``ConversationSealedError`` without writing when a shutdown sealed
+    the conversation.
+    """
+    conversation.check_writable()
     try:
         messages, branch, watermark = captured or (
             conversation.snapshot_messages(preserve_pending_tail=True),
@@ -402,7 +407,12 @@ async def persist_compacted_async(
     compact_count: int,
     last_compact_time: float,
 ) -> None:
-    """Persist one captured checkpoint on the store's affinity thread."""
+    """Persist one captured checkpoint on the store's affinity thread.
+
+    Raises ``ConversationSealedError`` without writing when the conversation
+    is sealed now or by the time the queued write runs.
+    """
+    conversation.check_writable()
     captured = (
         deepcopy(conversation.snapshot_messages(preserve_pending_tail=True)),
         snapshot_tag(agent),
