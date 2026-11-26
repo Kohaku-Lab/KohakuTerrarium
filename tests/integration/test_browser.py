@@ -25,8 +25,11 @@ import pytest
 
 from kohakuterrarium import browser
 from kohakuterrarium.browser.errors import BrowserClosedError, BrowserUnavailableError
+from kohakuterrarium.builtins.plugins.browser.reading import read_page_for
+from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.llm.base import NativeToolCall
+from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.terrarium.creature.ops import agent_toggle_plugin
 from kohakuterrarium.testing.llm import ScriptedLLM
 from tests.helpers.browser_site import (
@@ -562,7 +565,9 @@ class TestBrowserIntegration:
         """a session with no plugin and no agent → read under an external check →
         a redirect the check refuses → a loopback URL the policy refuses → a URL
         that only downloads → ``async with`` exit, no Chromium left → the one-shot
-        helper, nothing left running and nothing written."""
+        helper → the framework-aware read under a real sandbox: allowed, a redirect
+        hop its allowlist refuses, refused under os_enforce=require → nothing
+        written."""
         pytest.importorskip("playwright.async_api")
         for name, value in browsers_env().items():
             monkeypatch.setenv(name, value)
@@ -639,4 +644,24 @@ class TestBrowserIntegration:
         )
         assert once.title == "Rendered" and not once.html_truncated
         assert site.hits["/rendered"] == 2
+
+        # A framework tool reads through every gate the plugin applies, with the
+        # real sandbox's services in its context and no browser plugin loaded.
+        sandbox = SandboxPlugin(options={"network_allowlist": ["127.0.0.1"]})
+        tool = ToolContext(agent_name="reader", session=None, working_dir=tmp_path)
+        tool.runtime_services.update(sandbox.runtime_services(None))
+        gated = await within(
+            read_page_for(tool, site.url("/rendered"), options), "framework read"
+        )
+        assert gated.title == "Rendered" and site.hits["/rendered"] == 3
+        site.redirect("/to-localhost", site.url("/rendered", host="localhost"))
+        with pytest.raises(browser.NavigationBlockedError, match="not allowlisted"):
+            await within(read_page_for(tool, site.url("/to-localhost"), options), "hop")
+        assert site.hits["/rendered"] == 3, "the refused hop reached the site"
+        sandbox.set_options({"os_enforce": "require"})
+        with pytest.raises(browser.BrowserUnavailableError, match="os_enforce"):
+            await within(
+                read_page_for(tool, site.url("/rendered"), options), "confined"
+            )
+        assert site.hits["/rendered"] == 3
         assert list(tmp_path.iterdir()) == []
