@@ -568,8 +568,12 @@ the same checks as the `browser_*` tools:
   confinement or when `options` ask for what a creature without host
   resources may not use (see [Multi-user hosts](#multi-user-hosts)); such a
   creature gets the bundled Chromium only. Every connection is judged by the
-  sandbox's network rules as they are at that moment, and no download is
-  written. This is the call for a framework tool that reads pages.
+  sandbox's network rules, and no download is written. It uses the sandbox
+  services the tool call had when it began: a change to the sandbox's options
+  applies during the read, while a sandbox enabled or disabled through the
+  plugin manager after the call began does not (the `browser_*` tools follow
+  such a change at once). This is the call for a framework tool that reads
+  pages.
 - **The agent's shared browser.** From a tool, call
   `await browser.agent_session(context)`. It returns the session the
   `browser_*` tools use, after the plugin's own checks (sandbox, multi-user

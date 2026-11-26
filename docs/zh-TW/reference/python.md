@@ -550,10 +550,11 @@ for pkg in packages.list_packages():
   以外不套用任何框架政策。
 - `await read_page_for(context, url, options=None, *, max_chars=1_000_000, driver=None) -> PageRead`
   （模組 `kohakuterrarium.builtins.plugins.browser.reading`，不在門面裡）：給框架工具用的讀取。
-  它接收工具的 `ToolContext`，不論外掛是否載入，都套用瀏覽器外掛對自身呼叫所做的所有檢查：
+  它接收工具的 `ToolContext`，不論外掛是否載入，都套用瀏覽器外掛對自身呼叫所做的檢查：
   sandbox 要求 OS 層級隔離，或 `options` 要求該生物不能使用的主機資源時，在啟動任何東西之前
   丟出 `BrowserUnavailableError`；這樣的生物只用內附的 Chromium；每個連線都依 sandbox 的網路
-  規則判斷；不寫入任何下載。
+  規則判斷；不寫入任何下載。所用的 sandbox 是呼叫開始時 context 的 runtime services 裡的那個：
+  它的 options 變更在讀取期間生效，之後才加入或移除的服務不生效。
 - `PageRead`：凍結的 dataclass。`url`（跟隨重新導向後的最終 URL）、
   `status`（`int | None`）、`title`、`html`（腳本執行後序列化的 DOM）、
   `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。

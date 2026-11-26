@@ -1,6 +1,8 @@
 """Unit tests for ``builtins.plugins.browser.reading``: a page read under every framework gate."""
 
+import asyncio
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -14,6 +16,7 @@ from kohakuterrarium.browser.protocol import NavResponse
 from kohakuterrarium.browser.read import read_page
 from kohakuterrarium.builtins.plugins.browser.reading import read_page_for
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.terrarium.channels.channels import TERRARIUM_ENGINE_KEY
 from tests.helpers.browser_driver import ScriptedDownload, ScriptedDriver
@@ -150,3 +153,101 @@ async def test_the_gates_are_the_same_with_the_plugin_loaded_and_its_browser_unt
     finally:
         await plugin.on_unload()
     assert plugin_driver.alive() == []
+
+
+NEXT = "http://next.test/page"
+
+
+async def proxied_get(driver: ScriptedDriver, host: str) -> None:
+    """One request through the filtering proxy of the browser ``driver`` launched last."""
+    proxy = urlsplit(driver.plans[-1].proxy_server)
+    reader, writer = await asyncio.open_connection(proxy.hostname, proxy.port)
+    writer.write(f"GET http://{host}/ HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
+    await writer.drain()
+    await reader.read()
+    writer.close()
+
+
+def redirect_after(change):
+    """A driver whose read page runs ``change``, then redirects through the proxy to ``NEXT``."""
+    holder: dict[str, ScriptedDriver] = {}
+
+    def setup(browser) -> None:
+        page_setup(browser)
+
+        async def goto(url, timeout):
+            change()
+            browser.sink.navigation_started(page, NEXT)
+            await proxied_get(holder["driver"], "next.test")
+            page.load(URL)
+            return NavResponse(NEXT, 200)
+
+        def prepare(new_page):
+            nonlocal page
+            page = new_page
+            new_page.handlers["goto"] = goto
+
+        page = None
+        browser.page_setup = prepare
+
+    holder["driver"] = ScriptedDriver(setup)
+    return holder["driver"]
+
+
+async def managed_sandbox(tmp_path, allow, *, disabled=False):
+    """A sandbox in a plugin manager, and a tool context built from the manager now."""
+    sandbox = SandboxPlugin(options={"network_allowlist": allow})
+    manager = PluginManager()
+    manager.register(sandbox)
+    await manager.load_all(plugin_context(tmp_path, manager))
+    if disabled:
+        manager.disable("sandbox")
+    tool = context(tmp_path)
+    tool.runtime_services.update(manager.collect_runtime_services(tool))
+    return sandbox, manager, tool
+
+
+class TestServicesFromWhenTheCallBegan:
+    async def test_an_option_change_of_a_present_sandbox_applies_during_the_read(
+        self, tmp_path
+    ):
+        sandbox, manager, tool = await managed_sandbox(
+            tmp_path, ["shop.test", "next.test"]
+        )
+        driver = redirect_after(
+            lambda: sandbox.set_options({"network_allowlist": ["shop.test"]})
+        )
+        try:
+            with pytest.raises(NavigationBlockedError, match="it led to next.test"):
+                await read_page_for(tool, URL, options(), driver=driver)
+        finally:
+            await manager.unload_all()
+        assert driver.alive() == []
+
+    async def test_a_sandbox_enabled_after_the_call_began_is_not_applied(
+        self, tmp_path
+    ):
+        _, manager, tool = await managed_sandbox(tmp_path, ["shop.test"], disabled=True)
+        assert "network_policy" not in tool.runtime_services
+        driver = redirect_after(lambda: manager.enable("sandbox"))
+        try:
+            page = await read_page_for(tool, URL, options(), driver=driver)
+            assert "network_policy" in manager.collect_runtime_services(tool)
+        finally:
+            await manager.unload_all()
+        assert page.title == "Shop page", "the read followed a sandbox added later"
+        assert driver.alive() == []
+
+    async def test_a_sandbox_disabled_during_the_read_still_applies_to_it(
+        self, tmp_path
+    ):
+        _, manager, tool = await managed_sandbox(tmp_path, ["shop.test"])
+        assert "network_policy" in tool.runtime_services
+        driver = redirect_after(lambda: manager.disable("sandbox"))
+        try:
+            with pytest.raises(NavigationBlockedError, match="it led to next.test"):
+                await read_page_for(tool, URL, options(), driver=driver)
+            assert manager.collect_runtime_services(tool) == {}
+        finally:
+            await manager.unload_all()
+        assert driver.alive() == []

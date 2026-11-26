@@ -62,11 +62,15 @@ which live in the builtins layer because their gates need the framework:
 **A read under the plugin's gates.**
 `await read_page_for(context, url, options)` from
 `kohakuterrarium.builtins.plugins.browser.reading` reads in a browser of its
-own and applies every gate the plugin applies to its own calls, whether or
+own and applies the gates the plugin applies to its own calls, whether or
 not the plugin is loaded: OS confinement and host resources refuse before
 anything launches, a restricted creature gets the bundled Chromium only, every
 connection is judged by the sandbox's network rules (and refused while the
-sandbox requires OS confinement), and no download is written. This is the
+sandbox requires OS confinement), and no download is written. It uses the
+runtime services of the calling context as they were when the call began:
+option changes of those services apply during the read, while a sandbox
+loaded, enabled or disabled through the plugin manager afterwards does not
+change it (the shared session follows such changes at once). This is the
 call for a tool such as `web_fetch`.
 
 **The agent's shared browser.** The plugin publishes a `BrowserAccess` under

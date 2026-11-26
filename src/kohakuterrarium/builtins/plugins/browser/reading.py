@@ -1,8 +1,9 @@
-"""A page read for framework tools, under every gate the ``browser`` plugin applies.
+"""A page read for framework tools, under the gates the ``browser`` plugin applies.
 
 For a tool with a ``ToolContext`` (``web_fetch`` and the like). The read runs
-in a browser of its own, launched and closed by the call, and is judged as the
-plugin judges its own calls whether or not the plugin is loaded on the creature.
+in a browser of its own, launched and closed by the call, and is judged by the
+plugin's gates whether or not the plugin is loaded on the creature, with the
+runtime services the calling context had when the call began.
 """
 
 from typing import Any
@@ -34,9 +35,11 @@ async def read_page_for(
     when the sandbox requires OS confinement, or when ``options`` (default
     ``BrowserOptions()``) ask for host resources the creature may not use; such
     a creature gets the bundled Chromium only. Every connection is judged by
-    the sandbox's network rules as they are at that moment. Downloads the page
-    starts are cancelled, so nothing is written. Other errors and the result
-    are those of ``BrowserSession.read_page``; ``driver`` replaces Playwright.
+    the sandbox among ``context``'s runtime services when the call began: its
+    option changes apply during the read; services added or removed
+    afterwards do not. Downloads the page starts are cancelled, so nothing is
+    written. Other errors and the result are those of
+    ``BrowserSession.read_page``; ``driver`` replaces Playwright.
     """
     options = options or BrowserOptions()
     link = SandboxLink()

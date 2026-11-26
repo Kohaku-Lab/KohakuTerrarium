@@ -609,12 +609,14 @@ Sessions and reads:
 - `await read_page_for(context, url, options=None, *, max_chars=1_000_000, driver=None) -> PageRead`
   (module `kohakuterrarium.builtins.plugins.browser.reading`, not the
   facade): the read for framework tools. It takes the tool's `ToolContext`
-  and applies every check the browser plugin applies to its own calls,
+  and applies the checks the browser plugin applies to its own calls,
   whether or not the plugin is loaded: `BrowserUnavailableError` before any
   launch when the sandbox requires OS confinement or `options` ask for host
   resources the creature may not use, the bundled Chromium only for such a
   creature, the sandbox's network rules on every connection, no download
-  written.
+  written. The sandbox is the one among the context's runtime services when
+  the call began: its option changes apply during the read, services added or
+  removed afterwards do not.
 - `PageRead`: frozen dataclass. `url` (final, after redirects),
   `status` (`int | None`), `title`, `html` (serialized DOM after
   scripts ran), `text` (`document.body.innerText`), `html_truncated`,

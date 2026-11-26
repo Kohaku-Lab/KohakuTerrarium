@@ -288,7 +288,7 @@ origin 由协议、主机和可选的端口组成，例如 `https://staging.exam
 
 **感知框架**的入口接收工具的 `ToolContext`，并应用与 `browser_*` 工具相同的检查：
 
-- **在插件检查之下读取。** `kohakuterrarium.builtins.plugins.browser.reading` 中的 `await read_page_for(context, url, options)` 在自己的浏览器里读取，无论这个 Creature 是否启用了浏览器插件。当 sandbox 要求 OS 级隔离，或 `options` 要求了没有主机资源的 Creature 不能使用的东西（见上文「多用户主机」）时，它在启动任何东西之前就拒绝；这样的 Creature 只用自带的 Chromium。每个连接都按 sandbox 当时的网络规则判断，且不写入任何下载。读取页面的框架工具应该用这个调用。
+- **在插件检查之下读取。** `kohakuterrarium.builtins.plugins.browser.reading` 中的 `await read_page_for(context, url, options)` 在自己的浏览器里读取，无论这个 Creature 是否启用了浏览器插件。当 sandbox 要求 OS 级隔离，或 `options` 要求了没有主机资源的 Creature 不能使用的东西（见上文「多用户主机」）时，它在启动任何东西之前就拒绝；这样的 Creature 只用自带的 Chromium。每个连接都按 sandbox 的网络规则判断，且不写入任何下载。它使用工具调用开始时拥有的 sandbox 服务：sandbox 的 options 变更会在读取期间生效，而调用开始后通过插件管理器启用或停用的 sandbox 不会影响它（`browser_*` 工具会立即跟随这类变化）。读取页面的框架工具应该用这个调用。
 - **Agent 共享的浏览器。** 在工具里调用 `await browser.agent_session(context)`。它返回 `browser_*` 工具所用的那个会话，先经过插件自己的检查（sandbox、多用户限制）；插件未加载时返回 `None`；检查拒绝时抛出异常。你的调用和工具的调用一起排队，并共用它们的浏览器状态（见下文）。
 
 `read_page`（会话上的或一次性的）是把页面当作数据读取的调用。它返回一个 `PageRead`：最终的 `url`（跟随重定向之后）、HTTP `status`、`title`、`html`（页面脚本运行后的 DOM）和 `text`（body 渲染后的文字，也就是人看到的排版），每项都在 `max_chars`（默认 1 000 000）处截断。配置的密钥以及页面密码框的值会从每一项中脱敏。不做隐藏文字过滤，所以请把这些字段当作不可信的页面内容。
