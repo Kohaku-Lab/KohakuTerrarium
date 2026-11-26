@@ -537,9 +537,17 @@ for pkg in packages.list_packages():
   每個連線都會詢問 `external_check(host, port) -> str | None`（回傳原因即拒絕）。
 - `await session.read_page(url, *, max_chars=1_000_000) -> PageRead`：
   在一個工作階段其他操作看不到的暫時分頁中載入 `url`，以資料形式回傳。
-  URL 檢查、代理與網路政策都與 `navigate` 相同。
+  URL 檢查、代理與網路政策都與 `navigate` 相同。這不是隔離的讀取：這個分頁與工作階段共用
+  cookie、儲存空間、快取與 service worker。
 - `await read_page(url, options=None, *, external_check=None, max_chars=1_000_000, driver=None) -> PageRead`：
-  同上，但用自己的瀏覽器，並在回傳前關閉它。
+  同上，但用自己的瀏覽器，並在回傳前關閉它。和 `BrowserSession` 一樣，除了 `external_check`
+  以外不套用任何框架政策。
+- `await read_page_for(context, url, options=None, *, max_chars=1_000_000, driver=None) -> PageRead`
+  （模組 `kohakuterrarium.builtins.plugins.browser.reading`，不在門面裡）：給框架工具用的讀取。
+  它接收工具的 `ToolContext`，不論外掛是否載入，都套用瀏覽器外掛對自身呼叫所做的所有檢查：
+  sandbox 要求 OS 層級隔離，或 `options` 要求該生物不能使用的主機資源時，在啟動任何東西之前
+  丟出 `BrowserUnavailableError`；這樣的生物只用內附的 Chromium；每個連線都依 sandbox 的網路
+  規則判斷；不寫入任何下載。
 - `PageRead`：凍結的 dataclass。`url`（跟隨重新導向後的最終 URL）、
   `status`（`int | None`）、`title`、`html`（腳本執行後序列化的 DOM）、
   `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。

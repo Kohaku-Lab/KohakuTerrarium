@@ -595,9 +595,20 @@ Sessions and reads:
 - `await session.read_page(url, *, max_chars=1_000_000) -> PageRead`:
   load `url` in a temporary tab invisible to the session's other
   operations and return it as data. Same URL check, proxy and network
-  policy as `navigate`.
+  policy as `navigate`. Not isolated: the tab shares the session's
+  cookies, storage, cache and service workers.
 - `await read_page(url, options=None, *, external_check=None, max_chars=1_000_000, driver=None) -> PageRead`:
-  the same with a browser of its own, closed before it returns.
+  the same with a browser of its own, closed before it returns. Like
+  `BrowserSession`, it applies no framework policy beyond `external_check`.
+- `await read_page_for(context, url, options=None, *, max_chars=1_000_000, driver=None) -> PageRead`
+  (module `kohakuterrarium.builtins.plugins.browser.reading`, not the
+  facade): the read for framework tools. It takes the tool's `ToolContext`
+  and applies every check the browser plugin applies to its own calls,
+  whether or not the plugin is loaded: `BrowserUnavailableError` before any
+  launch when the sandbox requires OS confinement or `options` ask for host
+  resources the creature may not use, the bundled Chromium only for such a
+  creature, the sandbox's network rules on every connection, no download
+  written.
 - `PageRead`: frozen dataclass. `url` (final, after redirects),
   `status` (`int | None`), `title`, `html` (serialized DOM after
   scripts ran), `text` (`document.body.innerText`), `html_truncated`,

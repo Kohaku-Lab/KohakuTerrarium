@@ -322,8 +322,8 @@ link-local 位址就算列在 `allow_hosts` 裡也會被拒絕；沒有任何 op
   比對，代理開出的每條連線（含子資源）也一樣。這份清單只寫主機名稱（沒有連接埠），
   並疊加在瀏覽器自己的 `allow_hosts` 之上；主機必須兩邊都通過。
 - **`os_enforce: require`**：瀏覽器會拒絕啟動，因為 Chromium 無法在 sandbox 的
-  子行程隔離下執行。這個設定生效時已在跑的瀏覽器，會在下一次瀏覽器呼叫（或下一次
-  框架讀取，見下文）時關閉；在那之前它繼續執行，它的連線仍照網路規則判斷（每 2 秒
+  子行程隔離下執行。這個設定生效時已在跑的瀏覽器，會在下一次瀏覽器呼叫（`browser_*`
+  工具，或其他工具透過 `agent_session` 使用它，見下文）時關閉；在那之前它繼續執行，它的連線仍照網路規則判斷（每 2 秒
   一次的重新判斷不看 `os_enforce`）。瀏覽器被當成網路工具看待，所以 `syscall`
   等級不會擋它。
 - **檔案路徑**：`browser_act` 的 `files`（讀取）與 `browser_screenshot` 的
@@ -452,17 +452,27 @@ Chromium，只能連公開位址，也不能使用密鑰。若生物的 options 
 代理與網路政策，不必經過那些工具。`import kohakuterrarium.browser` 很輕，絕不會
 import Playwright；要等某個呼叫真的需要瀏覽器時才會啟動。
 
-有三種用法：
+入口分成兩類。`kohakuterrarium.browser` 裡的**底層 API** 只套用瀏覽器自己的
+options；除非你把框架的政策傳進去，否則它不套用任何框架政策：
 
-- **Agent 共用的瀏覽器。** 在工具裡，用該工具的 `ToolContext` 呼叫
-  `await browser.agent_session(context)`。它回傳 `browser_*` 工具所用的那個工作
-  階段，先經過插件自己的檢查（sandbox、多使用者限制）；插件沒載入時回傳 `None`；
-  檢查拒絕時拋出例外。你的呼叫和工具的呼叫一起排隊。
 - **自己的工作階段。** `async with browser.BrowserSession(options) as session:`
   得到一個別人碰不到的瀏覽器，區塊結束時關閉。沒給 `downloads_dir` 時，每個下載
   都會被取消，磁碟上不會寫入任何東西。
 - **一次性讀取。** `await browser.read_page(url, options)` 啟動瀏覽器、讀取頁面，
   並在回傳前關閉瀏覽器。
+
+**感知框架**的入口接收工具的 `ToolContext`，並套用和 `browser_*` 工具相同的檢查：
+
+- **在插件檢查之下讀取。** `kohakuterrarium.builtins.plugins.browser.reading` 裡的
+  `await read_page_for(context, url, options)` 在自己的瀏覽器裡讀取，不論這個生物
+  有沒有啟用瀏覽器插件。sandbox 要求 OS 層級隔離，或 `options` 要求了沒有主機資源
+  的生物不能用的東西（見[多使用者主機](#多使用者主機)）時，它在啟動任何東西之前就
+  拒絕；這樣的生物只用內附的 Chromium。每個連線都依 sandbox 當下的網路規則判斷，
+  也不寫入任何下載。讀取頁面的框架工具應該用這個呼叫。
+- **Agent 共用的瀏覽器。** 在工具裡呼叫 `await browser.agent_session(context)`。
+  它回傳 `browser_*` 工具所用的那個工作階段，先經過插件自己的檢查（sandbox、多使用者
+  限制）；插件沒載入時回傳 `None`；檢查拒絕時拋出例外。你的呼叫和工具的呼叫一起
+  排隊，並共用它們的瀏覽器狀態（見下文）。
 
 `read_page`（工作階段上的或一次性的）是把頁面當成資料讀取的呼叫。它回傳一個
 `PageRead`：最終的 `url`（跟隨重新導向之後）、HTTP `status`、`title`、`html`
@@ -479,23 +489,33 @@ import Playwright；要等某個呼叫真的需要瀏覽器時才會啟動。
 （dismiss），它開始的下載會被取消，它開啟的視窗會被關閉；這段期間生物的某個分頁
 開啟的視窗照常成為分頁。
 
+在 Agent 共用的工作階段上，讀取和生物的瀏覽**並不隔離**。暫時分頁和生物的分頁用同一
+個瀏覽器設定檔：cookie、登入、同源儲存空間、快取與 service worker 都是共用的，所以
+讀取會帶上生物的 cookie，而被造訪的網站做的事（設定 cookie、註冊 service worker、
+修改它伺服器上的資料）之後也會留給生物的分頁。讀取自己的載入中被擋下的重新導向會
+拋給呼叫端，不會回報給生物；讀取期間代理擋下的其他請求會出現在生物的下一個結果裡，
+因為代理分不出是哪個頁面發出的。需要一個和生物什麼都不共用的讀取時，請用
+`read_page_for`、一次性的 `read_page`，或你自己的工作階段。
+
+框架工具這樣讀取：
+
 ```python
 from kohakuterrarium import browser
+from kohakuterrarium.builtins.plugins.browser.reading import read_page_for
 
 async def summarize_page(url: str, context) -> str:
-    # sandbox 開啟時跟隨它：它的 network_policy 服務會檢查頁面連線的每個主機。
-    policy = (context.runtime_services or {}).get("network_policy")
-    page = await browser.read_page(
-        url,
-        browser.BrowserOptions(allow_hosts=("docs.example.com",)),
-        external_check=policy.check if policy is not None else None,
+    page = await read_page_for(
+        context, url, browser.BrowserOptions(allow_hosts=("docs.example.com",))
     )
     return page.text
 ```
 
-`external_check(host, port)` 回傳 `None` 表示允許連線，回傳一個原因則拒絕；代理開啟
-的每個連線都會問它。sandbox 的 `network_policy` 執行環境服務正好是這個形狀，所以工具
-不必 import sandbox 就能跟隨它。所有名稱與簽章見 [Python 參考](../reference/python.md#browser)。
+底層呼叫接收 `external_check(host, port)`：回傳 `None` 表示允許連線，回傳一個原因
+則拒絕；代理開啟的每個連線都會問它。sandbox 的 `network_policy` 執行環境服務正好是
+這個形狀，所以傳入它的 `check` 會加上 sandbox 的網路規則，但也只有這些：這樣啟動的
+底層讀取在 sandbox 要求 OS 層級隔離時照樣執行，對沒有主機資源的生物也照樣採用主機
+相關的 options（可見視窗、系統 Chrome、loopback）。所有名稱與簽章見
+[Python 參考](../reference/python.md#browser)。
 
 ## 限制與已知缺口
 
@@ -516,6 +536,16 @@ async def summarize_page(url: str, context) -> str:
   存下來。
 - 每個生物一個瀏覽器；它的呼叫一次只跑一個。
 - 只支援 Chromium，透過 Playwright。
+- 下載上限約束的是工作階段保留的檔案。超過上限的檔案會先完整下載再刪除，所以它們
+  不約束下載進行中的磁碟用量與流量；Chromium 自己的暫存下載檔、設定檔與快取也不在
+  上限之內。
+- 網路隔離靠的是過濾代理、DNS 釘選（每個連線都連到經過檢查的那個位址）與 Chromium
+  的啟動參數。Chromium 以執行生物的使用者身分作為一般行程執行，沒有作業系統層級的
+  行程、檔案系統或網路隔離。
+- 瀏覽器是為受信任的本機使用者的 Agent 設計的。[多使用者](#多使用者主機)限制縮小了
+  非管理員的生物能要求的範圍，但它們不是沙箱。多租戶服務，或你不信任的生物，需要在
+  瀏覽器外再加一層更強的邊界：每個租戶一個獨立的作業系統使用者、容器或虛擬機，並有
+  各自的儲存配額與對外網路控制。
 - 不支援：附加到你自己正在執行的 Chrome 或它的預設設定檔；隱匿、規避反機器人
   或解 CAPTCHA（遇到 CAPTCHA 或兩步驟驗證時應交給使用者）；操作桌面或其他應用程式。
 - 尚未實作：專門用來瀏覽的子代理、提示注入分類器、供應商原生的 computer-use 工具，

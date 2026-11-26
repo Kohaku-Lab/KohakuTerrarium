@@ -530,9 +530,17 @@ for pkg in packages.list_packages():
   每个连接都会询问 `external_check(host, port) -> str | None`（返回原因即拒绝）。
 - `await session.read_page(url, *, max_chars=1_000_000) -> PageRead`：
   在一个会话其他操作看不到的临时标签页中加载 `url`，并以数据形式返回。
-  URL 检查、代理与网络策略都与 `navigate` 相同。
+  URL 检查、代理与网络策略都与 `navigate` 相同。这不是隔离的读取：这个标签页与会话共用
+  cookie、存储、缓存和 service worker。
 - `await read_page(url, options=None, *, external_check=None, max_chars=1_000_000, driver=None) -> PageRead`：
-  同上，但使用自己的浏览器，并在返回前关闭它。
+  同上，但使用自己的浏览器，并在返回前关闭它。与 `BrowserSession` 一样，除了 `external_check`
+  之外不应用任何框架策略。
+- `await read_page_for(context, url, options=None, *, max_chars=1_000_000, driver=None) -> PageRead`
+  （模块 `kohakuterrarium.builtins.plugins.browser.reading`，不在门面中）：给框架工具用的读取。
+  它接收工具的 `ToolContext`，无论插件是否加载，都应用浏览器插件对自身调用所做的全部检查：
+  sandbox 要求 OS 级隔离，或 `options` 要求该 Creature 不能使用的主机资源时，在启动任何东西之前
+  抛出 `BrowserUnavailableError`；这样的 Creature 只用自带的 Chromium；每个连接都按 sandbox 的
+  网络规则判断；不写入任何下载。
 - `PageRead`：冻结的 dataclass。`url`（跟随重定向后的最终 URL）、
   `status`（`int | None`）、`title`、`html`（脚本运行后序列化的 DOM）、
   `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。

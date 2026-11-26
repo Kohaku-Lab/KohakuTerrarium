@@ -210,7 +210,7 @@ plugins:
 
 - **`network: deny`**：任何浏览器工具都不会运行，sandbox 在调用到达浏览器之前就会拒绝。
 - **`network_allowlist`**：`browser_navigate` 和 `browser_tabs` 的 URL 参数要过它的检查，代理打开的每一个连接（包括子资源）也一样。allowlist 只写主机名（不带端口），它叠加在浏览器自己的 `allow_hosts` 之上，一个主机必须两边都通过。
-- **`os_enforce: require`**：浏览器拒绝启动，因为 Chromium 无法在 sandbox 的子进程隔离下运行。该设置生效时已在运行的浏览器，会在下一次浏览器调用（或下一次框架读取，见下文）时被关闭；在此之前它继续运行，它的连接仍按网络规则照常判断（每 2 秒一次的重新判断不看 `os_enforce`）。浏览器被视为网络工具，所以 `syscall` 级别不会拦它。
+- **`os_enforce: require`**：浏览器拒绝启动，因为 Chromium 无法在 sandbox 的子进程隔离下运行。该设置生效时已在运行的浏览器，会在下一次浏览器调用（`browser_*` 工具，或其他工具通过 `agent_session` 使用它，见下文）时被关闭；在此之前它继续运行，它的连接仍按网络规则照常判断（每 2 秒一次的重新判断不看 `os_enforce`）。浏览器被视为网络工具，所以 `syscall` 级别不会拦它。
 - **文件路径**：`browser_act` 的 `files`（读取）和 `browser_screenshot` 的 `path`（写入）与其他文件工具一样经过路径检查。
 - **下载** 在创建任何文件之前，先按文件写入规则（`fs_write`、`fs_deny`）检查；被拒绝的下载会被取消，并报告为被拒绝。
 - **`backend: audit`** 只记录本来会拒绝的操作，然后放行。
@@ -281,31 +281,36 @@ origin 由协议、主机和可选的端口组成，例如 `https://staging.exam
 
 浏览器运行时 `kohakuterrarium.browser` 是一个独立的组件；插件和它的六个工具只是它的一个使用者。自定义工具、脚本或测试都可以直接使用同一个受管控的 Chromium，走同一个代理和网络策略，而不必经过这些工具。`import kohakuterrarium.browser` 很轻，绝不会导入 Playwright；只有在某个调用真正需要浏览器时才会启动。
 
-有三种用法：
+入口分两类。`kohakuterrarium.browser` 中的**底层 API** 只应用浏览器自己的 options；除非你把框架的策略传进去，否则它不应用任何框架策略：
 
-- **Agent 共享的浏览器。** 在工具里，用该工具的 `ToolContext` 调用 `await browser.agent_session(context)`。它返回 `browser_*` 工具所用的那个会话，先经过插件自己的检查（sandbox、多用户限制）；插件未加载时返回 `None`；检查拒绝时抛出异常。你的调用和工具的调用一起排队。
 - **自己的会话。** `async with browser.BrowserSession(options) as session:` 得到一个别人碰不到的浏览器，代码块结束时关闭。不提供 `downloads_dir` 时，每个下载都会被取消，磁盘上不会写入任何东西。
 - **一次性读取。** `await browser.read_page(url, options)` 启动浏览器、读取页面，并在返回前关闭浏览器。
+
+**感知框架**的入口接收工具的 `ToolContext`，并应用与 `browser_*` 工具相同的检查：
+
+- **在插件检查之下读取。** `kohakuterrarium.builtins.plugins.browser.reading` 中的 `await read_page_for(context, url, options)` 在自己的浏览器里读取，无论这个 Creature 是否启用了浏览器插件。当 sandbox 要求 OS 级隔离，或 `options` 要求了没有主机资源的 Creature 不能使用的东西（见上文「多用户主机」）时，它在启动任何东西之前就拒绝；这样的 Creature 只用自带的 Chromium。每个连接都按 sandbox 当时的网络规则判断，且不写入任何下载。读取页面的框架工具应该用这个调用。
+- **Agent 共享的浏览器。** 在工具里调用 `await browser.agent_session(context)`。它返回 `browser_*` 工具所用的那个会话，先经过插件自己的检查（sandbox、多用户限制）；插件未加载时返回 `None`；检查拒绝时抛出异常。你的调用和工具的调用一起排队，并共用它们的浏览器状态（见下文）。
 
 `read_page`（会话上的或一次性的）是把页面当作数据读取的调用。它返回一个 `PageRead`：最终的 `url`（跟随重定向之后）、HTTP `status`、`title`、`html`（页面脚本运行后的 DOM）和 `text`（body 渲染后的文字，也就是人看到的排版），每项都在 `max_chars`（默认 1 000 000）处截断。配置的密钥以及页面密码框的值会从每一项中脱敏。不做隐藏文字过滤，所以请把这些字段当作不可信的页面内容。
 
 读取走的是和 `browser_navigate` 相同的 URL 检查、代理和网络策略，出错时抛出异常而不是返回错误文本：URL 被拒绝或重定向被拦截时抛 `NavigationBlockedError`，加载超过 `nav_timeout_s` 时抛 `BrowserTimeoutError`，加载失败或 URL 只触发下载时抛 `NavigationError`；读取期间因 sandbox 现在拒绝而被代理切断的连接也抛 `NavigationBlockedError`。它在一个 Creature 永远看不到的临时标签页里运行：不在标签页列表里，不改变当前标签页及其 ref，无论走哪条路径结束都会被关闭。它打开的对话框会被关闭（dismiss），它开始的下载会被取消，它打开的窗口会被关闭；在此期间 Creature 的某个标签页打开的窗口照常成为标签页。
 
+在 Agent 共享的会话上，读取与 Creature 的浏览**并不隔离**。临时标签页和 Creature 的标签页用同一个浏览器 profile：cookie、登录、同源存储、缓存和 service worker 都是共用的，所以读取会带上 Creature 的 cookie，而被访问的网站所做的事（设置 cookie、注册 service worker、修改它服务器上的数据）之后也会留给 Creature 的标签页。读取自身加载中被拦截的重定向会抛给调用方，不会报告给 Creature；读取期间代理拦截的其他请求会出现在 Creature 的下一个结果里，因为代理分辨不出是哪个页面发出的。需要一个与 Creature 什么都不共用的读取时，请用 `read_page_for`、一次性的 `read_page`，或你自己的会话。
+
+框架工具这样读取：
+
 ```python
 from kohakuterrarium import browser
+from kohakuterrarium.builtins.plugins.browser.reading import read_page_for
 
 async def summarize_page(url: str, context) -> str:
-    # sandbox 开启时跟随它：它的 network_policy 服务会检查页面连接的每个主机。
-    policy = (context.runtime_services or {}).get("network_policy")
-    page = await browser.read_page(
-        url,
-        browser.BrowserOptions(allow_hosts=("docs.example.com",)),
-        external_check=policy.check if policy is not None else None,
+    page = await read_page_for(
+        context, url, browser.BrowserOptions(allow_hosts=("docs.example.com",))
     )
     return page.text
 ```
 
-`external_check(host, port)` 返回 `None` 表示允许连接，返回一个原因则拒绝；代理打开的每个连接都会询问它。sandbox 的 `network_policy` 运行时服务正好是这个形状，所以工具不必导入 sandbox 就能跟随它。所有名称和签名见 [Python 参考](../reference/python.md#browser)。
+底层调用接收 `external_check(host, port)`：返回 `None` 表示允许连接，返回一个原因则拒绝；代理打开的每个连接都会询问它。sandbox 的 `network_policy` 运行时服务正好是这个形状，所以传入它的 `check` 会加上 sandbox 的网络规则，但也只有这些：这样启动的底层读取在 sandbox 要求 OS 级隔离时照样运行，对没有主机资源的 Creature 也照样采用主机相关的 options（可见窗口、系统 Chrome、loopback）。所有名称和签名见 [Python 参考](../reference/python.md#browser)。
 
 ## 限制与已知缺口
 
@@ -317,6 +322,9 @@ async def summarize_page(url: str, context) -> str:
 - **只有原生工具调用才能把截图送到模型。** 在文本工具格式（`bracket`、`xml`）下，工具结果以文本形式传回，所以模型只拿到截图的文字行（截了什么、存在哪里），看不到图片。需要截图时请使用 `tool_format: native`，或者用 `path` 把截图存下来。
 - 每个 Creature 一个浏览器；它上面的调用一次执行一个。
 - 只支持经由 Playwright 驱动的 Chromium。
+- 下载上限约束的是会话保留的文件。超过上限的文件会先被完整下载再删除，所以它们不约束下载进行中的磁盘占用和流量；Chromium 自己的临时下载文件、profile 和缓存也不在上限之内。
+- 网络隔离靠的是过滤代理、DNS 固定（每个连接都连到经过检查的那个地址）和 Chromium 的启动参数。Chromium 以运行 Creature 的用户身份作为普通进程运行，没有操作系统级的进程、文件系统或网络隔离。
+- 浏览器是为受信任的本地用户的 Agent 设计的。「多用户主机」中的限制缩小了非管理员的 Creature 能要求的范围，但它们不是沙箱。多租户服务，或你不信任的 Creature，需要在浏览器外加一层更强的边界：每个租户一个独立的操作系统用户、容器或虚拟机，并有各自的存储配额和出站网络控制。
 - 不支持：连接到你自己正在运行的 Chrome 或其默认 profile；隐身、反机器人规避或破解验证码（遇到验证码或两步验证提示，应交给用户处理）；控制桌面或其他应用程序。
 - 尚未实现：专门的浏览子代理、提示注入分类器、提供商原生的 computer-use 工具，以及对既往浏览流程的记忆。
 

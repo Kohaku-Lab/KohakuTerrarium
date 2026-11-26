@@ -11,6 +11,16 @@ counting imports inside functions and under `TYPE_CHECKING`). Playwright is
 imported lazily by `driver.py` alone; `import kohakuterrarium.browser` loads no
 submodule at all (the facade resolves names on first use, PEP 562).
 
+It is built for a trusted local user's agent. Its network confinement is the
+filtering proxy, DNS pinning (each connection goes to the address that was
+checked) and Chromium launch flags; Chromium runs as an ordinary process of
+the server's user, with no OS-level process, filesystem or network isolation.
+Its download caps bound the files a session keeps, not disk use or traffic
+while a download runs, and Chromium's temporary download files, profile and
+cache are outside them. A multi-tenant service, or a creature you do not
+trust, needs a stronger boundary around the browser (a separate OS user,
+container or VM per tenant, with its own storage quota and egress control).
+
 ## Public surface
 
 `from kohakuterrarium import browser`, then:
@@ -26,15 +36,11 @@ submodule at all (the facade resolves names on first use, PEP 562).
 | `BROWSER_SERVICE`, `BrowserAccess`, `browser_access(ctx)`, `agent_session(ctx)` | The contract by which a tool reaches the agent's shared session. |
 | `BrowserError` and subclasses | Typed errors; all derive from `KTError`. |
 
-## Three ways to use it
+## Ways to use it
 
-**The agent's shared browser.** The plugin publishes a `BrowserAccess` under
-`runtime_services[BROWSER_SERVICE]`. A tool calls
-`await browser.agent_session(context)` with its `ToolContext`: it gets the
-agent's `BrowserSession` after the plugin's per-call gates (sandbox, host
-resources), or `None` when the plugin is not loaded. A refusal of the gates
-raises. The session is shared with the `browser_*` tools, so a read waits for
-their calls and they wait for it.
+The package itself is the **low-level API**: it applies the browser's own
+options and whatever `external_check` the caller passes, and no framework
+policy beyond that.
 
 **A session of your own.** `async with BrowserSession(options) as session:`
 gives a browser nobody else touches. Without `downloads_dir` every download
@@ -43,16 +49,32 @@ is cancelled and reported as refused, so nothing is written to disk.
 **A one-shot read.** `await browser.read_page(url, options)` launches a
 browser, reads, and closes it before returning.
 
-In each case `external_check(host, port) -> reason | None` plugs an outside
-network policy into the session's filtering proxy. A tool running under the
-sandbox passes the sandbox's `network_policy` runtime service, read from its
-`ToolContext`, without importing the sandbox plugin:
+In both, `external_check(host, port) -> reason | None` plugs an outside
+network policy into the session's filtering proxy (the sandbox's
+`network_policy` service has that shape). That adds the sandbox's network
+rules only: it does not refuse when the sandbox requires OS confinement, does
+not apply the host-resources rule (bundled Chromium only, no host options)
+for a restricted creature, and does not consult the sandbox's write rules.
 
-```python
-policy = (context.runtime_services or {}).get("network_policy")
-check = policy.check if policy is not None else None
-page = await browser.read_page(url, options, external_check=check)
-```
+Framework code with a `ToolContext` uses one of the **framework-aware** ways,
+which live in the builtins layer because their gates need the framework:
+
+**A read under the plugin's gates.**
+`await read_page_for(context, url, options)` from
+`kohakuterrarium.builtins.plugins.browser.reading` reads in a browser of its
+own and applies every gate the plugin applies to its own calls, whether or
+not the plugin is loaded: OS confinement and host resources refuse before
+anything launches, a restricted creature gets the bundled Chromium only, every
+connection is judged by the sandbox's network rules, and no download is
+written. This is the call for a tool such as `web_fetch`.
+
+**The agent's shared browser.** The plugin publishes a `BrowserAccess` under
+`runtime_services[BROWSER_SERVICE]`. A tool calls
+`await browser.agent_session(context)` with its `ToolContext`: it gets the
+agent's `BrowserSession` after the plugin's per-call gates (sandbox, host
+resources), or `None` when the plugin is not loaded. A refusal of the gates
+raises. The session is shared with the `browser_*` tools, so a read waits for
+their calls and they wait for it, and it shares their browser state (below).
 
 ## The structured read
 
@@ -105,11 +127,21 @@ How it behaves:
 - The temporary tab is not an agent tab: it is not in the tab list, never
   active, records no refs, leaves every tab's last observation alone, and
   does not count toward the tab cap (reads are serialized, so at most one
-  exists). Requests the proxy blocked during the read are dropped, not
-  reported to the agent. The tab is closed on every path, cancellation
-  included; when the read gives up while the browser is still creating the
-  tab (timeout or cancellation), the tab is closed once it appears and is
-  never listed.
+  exists). The tab is closed on every path, cancellation included; when the
+  read gives up while the browser is still creating the tab (timeout or
+  cancellation), the tab is closed once it appears and is never listed.
+- It is not an isolated read. On a shared session the temporary tab uses the
+  same browser profile as the agent's tabs: cookies, logins, same-origin
+  storage, caches and service workers are common to both, so the read is sent
+  the agent's cookies, and what the visited site does (sets a cookie,
+  registers a service worker, changes server-side state) is there for the
+  agent's tabs afterwards. A read that shares nothing uses a session of its
+  own, the one-shot `read_page`, or `read_page_for`.
+- Blocked hops of the read's own load are raised to the caller and left out
+  of the agent's reports. Any other request the proxy blocked while the read
+  ran stays for the agent's next result, since the proxy cannot tell which
+  page made it; blocked subresources of the read's page are reported to the
+  agent that way too.
 - Dialogs the read's page opens are dismissed at once; downloads it starts are
   cancelled and never saved. A window opened while a read runs is decided by
   its opener: one an agent tab opened (a timer firing between agent calls)
@@ -159,7 +191,7 @@ Allowed import directions:
   the `RefBook` (`refs`) and clears the per-tab `Observation`s (`observe`)
   when a browser is lost.
 - The structured read (`session/reading`, `read`) imports runtime modules only.
-- The plugin (`builtins/plugins/browser`) and the tools
-  (`builtins/tools/browser`) import `browser/`; nothing in `browser/` imports
-  them. Tool-call wire details (argument schemas, text-format coercion) live
-  with the tools.
+- The plugin (`builtins/plugins/browser`, with its gates in `gates` and the
+  framework-aware read in `reading`) and the tools (`builtins/tools/browser`)
+  import `browser/`; nothing in `browser/` imports them. Tool-call wire
+  details (argument schemas, text-format coercion) live with the tools.

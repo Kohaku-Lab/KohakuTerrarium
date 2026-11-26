@@ -382,7 +382,8 @@ and with its current options. No tool call is needed for a change to apply.
 - **`os_enforce: require`**: the browser refuses to start, because Chromium
   cannot run under the sandbox's subprocess confinement. A browser already
   running when the setting takes effect is closed at the next browser call
-  (or the next framework read, see below); until then it keeps running, and its
+  (a `browser_*` tool, or another tool reaching it through `agent_session`,
+  see below); until then it keeps running, and its
   connections are judged by the network rules as before (the 2-second re-judge
   does not look at `os_enforce`). The browser is treated as a network tool, so
   the `syscall` level does not block it.
@@ -539,19 +540,35 @@ can use the same policed Chromium, with the same proxy and network policy,
 without going through the tools. `import kohakuterrarium.browser` is cheap and
 never imports Playwright; nothing starts until a call needs a browser.
 
-There are three ways in:
+There are two kinds of entry point. The **low-level API** in
+`kohakuterrarium.browser` applies the browser's own options and nothing of the
+framework's policy unless you pass it in:
 
-- **The agent's shared browser.** From a tool, call
-  `await browser.agent_session(context)` with the tool's `ToolContext`. It
-  returns the session the `browser_*` tools use, after the plugin's own
-  checks (sandbox, multi-user restrictions), or `None` when the plugin is not
-  loaded; a refusal raises. Your calls queue with the tools' calls.
 - **A session of your own.** `async with browser.BrowserSession(options) as
   session:` gives a browser no one else touches, closed when the block ends.
   Without a `downloads_dir` every download is cancelled, so nothing is written
   to disk.
 - **A one-shot read.** `await browser.read_page(url, options)` starts a
   browser, reads the page and closes the browser before it returns.
+
+The **framework-aware** entry points take the tool's `ToolContext` and apply
+the same checks as the `browser_*` tools:
+
+- **A read under the plugin's checks.** `await read_page_for(context, url,
+  options)` from `kohakuterrarium.builtins.plugins.browser.reading` reads in a
+  browser of its own, whether or not the browser plugin is on for the
+  creature. It refuses before anything starts when the sandbox requires OS
+  confinement or when `options` ask for what a creature without host
+  resources may not use (see [Multi-user hosts](#multi-user-hosts)); such a
+  creature gets the bundled Chromium only. Every connection is judged by the
+  sandbox's network rules as they are at that moment, and no download is
+  written. This is the call for a framework tool that reads pages.
+- **The agent's shared browser.** From a tool, call
+  `await browser.agent_session(context)`. It returns the session the
+  `browser_*` tools use, after the plugin's own checks (sandbox, multi-user
+  restrictions), or `None` when the plugin is not loaded; a refusal raises.
+  Your calls queue with the tools' calls, and share their browser state (see
+  below).
 
 `read_page`, on a session or one-shot, is the call for reading a page as
 data. It returns a `PageRead` with the final `url` (after redirects), the
@@ -574,26 +591,40 @@ and is closed afterwards on every path. Dialogs it opens are dismissed,
 downloads it starts are cancelled, and windows it opens are closed; a window
 one of the creature's tabs opens meanwhile becomes a tab as usual.
 
+On the agent's shared session a read is **not isolated** from the creature's
+browsing. The temporary tab uses the same browser profile as the creature's
+tabs: cookies, logins, same-origin storage, the cache and service workers are
+common to both, so the read is sent the creature's cookies, and whatever the
+visited site does (sets a cookie, registers a service worker, changes data on
+its server) is there for the creature's tabs afterwards. A blocked redirect of
+the read's own load is raised to the caller and not reported to the creature;
+any other request the proxy blocked while the read ran shows up in the
+creature's next result, because the proxy cannot tell which page made it. For a
+read that shares nothing with the creature, use `read_page_for`, the one-shot
+`read_page`, or a session of your own.
+
+A framework tool reads like this:
+
 ```python
 from kohakuterrarium import browser
+from kohakuterrarium.builtins.plugins.browser.reading import read_page_for
 
 async def summarize_page(url: str, context) -> str:
-    # Follow the sandbox when it is on: its network_policy service checks
-    # every host the page connects to.
-    policy = (context.runtime_services or {}).get("network_policy")
-    page = await browser.read_page(
-        url,
-        browser.BrowserOptions(allow_hosts=("docs.example.com",)),
-        external_check=policy.check if policy is not None else None,
+    page = await read_page_for(
+        context, url, browser.BrowserOptions(allow_hosts=("docs.example.com",))
     )
     return page.text
 ```
 
-`external_check(host, port)` returns `None` to allow a connection or a reason
-to refuse it, and is asked for every connection the proxy opens. The sandbox's
-`network_policy` runtime service has that shape, so a tool follows the
-sandbox without importing it. See [the Python reference](../reference/python.md#browser)
-for every name and signature.
+The low-level calls take `external_check(host, port)`, which returns `None` to
+allow a connection or a reason to refuse it and is asked for every connection
+the proxy opens. The sandbox's `network_policy` runtime service has that
+shape, so passing its `check` adds the sandbox's network rules, but only those:
+a low-level read started that way still runs when the sandbox requires OS
+confinement, and still honours host options (a visible window, a system
+Chrome, loopback) for a creature without host resources. See
+[the Python reference](../reference/python.md#browser) for every name and
+signature.
 
 ## Limits and known gaps
 
@@ -619,6 +650,20 @@ for every name and signature.
   matter, or save the screenshot with `path`.
 - One browser per creature; its calls run one at a time.
 - Chromium only, through Playwright.
+- The download caps bound the files a session keeps. A download is fetched in
+  full before a file over the cap is deleted, so they do not bound disk use or
+  traffic while a download runs, and Chromium's own temporary download files,
+  profile and cache are outside them.
+- Network confinement is the filtering proxy, DNS pinning (each connection
+  goes to the address that was checked) and Chromium's launch flags. Chromium
+  runs as an ordinary process of the user running the creature, with no
+  OS-level process, filesystem or network isolation.
+- The browser is built for a trusted local user's agent. The
+  [multi-user](#multi-user-hosts) restrictions narrow what a non-administrator's
+  creature may ask for; they are not a sandbox. A multi-tenant service, or a
+  creature you do not trust, needs a stronger boundary around the browser: a
+  separate OS user, container or VM per tenant, with its own storage quota and
+  network egress control.
 - Not supported: attaching to your own running Chrome or its default profile;
   stealth, anti-bot evasion or CAPTCHA solving (a CAPTCHA or a two-factor
   prompt should be handed to the user); controlling the desktop or other
