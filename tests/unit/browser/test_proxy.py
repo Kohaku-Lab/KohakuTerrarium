@@ -694,6 +694,37 @@ class TestRejudge:
             writer.close()
             await writer.wait_closed()
 
+    async def test_rejudge_cuts_a_connection_whose_pinned_address_is_now_refused(
+        self, servers, make_proxy
+    ):
+        upstream = await servers(tcp_echo)
+        seams = Seams(
+            {"lan.test": [PRIVATE], "public.test": [PUBLIC]},
+            {PRIVATE: upstream, PUBLIC: upstream},
+        )
+        proxy = await make_proxy(
+            NetworkPolicy(allow_private=True), seams=seams, rejudge_interval=60
+        )
+        _, cut_r, cut_w = await open_tunnel(proxy, "lan.test:443")
+        _, kept_r, kept_w = await open_tunnel(proxy, "public.test:443")
+        for reader in (cut_r, kept_r):
+            assert await reader.readexactly(9) == b"greeting\n"
+        await proxy.set_policy(NetworkPolicy(), drop=False)
+        assert await proxy.rejudge() == 1
+        assert await asyncio.wait_for(cut_r.read(), 10) == b""
+        assert proxy.open_connections() == [("public.test", 443)]
+        dropped = proxy.drain_blocked()
+        assert [(r.host, r.address, r.blocked) for r in dropped] == [
+            ("lan.test", PRIVATE, True)
+        ]
+        assert dropped[0].code == NetworkPolicy().check_address(PRIVATE, 443).code
+        kept_w.write(b"alive")
+        await kept_w.drain()
+        assert await asyncio.wait_for(kept_r.readexactly(5), 10) == b"alive"
+        for writer in (kept_w, cut_w):
+            writer.close()
+            await writer.wait_closed()
+
     async def test_open_connections_are_rejudged_on_the_interval(
         self, servers, make_proxy
     ):

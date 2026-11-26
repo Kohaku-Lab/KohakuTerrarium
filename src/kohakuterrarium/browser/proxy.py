@@ -4,7 +4,7 @@ Handles ``CONNECT`` tunnels and absolute-form plain-HTTP requests. Each
 connection is checked by host, resolved once, checked by every resolved
 address, and dialled to an address that passed. Plain HTTP carries one
 request per connection; both sides are told ``Connection: close``. While
-connections are open their hosts are judged again every
+connections are open their hosts and pinned addresses are judged again every
 ``REJUDGE_INTERVAL_S``, and those the policy now refuses are cut.
 """
 
@@ -257,7 +257,7 @@ class FilteringProxy:
         self._port: int | None = None
         self._closed = False
         self._tasks: set[asyncio.Task] = set()
-        self._targets: dict[asyncio.Task, tuple[str, int, str]] = {}
+        self._targets: dict[asyncio.Task, tuple[str, int, str, str | None]] = {}
         self._rejudge_interval = rejudge_interval
         self._watch_task: asyncio.Task | None = None
 
@@ -318,16 +318,22 @@ class FilteringProxy:
 
     def open_connections(self) -> list[tuple[str, int]]:
         """``(host, port)`` of every connection the policy allowed that is still open."""
-        return [(host, port) for host, port, _ in self._targets.values()]
+        return [(host, port) for host, port, _, _ in self._targets.values()]
 
     async def rejudge(self) -> int:
-        """Cut the open connections whose host the policy now refuses; how many were cut."""
+        """Cut the open connections the policy now refuses; how many were cut.
+
+        Each is judged by its host and, once connected, by the address it was
+        pinned to.
+        """
         policy = self._policy
         refused: list[asyncio.Task] = []
-        for task, (host, port, method) in list(self._targets.items()):
+        for task, (host, port, method, address) in list(self._targets.items()):
             decision = policy.check_host(host, port)
+            if decision and address is not None:
+                decision = policy.check_address(address, port)
             if not decision:
-                self._record(host, port, method, decision, None)
+                self._record(host, port, method, decision, address)
                 refused.append(task)
         if refused:
             await self._cancel(refused)
@@ -338,9 +344,16 @@ class FilteringProxy:
         task = asyncio.current_task()
         if task is None or self._closed:
             return
-        self._targets[task] = (host, port, method)
+        self._targets[task] = (host, port, method, None)
         if self._watch_task is None:
             self._watch_task = asyncio.create_task(self._watch())
+
+    def _pin(self, address: str) -> None:
+        """Remember the address the current connection was dialled to."""
+        task = asyncio.current_task()
+        target = self._targets.get(task)
+        if target is not None:
+            self._targets[task] = (*target[:3], address)
 
     async def _watch(self) -> None:
         """Re-judge open connections every interval; ends once none is open."""
@@ -472,7 +485,8 @@ class FilteringProxy:
             status = 400 if decision.code in _CLIENT_ERRORS else 403
             raise _Reject(status, decision.code, decision.reason)
         self._register(name, port, request.method)
-        upstream, _ = await self._open(policy, request.method, name, port)
+        upstream, address = await self._open(policy, request.method, name, port)
+        self._pin(address)
         try:
             if request.method == "CONNECT":
                 writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
