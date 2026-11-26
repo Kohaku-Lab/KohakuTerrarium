@@ -215,6 +215,8 @@ class PageDriver(Protocol):
         ``ref`` is resolved once; the URL judged and the element typed into
         come from that one resolution, so an element replaced or a document
         navigated in between fails the call instead of receiving ``text``.
+        Only an ``input`` or ``textarea`` text field takes ``text``; any other
+        element, editable content included, fails the call.
         Returns the URL judged (empty when it could not be read).
         """
 

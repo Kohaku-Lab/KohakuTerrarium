@@ -463,9 +463,14 @@ that same element. If the page replaces the element or navigates its document
 in between, the action fails rather than typing the secret anywhere else.
 The value is set at once by a script in that document, which checks the
 document's origin again just before (the field gets `input` and `change`
-events but no key events). A field that reacts only to key events cannot take
-a secret, and a `type` action with both `secret` and `slowly` is refused
-before the batch runs, with a message saying to drop `slowly`.
+events but no key events). A secret goes only into an `input` text field
+(text, password, email, search, tel, url, number) or a `textarea`. Editable
+content (a `contenteditable` element, as rich-text editors use) is refused
+with `the element is editable content, not an input or textarea field`: such
+editors rewrite what is inserted, so the session could not tell whether the
+value arrived. A field that reacts only to key events cannot take a secret,
+and a `type` action with both `secret` and `slowly` is refused before the
+batch runs, with a message saying to drop `slowly`.
 
 The value must be at least four characters. In every text result it shows as
 `[secret:staging_pw]`, raw and in its URL- and JSON-encoded spellings.
@@ -651,7 +656,8 @@ signature.
   saved) but not the image. Use `tool_format: native` when screenshots
   matter, or save the screenshot with `path`.
 - A secret is set in one step with `input` and `change` events and no key
-  events, so a field that needs key events cannot take a secret.
+  events, so a field that needs key events cannot take a secret. It goes only
+  into `input` and `textarea` fields, never into a rich-text editor.
 - One browser per creature; its calls run one at a time.
 - Chromium only, through Playwright.
 - The download caps bound the files a session keeps. A download is fetched in

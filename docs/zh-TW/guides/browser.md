@@ -392,8 +392,12 @@ plugins:
 的來源，再輸入到同一個元素。頁面若在兩者之間換掉這個元素或讓它的文件跳轉，動作會
 失敗，而不會把密鑰輸入到別處。值由該文件裡的一段指令碼一次設定，指令碼在設定前
 會再檢查一次文件的來源（欄位會收到 `input` 與 `change` 事件，但沒有按鍵事件）。
-只回應按鍵事件的欄位無法接收密鑰；同時帶 `secret` 與 `slowly` 的 `type` 動作會在
-批次執行前被拒絕，錯誤訊息會說明拿掉 `slowly`。
+密鑰只會輸入到 `input` 文字欄位（text、password、email、search、tel、url、number）
+或 `textarea`。可編輯內容（`contenteditable` 元素，富文字編輯器就是這樣做的）會被
+拒絕，原因為 `the element is editable content, not an input or textarea field`：這類
+編輯器會改寫插入的內容，工作階段無法判斷值是否真的寫入。只回應按鍵事件的欄位無法
+接收密鑰；同時帶 `secret` 與 `slowly` 的 `type` 動作會在批次執行前被拒絕，錯誤訊息
+會說明拿掉 `slowly`。
 
 值的長度至少要四個字元。
 在每個文字結果裡，它（包括原始值以及 URL、JSON 編碼後的寫法）都會顯示成
@@ -537,7 +541,7 @@ async def summarize_page(url: str, context) -> str:
   存在哪裡），看不到圖片。截圖重要時請用 `tool_format: native`，或用 `path` 把截圖
   存下來。
 - 密鑰一步設定，只有 `input` 與 `change` 事件、沒有按鍵事件，所以需要按鍵事件的
-  欄位無法接收密鑰。
+  欄位無法接收密鑰。密鑰只會輸入到 `input` 與 `textarea`，不會輸入到富文字編輯器。
 - 每個生物一個瀏覽器；它的呼叫一次只跑一個。
 - 只支援 Chromium，透過 Playwright。
 - 下載上限約束的是工作階段保留的檔案。超過上限的檔案會先完整下載再刪除，所以它們

@@ -582,6 +582,14 @@ def site():
         '<div id=bio contenteditable role=textbox aria-label="Bio"></div>',
     )
     server.html(
+        "/fields-rewritten",
+        "<!doctype html><title>Rewritten</title>"
+        '<div id=note contenteditable role=textbox aria-label="Note">keep me</div>'
+        "<script>const note = document.getElementById('note');"
+        "note.addEventListener('input', () => { note.textContent = 'keep me'; });"
+        "</script>",
+    )
+    server.html(
         "/fields-number",
         "<!doctype html><title>Number</title><label>PIN <input type=number></label>",
     )
@@ -869,14 +877,6 @@ async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
     )
     await page.type_checked(area, CHECKED, lambda u: True, timeout=5)
     assert await field_values(page) == CHECKED
-    bio = ref_of(
-        (await live.navigate(site.url("/fields-editable"))).text, "textbox", "Bio"
-    )
-    await page.type_checked(bio, CHECKED, lambda u: True, timeout=5)
-    shown = await within(
-        page.evaluate("document.getElementById('bio').innerText", timeout=5), "bio"
-    )
-    assert shown == CHECKED
     pin = ref_of(
         (await live.navigate(site.url("/fields-number"))).text, "spinbutton", "PIN"
     )
@@ -888,6 +888,68 @@ async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
     save = ref_of((await live.navigate(site.url("/form"))).text, "button", "Save")
     with pytest.raises(DriverError, match="not a text field"):
         await page.type_checked(save, CHECKED, lambda u: True, timeout=5)
+
+
+EDITABLE_REFUSED = "the element is editable content, not an input or textarea field"
+
+
+@LIVE
+@pytest.mark.parametrize(
+    "path,label,node,before",
+    [
+        ("/fields-editable", "Bio", "bio", ""),
+        ("/fields-rewritten", "Note", "note", "keep me"),
+    ],
+)
+async def test_a_checked_type_refuses_editable_content(
+    live, site, path, label, node, before
+):
+    ref = ref_of((await live.navigate(site.url(path))).text, "textbox", label)
+    page = live._tabs.active.page
+    with pytest.raises(DriverError, match=EDITABLE_REFUSED):
+        await page.type_checked(ref, CHECKED, lambda u: True, timeout=5)
+    shown = await within(
+        page.evaluate(f"document.getElementById('{node}').innerText", timeout=5),
+        node,
+    )
+    assert shown == before, "the editable content was changed"
+
+
+@LIVE
+async def test_a_secret_into_editable_content_fails_naming_the_reason(
+    site, browser_env, downloads, monkeypatch
+):
+    monkeypatch.setenv("KT_T_LIVE_PW", LIVE_SECRET)
+    session = Bounded(
+        BrowserSession(
+            BrowserOptions.from_mapping(
+                {
+                    "allow_loopback": True,
+                    "action_timeout_s": 5,
+                    "secrets": {
+                        "pw": {"env": "KT_T_LIVE_PW", "origins": [site.url("/")]}
+                    },
+                }
+            ),
+            downloads_dir=downloads,
+        )
+    )
+    try:
+        text = (await start(session, site.url("/fields-rewritten"))).text
+        note = ref_of(text, "textbox", "Note")
+        result = await session.act([{"kind": "type", "ref": note, "secret": "pw"}])
+        shown = await within(
+            session._tabs.active.page.evaluate(
+                "document.getElementById('note').innerText", timeout=5
+            ),
+            "note",
+        )
+    finally:
+        await session.close()
+    assert result.is_error and not result.meta["ok"], result.text
+    assert f"1. type {note}: failed — {EDITABLE_REFUSED}" in result.text
+    assert shown == "keep me"
+    assert LIVE_SECRET not in result.text
 
 
 @LIVE

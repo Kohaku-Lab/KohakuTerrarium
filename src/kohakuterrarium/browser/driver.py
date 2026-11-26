@@ -86,15 +86,7 @@ _PLACE_JS = """(el, [text, url]) => {
   if (!el.isConnected || !view || new URL(doc.URL).origin !== new URL(url).origin) {
     return "moved";
   }
-  if (el.isContentEditable) {
-    el.focus();
-    const range = doc.createRange();
-    range.selectNodeContents(el);
-    view.getSelection().removeAllRanges();
-    view.getSelection().addRange(range);
-    doc.execCommand("insertText", false, text);
-    return "ok";
-  }
+  if (el.isContentEditable) return "editable";
   const textTypes = ["", "text", "password", "email", "search", "tel", "url", "number"];
   let proto = null;
   if (el instanceof view.HTMLTextAreaElement) proto = view.HTMLTextAreaElement.prototype;
@@ -117,6 +109,7 @@ _PLACE_JS = """(el, [text, url]) => {
 }"""
 _PLACE_FAILURES = {
     "moved": "the element was replaced or its document changed during the call",
+    "editable": "the element is editable content, not an input or textarea field",
     "not_text": "the element is not a text field",
     "not_editable": "the text field is disabled or read-only",
     "rejected": "the field did not accept the value (wrong format for its type)",
@@ -401,7 +394,8 @@ class PlaywrightPage:
         """One element handle: its frame's URL is judged, then it alone is typed into.
 
         The value is set by one synchronous script in that element's
-        document, which re-checks the document's origin first.
+        document, which re-checks the document's origin first; only an
+        ``input`` or ``textarea`` text field takes it.
         """
         ms = timeout * 1000
 
