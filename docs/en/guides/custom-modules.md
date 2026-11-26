@@ -119,8 +119,9 @@ class MirrorTool(BaseTool):
   refuses the call. Under an allowlist, a value whose host cannot be
   parsed (such as `http://[::1`, or a backslash before the path) refuses
   it too; with no allowlist the sandbox does not validate the URL. Hosts
-  are compared ignoring letter case but otherwise as written: `münchen.de` and `xn--mnchen-3ya.de` are
-  different entries, and so are `example.com` and `example.com.`.
+  are compared ignoring letter case but otherwise as written:
+  `münchen.de` and `xn--mnchen-3ya.de` are different entries, and so are
+  `example.com` and `example.com.`.
 - `network_hosts`: each host is checked as `https://<host>/`, with the
   same refusal for one that cannot be parsed.
 - `network_access`: declares that the tool picks hosts at run time. The
