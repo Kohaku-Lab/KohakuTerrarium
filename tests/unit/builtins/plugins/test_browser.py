@@ -18,6 +18,7 @@ import pytest
 
 import kohakuterrarium as kt
 from kohakuterrarium.browser import proxy as proxy_module
+from kohakuterrarium.browser.errors import BrowserClosedError
 from kohakuterrarium.browser.launch import Candidate
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.builtins.plugin_catalog import is_default_on, lookup_plugin
@@ -367,6 +368,31 @@ class TestLifecycle:
         context = tool_context(plugin, tmp_path)
         assert (await call(plugin, "browser_snapshot", {}, context)).success
         assert len(driver.plans) == 2 and len(driver.alive()) == 1
+        await manager.unload_all()
+        assert driver.alive() == []
+
+    async def test_disabled_plugin_hands_no_session_to_a_kept_access(self, tmp_path):
+        plugin, driver = scripted_plugin()
+        manager = PluginManager()
+        manager.register(plugin)
+        await manager.load_all(plugin_context(tmp_path, manager))
+        context = tool_context(plugin, tmp_path)
+        kept = context.runtime_services["browser"]
+        assert (await call(plugin, "browser_snapshot", {}, context)).success
+        assert manager.disable("browser")
+        plugin.set_options({"viewport": "800x600"})
+        assert plugin.session is None, "a disabled plugin built a session"
+        with pytest.raises(BrowserClosedError):
+            await kept.prepare(context)
+        assert plugin.session is None and len(driver.plans) == 1
+        await asyncio.sleep(0.05)
+        assert driver.alive() == []
+        assert manager.enable("browser")
+        await manager.load_pending()
+        session = await kept.prepare(tool_context(plugin, tmp_path))
+        assert session is plugin.session and session.options.viewport == (800, 600)
+        assert (await call(plugin, "browser_snapshot", {}, context)).success
+        assert len(driver.plans) == 2 and driver.plans[1].viewport == (800, 600)
         await manager.unload_all()
         assert driver.alive() == []
 

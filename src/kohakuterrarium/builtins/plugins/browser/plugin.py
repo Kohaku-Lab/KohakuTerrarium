@@ -197,7 +197,7 @@ class BrowserPlugin(BasePlugin):
         if options != self._browser_options:
             self._browser_options = options
             self._retire_session()
-            if self._accepting:
+            if self._enabled():
                 self._session = self._new_session()
         return self.get_options()
 
@@ -295,10 +295,12 @@ class BrowserPlugin(BasePlugin):
         return session
 
     def _live_session(self) -> BrowserSession:
+        """The open session, made anew after a close; refused while not enabled."""
+        enabled = self._enabled()
         session = self._session
-        if (session is None or session.state == CLOSED) and self._enabled():
+        if (session is None or session.state == CLOSED) and enabled:
             session = self._session = self._new_session()
-        if session is None or session.state == CLOSED:
+        if not enabled or session is None or session.state == CLOSED:
             raise BrowserClosedError(
                 "the browser session is closed (the agent stopped or the browser "
                 "plugin was disabled)"
