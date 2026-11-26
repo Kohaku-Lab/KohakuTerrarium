@@ -14,6 +14,11 @@ CONFINEMENT_REFUSAL = (
     "(os_enforce=require) and Chromium cannot run under the sandbox's "
     "subprocess confinement"
 )
+CONFINEMENT_NETWORK_REFUSAL = (
+    "the sandbox requires OS-level confinement (os_enforce=require), which "
+    "Chromium cannot run under: every browser connection is refused, and the "
+    "browser closes at its next call"
+)
 
 Services = dict[str, Any]
 
@@ -24,8 +29,9 @@ class SandboxLink:
     Every answer reads the services in force at that moment: ``live``
     returns the host's current runtime services, or ``None`` when no host is
     reachable; then the services last given to ``bind`` stand in. ``check``
-    is what the proxy consults for every connection and every re-judge;
-    ``check_write`` judges a download path.
+    is what the proxy consults for every connection and every re-judge, and
+    refuses them all while OS confinement is required; ``check_write``
+    judges a download path.
     """
 
     def __init__(self, live: Callable[[], Services | None] | None = None) -> None:
@@ -47,9 +53,16 @@ class SandboxLink:
         return self.services().get(NETWORK_POLICY)
 
     def check(self, host: str, port: int) -> str | None:
-        """Why the sandbox refuses ``host:port``, or ``None`` to allow it."""
+        """Why the sandbox refuses ``host:port``, or ``None`` to allow it.
+
+        While the sandbox requires OS confinement every connection is refused.
+        """
         policy = self.policy
-        return None if policy is None else policy.check(host, port)
+        if policy is None:
+            return None
+        if getattr(policy, "requires_os_confinement", False):
+            return CONFINEMENT_NETWORK_REFUSAL
+        return policy.check(host, port)
 
     def check_write(self, path: Path) -> str | None:
         """Why the sandbox refuses writing ``path``, or ``None`` to allow it."""

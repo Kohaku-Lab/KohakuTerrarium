@@ -751,6 +751,25 @@ class TestSandboxWiring:
             assert head.startswith(b"HTTP/1.1 403") and b"external" in head
             writer.close()
 
+    async def test_required_confinement_cuts_a_running_browser_off_the_network(
+        self, tmp_path, fast_rejudge
+    ):
+        async with sandboxed(tmp_path, {}) as (plugin, sandbox, manager, port):
+            reader, writer = await tunnel(plugin.session, port)
+            sandbox.set_options({"os_enforce": "require"})
+            head, _ = await connect(plugin.session, port)
+            assert head.startswith(b"HTTP/1.1 403") and b"os_enforce=require" in head
+            await closes_within(reader, REJUDGE_BOUND_S)
+            assert (
+                plugin.session.state == "ready"
+            ), "the process closes at the next call"
+            snapshot = plugin.contribute_tools()[1]
+            context = manager_context(manager, tmp_path)
+            result = await wrapped(manager, snapshot, context)({}, context)
+            assert not result.success and "os_enforce" in result.error
+            assert plugin.session.state != "ready"
+            writer.close()
+
     async def test_a_narrowed_allowlist_drops_tunnels_it_no_longer_allows(
         self, tmp_path, fast_rejudge
     ):
