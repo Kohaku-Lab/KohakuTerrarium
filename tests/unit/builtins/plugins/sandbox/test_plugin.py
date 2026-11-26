@@ -813,6 +813,18 @@ class TestNetworkPolicyService:
         assert isinstance(services["network_policy"], plugin_mod.SandboxNetworkPolicy)
         assert callable(services["network_policy"].check)
 
+    def test_every_collection_publishes_the_same_objects(self):
+        sandbox = SandboxPlugin()
+        first, second = sandbox.runtime_services(None), sandbox.runtime_services(None)
+        for name in ("network_policy", "write_policy"):
+            assert first[name] is second[name]
+        sandbox.set_options({"enabled": False})
+        assert sandbox.runtime_services(None) == {}
+        sandbox.set_options({"enabled": True})
+        assert (
+            sandbox.runtime_services(None)["network_policy"] is first["network_policy"]
+        )
+
     @pytest.mark.parametrize("options", [{"enabled": False}, {"backend": "off"}])
     def test_disabled_plugin_exposes_no_service(self, options):
         assert "network_policy" not in SandboxPlugin(**options).runtime_services(None)

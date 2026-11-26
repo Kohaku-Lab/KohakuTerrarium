@@ -113,8 +113,24 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   to allow or a short reason to refuse (such as `fs_write=deny`), by the
   same decision a write tool's path argument gets: `fs_write`, the
   workspace boundary, `fs_deny` and `fs_write_allow`. A relative path
-  resolves against the agent's current working directory. In audit mode it
-  logs and allows; each call follows the plugin's current options.
+  resolves against the agent's current working directory (it follows a
+  working-directory switch); in a host without an agent, such as the MCP
+  tool server, against the directory the plugin was loaded with. In audit
+  mode it logs and allows; each call follows the plugin's current options.
+- **Holding the services**: the plugin publishes the same `network_policy`
+  and `write_policy` objects for its whole life, so a component may hold one
+  across calls. Option changes apply to a held object at once, and
+  `enabled: false` or `backend: off` make it allow everything. Disabling the
+  plugin through the plugin manager only stops handing the objects to new
+  tool calls: a held one keeps answering by the last options, and enabling
+  the plugin again hands out the same objects.
+- **Which tool calls see them**: a tool call gets the services of the
+  plugin manager that built its tool context. A context-fork sub-agent's
+  calls get the parent's objects, and the parent's sandbox also checks them.
+  A regular sub-agent's tool context is built by the parent, so its calls
+  carry the parent's services, while its hooks run only through its own
+  plugins; a sandbox configured on the sub-agent itself gates those hooks
+  but publishes no services to its tools.
 - **Subprocess gating**: the plugin publishes a `subprocess_runner`
   service via `runtime_services()`. Tools that need to spawn
   subprocesses (`bash`, etc.) consume it from

@@ -86,6 +86,7 @@ from kohakuterrarium.modules.subagent.config import (
     OutputTarget,
     SubAgentConfig,
 )
+from kohakuterrarium.modules.subagent.runtime_builders import fork_tool_context
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
 from kohakuterrarium.modules.trigger.scheduler import SchedulerTrigger
@@ -894,6 +895,36 @@ class TestModulesIntegration:
             assert "fs_write=deny" in writes.check("downloads/page.pdf")
             mgr.set_plugin_options("sandbox", {"fs_write": "default"})
             assert writes.check("downloads/page.pdf") is None
+
+            # A relative write follows the agent's working directory as it moves.
+            agent.workspace.set(outside)
+            assert writes.check("x") is None
+            assert "outside working directory" in writes.check(work / "x")
+            agent.workspace.set(work)
+
+            # Every tool call, a fork's included, carries the held services
+            # themselves; a disabled sandbox publishes none, and a held one
+            # keeps the last options until the same objects come back.
+            def services(build=agent.executor._build_tool_context) -> dict:
+                return build().runtime_services
+
+            fork = SimpleNamespace(config=SimpleNamespace(name="fork"))
+            for build in (
+                agent.executor._build_tool_context,
+                fork_tool_context(agent.executor._build_tool_context, fork),
+            ):
+                assert services(build)["network_policy"] is policy
+                assert services(build)["write_policy"] is writes
+            mgr.set_plugin_options("sandbox", {"network_allowlist": ["ok.test"]})
+            assert mgr.disable("sandbox") is True
+            assert "network_policy" not in services()
+            assert "write_policy" not in services()
+            assert policy.check("evil.test", 443) == "host 'evil.test' not allowlisted"
+            assert mgr.enable("sandbox") is True
+            await mgr.load_pending()
+            assert services()["network_policy"] is policy
+            assert services()["write_policy"] is writes
+            mgr.set_plugin_options("sandbox", {"network_allowlist": []})
             if confinement_backend() is not None:
                 # pytest's base temp lies under /tmp on Linux, a writable root.
                 monkeypatch.setattr(roots, "temp_roots", lambda: [])
