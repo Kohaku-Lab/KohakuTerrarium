@@ -26,8 +26,8 @@ task-oriented paths, read [Guides](../guides/README.md).
 - [Built-ins](builtins.md): every shipped tool, sub-agent, input,
   output, user command, framework command, LLM provider, and LLM
   preset.
-- [Built-in plugins](builtin-plugins.md): sandbox, budget, permgate,
-  compact.auto: hooks, options, behaviour.
+- [Built-in plugins](builtin-plugins.md): sandbox, budget, repeat_guard,
+  permgate, compact.auto: hooks, options, behaviour.
 - [Plugin hooks](plugin-hooks.md): every lifecycle, LLM, tool,
   sub-agent, callback, and prompt hook, with signatures and timing.
 - [Module layout in 2.2](module-layout-2.2.md): where modules moved and how

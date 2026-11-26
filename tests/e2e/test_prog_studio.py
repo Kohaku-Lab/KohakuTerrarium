@@ -440,8 +440,14 @@ class TestProgStudioJourney:
             # A Drive-enabled Terrarium turns on its always-on Drive plugins on
             # every creature (the ``goal`` composition + the ``drive_runtime``
             # prompt contributor); every other builtin stays off until toggled.
-            # The renderer-gated UI plugins are on by default on every creature.
-            terrarium_defaults = {"goal", "drive_runtime", "ui.apps", "ui.declarative"}
+            # The UI plugins and repeat_guard are on by default on every creature.
+            terrarium_defaults = {
+                "goal",
+                "drive_runtime",
+                "repeat_guard",
+                "ui.apps",
+                "ui.declarative",
+            }
             assert all(
                 p["enabled"] is False
                 for p in plugins

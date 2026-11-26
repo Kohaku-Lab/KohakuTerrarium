@@ -1,6 +1,6 @@
 ---
 title: 内建插件
-summary: 框架附带的四个运行时插件参考：sandbox、budget、permgate、compact.auto。
+summary: 框架附带的运行时插件参考：sandbox、budget、repeat_guard、permgate、compact.auto。
 tags:
   - reference
   - plugins
@@ -9,7 +9,7 @@ tags:
 
 # 内建插件
 
-KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特权，用的
+KohakuTerrarium 附带以下运行时插件。它们在框架里没有任何特权，用的
 是和使用者插件一样的 hook。它们在 agent 启动时被自动发现；config 用
 和其他插件一样的 `plugins:` 区块来启用。
 
@@ -20,10 +20,20 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
 |------|----------|-------|------|
 | [`sandbox`](#sandbox) | 1 | `pre_tool_execute`、`runtime_services`、`on_load` | 文件 / 网络 / 子行程能力闸门。 |
 | [`budget`](#budget) | 5 | `pre_llm_call`、`post_llm_call`、`pre_tool_execute`、`pre_subagent_run`、`get_prompt_content` | 回合 / 工具呼叫 / 墙钟预算记账。 |
+| [`repeat_guard`](#repeat_guard) | 10 | `pre_tool_execute`、`post_tool_execute`、`on_event` | 阻挡一直以同样方式失败的工具调用。 |
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`、`on_load` | 在高 token LLM 呼叫之后触发 context 压缩。 |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`、`on_load` | 互动式使用者批准工具呼叫。 |
 
 `pre_*` hook 在低 priority 先跑。上面列的顺序是预设注册顺序。
+
+`repeat_guard` **默认开启**（`ui.apps`、`ui.declarative` 也是），其他插件默认关闭。
+`repeat_guard` 不增加提示词，也不增加工具。在 `plugins:` 中加一项即可关闭：
+
+```yaml
+plugins:
+  - name: repeat_guard
+    enabled: false
+```
 
 ## `sandbox`
 
@@ -140,6 +150,51 @@ plugins:
       turn_budget: [40, 60]
       tool_call_budget: [75, 100]
       walltime_budget: [300, 600]
+```
+
+要停止一直失败的同一个工具调用，请见 [`repeat_guard`](#repeat_guard)。
+
+## `repeat_guard`
+
+阻止模型反复发出一直失败的同一个工具调用。默认开启。
+实现：`src/kohakuterrarium/builtins/plugins/repeat_guard/plugin.py`。
+
+### Options
+
+| Option | 类型 | 预设 | 用途 |
+|--------|------|------|------|
+| `repeat_failures` | int ≥ 0 | 3 | 同一个调用以相同参数、相同错误连续失败这么多次后，阻挡下一次相同调用。`0` 表示关闭。 |
+
+### 行为
+
+- **相同调用**：工具名加上参数，以规范化 JSON 比较（键的顺序不影响）。
+  忽略调用控制参数 `run_in_background` 与 `allow_concurrent`。
+- **失败**：工具结果带有错误或非零退出码。只有当错误与输出都和该调用上一次
+  失败相同时才累加；不同的失败会把计数重置为 1。输出每次都不同的命令
+  （例如会印出耗时的测试）因此不会达到上限。
+- **重置**：同一调用成功会结束它的计数，其他调用不影响它。新回合开始时清空
+  全部计数：使用者讯息、频道讯息、计时器，或任何不是后台工具 / 子 agent
+  结果的事件。不会跨使用者回合阻挡。
+- **阻挡**：达到 `repeat_failures` 次相同失败后，下一次相同调用不会执行，
+  模型收到以下工具结果：
+
+  ```text
+  This exact call to image_gen failed 3 times in a row with the same arguments: <上一次错误的第一行>. Change the arguments or take another approach; repeating it will fail the same way.
+  ```
+
+  同一回合内之后的相同调用都得到同样的结果；被阻挡的调用不增加计数。
+  改变任何一个参数的调用照常执行。
+- **范围**：计数属于插件实例。每个 agent、每次子 agent 执行都有自己的实例，
+  共用同一个工具也不会互相影响。被其他插件（`sandbox`、`budget`、`permgate`）
+  阻挡的调用没有执行，不计入。计数不随 session 保存。
+
+### 范例
+
+```yaml
+plugins:
+  - name: repeat_guard
+    options:
+      repeat_failures: 5   # 0 表示关闭；`enabled: false` 移除插件
 ```
 
 ## `compact.auto`

@@ -104,7 +104,7 @@ def _discover_catalog_plugins(
         plugin = _load_one(spec, loader)
         if plugin:
             manager.register(plugin)
-            # Discovery must not activate policy implicitly; only renderer-gated UI plugins start on.
+            # Discovery activates only the catalog's listed default-on plugins.
             if defaults and is_default_on(name):
                 manager.mark_default_on(name)
             else:
