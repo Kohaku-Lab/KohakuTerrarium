@@ -442,6 +442,11 @@ def site():
         "/fields-area",
         "<!doctype html><title>Area</title><label>Notes <textarea></textarea></label>",
     )
+    server.html(
+        "/fields-editable",
+        "<!doctype html><title>Editable</title>"
+        '<div id=bio contenteditable role=textbox aria-label="Bio"></div>',
+    )
     server.html("/tallbox", TALL_BOX)
     server.file(
         "/report.csv",
@@ -728,6 +733,17 @@ async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
     )
     await page.type_checked(area, CHECKED, lambda u: True, slowly=False, timeout=5)
     assert await field_values(page) == CHECKED
+    bio = ref_of(
+        (await live.navigate(site.url("/fields-editable"))).text, "textbox", "Bio"
+    )
+    await page.type_checked(bio, CHECKED, lambda u: True, slowly=False, timeout=5)
+    shown = await within(
+        page.evaluate("document.getElementById('bio').innerText", timeout=5), "bio"
+    )
+    assert shown == CHECKED
+    save = ref_of((await live.navigate(site.url("/form"))).text, "button", "Save")
+    with pytest.raises(DriverError, match="not a text field"):
+        await page.type_checked(save, CHECKED, lambda u: True, slowly=False, timeout=5)
 
 
 @LIVE

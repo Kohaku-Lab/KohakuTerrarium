@@ -523,7 +523,7 @@ class ScriptedBrowser:
 
     def kill(self) -> None:
         self.killed = True
-        self.alive = self.survives_kill
+        self.alive = self.alive and self.survives_kill
         self.connected = False
         self._release(DriverDisconnectedError("the browser closed unexpectedly"))
 
