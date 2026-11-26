@@ -1,4 +1,4 @@
-"""Export sandbox profiles, parsing, intersections, and violations."""
+"""Export sandbox profiles, parsing, intersections, violations, and services."""
 
 from kohakuterrarium.modules.sandbox.parse import parse_profile
 from kohakuterrarium.modules.sandbox.presets import (
@@ -16,10 +16,13 @@ from kohakuterrarium.modules.sandbox.profile import (
     SandboxProfile,
     profile_intersection,
 )
+from kohakuterrarium.modules.sandbox.services import NetworkPolicy, WritePolicy
 from kohakuterrarium.modules.sandbox.violations import ProfileViolation
 
 __all__ = [
     "DEFAULT_DENY_PATHS",
+    "NetworkPolicy",
+    "WritePolicy",
     "SandboxProfile",
     "ProfileViolation",
     "profile_intersection",

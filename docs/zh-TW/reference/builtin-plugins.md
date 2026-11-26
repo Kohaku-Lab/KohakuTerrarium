@@ -90,7 +90,9 @@ KohakuTerrarium 附帶下列執行期外掛。它們在框架裡沒有任何特�
   `write_policy` 物件，元件可以跨呼叫持有。選項變更立即作用在持有的物件
   上，`enabled: false` 或 `backend: off` 會讓它全部允許。透過外掛管理器
   停用外掛只會停止把物件交給新的工具呼叫：已持有的物件仍按最後的選項
-  回答，重新啟用後交出的是同一組物件。
+  回答，重新啟用後交出的是同一組物件。使用方可以依
+  `kohakuterrarium.modules.sandbox` 的 `NetworkPolicy` 與 `WritePolicy`
+  介面標注型別。
 - **哪些工具呼叫看得到**：工具呼叫拿到的是建立其工具 context 的外掛管理器
   的服務。context-fork 子 agent 的呼叫拿到父 agent 的物件，並且也會經過
   父 agent 的 sandbox 檢查。一般子 agent 的工具 context 由父 agent 建立，

@@ -124,7 +124,9 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   `enabled: false` or `backend: off` make it allow everything. Disabling the
   plugin through the plugin manager only stops handing the objects to new
   tool calls: a held one keeps answering by the last options, and enabling
-  the plugin again hands out the same objects.
+  the plugin again hands out the same objects. Consumers can type against
+  the interfaces `NetworkPolicy` and `WritePolicy` from
+  `kohakuterrarium.modules.sandbox`.
 - **Which tool calls see them**: a tool call gets the services of the
   plugin manager that built its tool context. A context-fork sub-agent's
   calls get the parent's objects, and the parent's sandbox also checks them.
