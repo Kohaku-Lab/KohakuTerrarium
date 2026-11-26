@@ -90,8 +90,10 @@ class MirrorTool(BaseTool):
   设有白名单时，无法解析出主机的值（例如 `http://[::1`）也会拒绝呼叫。
 - `network_hosts`：每个主机以 `https://<host>/` 检查；无法解析的主机同样
   拒绝。
-- `network_access`：`network=deny` 时拒绝呼叫；逐主机的检查由工具自己
-  负责（例如透过 sandbox 的 `network_policy` runtime service）。
+- `network_access`：声明工具在执行时才决定要连的主机。`network=deny` 时
+  拒绝呼叫；白名单无法在呼叫前判断，hook 会放行。这类工具必须在每次连线
+  前呼叫 `context.runtime_services["network_policy"].check(host, port)`，
+  回传理由时拒绝该连线。没有启用 sandbox 时该服务不存在。
 
 这些声明会加到 sandbox 内建的工具名称表上，该表依名称管制 `web_fetch`
 与 `web_search`。其他三者都没声明的工具不受网络轴管制。`@kt.tool`

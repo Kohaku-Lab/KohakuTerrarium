@@ -118,9 +118,12 @@ class MirrorTool(BaseTool):
   value whose host cannot be parsed (such as `http://[::1`) refuses it too.
 - `network_hosts`: each host is checked as `https://<host>/`, with the
   same refusal for one that cannot be parsed.
-- `network_access`: the call is refused under `network=deny`; per-host
-  checks are the tool's own job (for example through the sandbox's
-  `network_policy` runtime service).
+- `network_access`: declares that the tool picks hosts at run time. The
+  call is refused under `network=deny`; an allowlist cannot judge it
+  before the call, so the hook lets it through. Such a tool must call
+  `context.runtime_services["network_policy"].check(host, port)` before
+  each connection and refuse it when that returns a reason. The service
+  is absent while no sandbox is enabled.
 
 The declarations add to the sandbox's built-in name tables, which gate
 `web_fetch` and `web_search` by name. Any other tool that declares none
