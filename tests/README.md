@@ -81,8 +81,10 @@ With `KT_TEST_REQUIRE_BROWSER=1` that skip is reported as a failure instead
 `tests/conftest.py`), so a run that installed Chromium cannot pass on skips.
 They read Playwright's browser cache from the operator's real home
 (`KT_TEST_REAL_HOME`; `%LOCALAPPDATA%` on Windows) unless
-`PLAYWRIGHT_BROWSERS_PATH` is set. CI does not install Playwright, so there
-they skip. Every other browser test drives the session through the scripted
+`PLAYWRIGHT_BROWSERS_PATH` is set. CI's `test` matrix installs no Playwright,
+so there they skip; the `test-browser` job (Ubuntu, Python 3.13) installs
+Chromium with its system libraries and runs `tests/unit/browser/` and
+`tests/integration/test_browser.py` with `KT_TEST_REQUIRE_BROWSER=1`. Every other browser test drives the session through the scripted
 driver in `tests/helpers/browser_driver.py` and needs no browser.
 
 **CI policy (`.github/workflows/ci.yml`).** Unit and integration tiers
@@ -520,5 +522,5 @@ testing otherwise.
 | `laboratory/_internal/transport/ws.py` | `websockets` library: `InProcTransport` is the test transport |
 | `builtins/inputs/cli*.py`, `builtins/inputs/tui*.py`, `builtins/outputs/*` (terminal/audio) | CLI / TUI / audio UI |
 | `serving/web.py` (the pywebview / uvicorn boot path) | Desktop bundling, manual test only |
-| `browser/driver.py` (without Chromium) | The only module that imports Playwright; covered by the browser-backed tests, which skip where Playwright's Chromium is missing (CI included) |
+| `browser/driver.py` (without Chromium) | The only module that imports Playwright; covered by the browser-backed tests, which skip where Playwright's Chromium is missing (CI's `test` matrix; the `test-browser` job runs them) |
 | `api/main.py`, `__briefcase__.py` | Server / bundler entry points: module-level side effects only |
