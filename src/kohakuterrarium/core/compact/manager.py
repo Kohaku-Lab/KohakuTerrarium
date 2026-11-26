@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from kohakuterrarium.errors import ConversationSealedError
 from kohakuterrarium.core.compact.branch import (
     capture_compact_metadata,
     live_turn_window,
@@ -495,6 +496,14 @@ class CompactManager:
                     messages_removed=boundary - 1,
                 )
 
+        except ConversationSealedError:
+            # A shutdown sealed the conversation: abandon without splicing,
+            # persisting, or notifying plugins.
+            abort_reason = "sealed"
+            logger.info(
+                "Compact abandoned — conversation sealed by shutdown",
+                agent=self._agent_name,
+            )
         except asyncio.CancelledError:
             abort_reason = "cancelled"
             logger.info("Compact cancelled", agent=self._agent_name)
@@ -506,7 +515,11 @@ class CompactManager:
                 try:
                     self._emit_compact_skipped(
                         abort_reason,
-                        f"Compaction {abort_reason}",
+                        (
+                            "Compaction abandoned — conversation sealed by shutdown"
+                            if abort_reason == "sealed"
+                            else f"Compaction {abort_reason}"
+                        ),
                     )
                 except Exception:  # pragma: no cover - defensive
                     pass

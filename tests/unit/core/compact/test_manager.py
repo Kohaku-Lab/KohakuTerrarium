@@ -7,7 +7,9 @@ from typing import Any
 import pytest
 
 
+from kohakuterrarium.errors import ConversationSealedError
 from kohakuterrarium.core.compact import manager as compact_module
+from kohakuterrarium.core.compact import splice as splice_module
 from kohakuterrarium.core.compact.branch import (
     compact_rule_from_event,
     compute_replaced_range,
@@ -29,6 +31,7 @@ from kohakuterrarium.core.compact.manager import (
 from kohakuterrarium.core.compact.splice import (
     count_keep_messages,
     select_compact_boundary,
+    splice_conversation,
 )
 from kohakuterrarium.core.compact.text import format_messages_for_summary
 from kohakuterrarium.core.conversation.conversation import Conversation
@@ -1505,6 +1508,220 @@ class TestCompactTerminalGuarantee:
         )
         await mgr._run_compact()
         assert self._terminals(router) == [("compact_skipped", "plugin_veto")]
+
+
+# ── sealed conversation (abandoned compaction after shutdown) ────
+
+
+def _issue_604_conversation():
+    conv = Conversation()
+    for role, body in [
+        ("system", "SYSTEM"),
+        ("user", "OLD_REQUEST"),
+        ("assistant", "OLD_ANSWER"),
+        ("user", "NEW_REQUEST"),
+        ("assistant", "NEW_ANSWER"),
+    ]:
+        conv.append(role, body)
+    return conv
+
+
+class TestSealedConversationGuard:
+    """A compaction abandoned by a bounded shutdown must neither splice
+    nor persist the conversation that shutdown sealed."""
+
+    @staticmethod
+    def _terminals(router):
+        return [
+            (k, (m or {}).get("reason"))
+            for k, _msg, m in router.calls
+            if k in ("compact_complete", "compact_skipped")
+        ]
+
+    def test_splice_rejects_sealed_conversation_untouched(self):
+        conv = _issue_604_conversation()
+        before = [(m.role, m.content) for m in conv.get_messages()]
+        metadata_before = (conv._metadata.message_count, conv._metadata.total_chars)
+        conv.seal()
+        with pytest.raises(ConversationSealedError):
+            splice_conversation(conv, 3, "ABANDONED_SUMMARY", 1)
+        assert conv.sealed
+        assert [(m.role, m.content) for m in conv.get_messages()] == before
+        assert (
+            conv._metadata.message_count,
+            conv._metadata.total_chars,
+        ) == metadata_before
+
+    def test_splice_is_all_or_nothing_when_building_fails(self, monkeypatch):
+        conv = _issue_604_conversation()
+        before = conv.get_messages()
+
+        def broken_create_message(*args, **kwargs):
+            raise RuntimeError("summary message build failed")
+
+        monkeypatch.setattr(splice_module, "create_message", broken_create_message)
+        with pytest.raises(RuntimeError):
+            splice_conversation(conv, 3, "SUMMARY", 1)
+        assert conv.get_messages() == before
+        assert conv._metadata.message_count == len(before)
+
+    def test_unsealed_splice_still_applies(self):
+        conv = _issue_604_conversation()
+        conv.seal()
+        conv.unseal()
+        assert splice_conversation(conv, 3, "SUMMARY", 1)
+        assert [m.content for m in conv.get_messages()][2:] == [
+            "NEW_REQUEST",
+            "NEW_ANSWER",
+        ]
+        assert "SUMMARY" in conv.get_messages()[1].content
+
+    async def test_persist_refuses_sealed_conversation(self, tmp_path):
+        store = SessionStore(tmp_path / "sealed.kohakutr")
+        try:
+            conv = _issue_604_conversation()
+            agent = types.SimpleNamespace(
+                _turn_index=1, _branch_id=1, _parent_branch_path=[]
+            )
+            conv.seal()
+            with pytest.raises(ConversationSealedError):
+                await persist_compacted_async(store, "alice", agent, conv, 1, 10.0)
+            assert store.load_conversation("alice") is None
+            assert store.load_branch_snapshot("alice", {1: 1}) is None
+        finally:
+            store.close()
+
+    async def test_persist_refuses_seal_landing_while_queued(
+        self, tmp_path, monkeypatch
+    ):
+        store = SessionStore(tmp_path / "queued.kohakutr")
+        entered, release = asyncio.Event(), asyncio.Event()
+        original_run = store.run
+
+        async def gated_run(fn, *args, **kwargs):
+            entered.set()
+            await release.wait()
+            return await original_run(fn, *args, **kwargs)
+
+        monkeypatch.setattr(store, "run", gated_run)
+        conv = _issue_604_conversation()
+        agent = types.SimpleNamespace(
+            _turn_index=1, _branch_id=1, _parent_branch_path=[]
+        )
+        task = asyncio.create_task(
+            persist_compacted_async(store, "alice", agent, conv, 1, 10.0)
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            conv.seal()
+            release.set()
+            with pytest.raises(ConversationSealedError):
+                await task
+            assert store.load_conversation("alice") is None
+            assert store.load_branch_snapshot("alice", {1: 1}) is None
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+            store.close()
+
+    async def test_seal_during_cancel_suppressing_summary_abandons_round(self):
+        """Issue #604: shutdown cancels the round, the summarizer swallows
+        the cancellation, the deadline seals the conversation, and the
+        summarizer then finishes."""
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        class StubbornLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                self.calls.append((messages, kwargs))
+                entered.set()
+                while not release.is_set():
+                    try:
+                        await release.wait()
+                    except asyncio.CancelledError:
+                        continue
+                yield "ABANDONED_SUMMARY"
+
+        conv = _build_conversation(n_user=10)
+        before = conv.snapshot_messages()
+        router, store, plugins = _Router(), _Store(), _Plugins()
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=StubbornLLM(),
+            router=router,
+            store=store,
+            plugins=plugins,
+        )
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            task.cancel()
+            await asyncio.sleep(0)
+            conv.seal()
+            release.set()
+            await asyncio.wait_for(task, 3)
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+        assert conv.snapshot_messages() == before
+        assert "ABANDONED_SUMMARY" not in str(before)
+        assert store.saved_conversations == []
+        assert store.saved_state_calls == []
+        assert self._terminals(router) == [("compact_skipped", "sealed")]
+        assert [hook for hook, _ in plugins.notify_calls] == []
+        assert mgr._compact_count == 0
+        assert not mgr.is_compacting
+        assert mgr._active_lease is None
+        assert mgr._compact_task is None
+
+        conv.unseal()
+        release.clear()
+        mgr._llm = _LLM(chunks=["FRESH_SUMMARY"])
+        assert mgr.trigger_compact()
+        await mgr.wait_for_current()
+        assert mgr._compact_count == 1
+        assert "FRESH_SUMMARY" in conv.get_messages()[1].content
+        assert store.saved_conversations
+
+    async def test_seal_during_post_splice_flush_skips_snapshot(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        router = _Router()
+
+        class FlushStore(_Store):
+            async def run(self, function, *args, **kwargs):
+                if any(kind == "compact_complete" for kind, _, _ in router.calls):
+                    entered.set()
+                    await release.wait()
+                return function(*args, **kwargs)
+
+        conv = _build_conversation(n_user=10)
+        store, plugins = FlushStore(), _Plugins()
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=_LLM(chunks=["summary"]),
+            router=router,
+            store=store,
+            plugins=plugins,
+        )
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            spliced = conv.snapshot_messages()
+            conv.seal()
+            release.set()
+            await asyncio.wait_for(task, 3)
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+        assert conv.snapshot_messages() == spliced
+        assert store.saved_conversations == []
+        assert store.saved_state_calls == []
+        assert self._terminals(router) == [("compact_complete", None)]
+        assert [hook for hook, _ in plugins.notify_calls] == []
+        assert not mgr.is_compacting
+        assert mgr._active_lease is None
+        assert mgr._compact_task is None
 
 
 # ── cancel ───────────────────────────────────────────────────────
