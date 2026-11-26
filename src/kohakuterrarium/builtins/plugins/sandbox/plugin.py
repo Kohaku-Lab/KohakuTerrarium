@@ -15,7 +15,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from kohakuterrarium.builtins.plugins.sandbox.confine import (
-    confine_argv,
+    ConfinedCommand,
+    confine_command,
     confinement_backend,
 )
 from kohakuterrarium.builtins.plugins.sandbox.roots import workspace_roots
@@ -284,32 +285,41 @@ class SandboxPlugin(BasePlugin):
             self._violate("syscall", "spawn", "read-only subprocess is denied")
         if self._profile.network == "deny" and _argv_may_use_network(argv):
             self._violate("network", " ".join(argv), "network command denied")
-        return await _run_plain_subprocess(
-            self._confine(argv, cwd),
-            cwd=cwd,
-            env=env,
-            timeout=timeout,
-            input_data=input_data,
-            max_output_bytes=max_output_bytes,
-        )
+        command = self._confine(argv, cwd)
+        try:
+            return await _run_plain_subprocess(
+                command.argv,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                input_data=input_data,
+                max_output_bytes=max_output_bytes,
+                pass_fds=command.pass_fds,
+            )
+        except OSError as exc:
+            if command.backend is None:
+                raise
+            raise PluginBlockError(_spawn_failure(command, exc)) from exc
+        finally:
+            command.close()
 
-    def _confine(self, argv: list[str], cwd: str | Path | None) -> list[str]:
+    def _confine(self, argv: list[str], cwd: str | Path | None) -> ConfinedCommand:
         """Wrap ``argv`` so the kernel enforces the write policy, when it can."""
         if self._audit or self._os_enforce == "off":
-            return argv
+            return ConfinedCommand(argv)
         backend = confinement_backend()
         if backend is None:
             if self._os_enforce == "require":
                 self._violate(
                     "syscall", "spawn", "kernel sandbox is unavailable on this host"
                 )
-            return argv
+            return ConfinedCommand(argv)
         workspace = (
             Path(cwd).resolve()
             if cwd is not None
             else _context_cwd(None, self._context)
         )
-        return confine_argv(
+        return confine_command(
             argv, backend, self._profile, workspace, write_allow=self._write_allow
         )
 
@@ -516,6 +526,19 @@ def _argv_may_use_network(argv: list[str]) -> bool:
     return first in network_bins or "://" in joined
 
 
+def _spawn_failure(command: ConfinedCommand, exc: OSError) -> str:
+    """The sandbox error for a confined command the OS refused to start."""
+    grants = (
+        f" with {command.grant_count} write grants"
+        if command.grant_count is not None
+        else ""
+    )
+    return (
+        f"SandboxError[spawn]: cannot start the {command.backend}-confined "
+        f"command{grants}: {exc}"
+    )
+
+
 async def _run_plain_subprocess(
     argv: list[str],
     *,
@@ -524,6 +547,7 @@ async def _run_plain_subprocess(
     timeout: float | None,
     input_data: bytes | None,
     max_output_bytes: int | None,
+    pass_fds: tuple[int, ...] = (),
 ) -> dict[str, Any]:
     """Run a subprocess and return bounded byte streams and timeout state."""
     spawn_kwargs: dict[str, Any] = (
@@ -531,6 +555,8 @@ async def _run_plain_subprocess(
         if sys.platform == "win32"
         else {"start_new_session": True}
     )
+    if pass_fds:
+        spawn_kwargs["pass_fds"] = pass_fds
     process = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd) if cwd is not None else None,
