@@ -182,7 +182,7 @@ class ActionContext(Protocol):
 
     def require_no_dialog(self) -> None: ...
 
-    async def type_secret(self, name: str, ref: str, *, slowly: bool) -> None:
+    async def type_secret(self, name: str, ref: str) -> None:
         """Type secret ``name`` into ``ref``, judged by that element's own document.
 
         ``ActionFailedError`` unless that document is on one of the secret's origins.
@@ -412,6 +412,11 @@ def _type(reader: "_Reader", secrets: Sequence[str] | None) -> dict[str, Any]:
         "slowly": reader.boolean("slowly", False),
     }
     if "secret" in reader.item:
+        if values["slowly"]:
+            raise reader.fail(
+                "a secret cannot be typed slowly: it is set in one step on the "
+                "checked element; set slowly to false or remove it"
+            )
         name = reader.text("secret", required=True, limit=128)
         if secrets is not None and name not in secrets:
             known = ", ".join(secrets) or "none are configured"
@@ -723,7 +728,7 @@ async def _type_text(action: Action, ctx: ActionContext) -> str:
     page, t = ctx.page, ctx.timeout
     value = action.text or ""
     if action.secret:
-        await ctx.type_secret(action.secret, action.ref, slowly=action.slowly)
+        await ctx.type_secret(action.secret, action.ref)
     elif action.slowly:
         slow = t + len(value) * SLOW_KEY_S
         await ctx.call(lambda: page.fill(action.ref, "", t), t)

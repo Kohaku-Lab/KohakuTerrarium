@@ -133,7 +133,7 @@ below.
 | kind | Fields |
 |---|---|
 | `click` | `ref`, or `x` / `y` in viewport pixels; `button`, `double`, `modifiers` |
-| `type` | `ref`; `text`, or `secret` (a configured secret name); `submit`, `slowly` |
+| `type` | `ref`; `text`, or `secret` (a configured secret name); `submit`; `slowly` (with `text` only) |
 | `select` | `ref`, `values` (option labels) |
 | `check` | `ref`, `checked` (default true) |
 | `press` | `key` such as `Enter` or `Control+A`; optional `ref` |
@@ -461,12 +461,11 @@ The check and the typing are one step on one element: the session finds the
 element once, judges the origin of that element's own document, and types into
 that same element. If the page replaces the element or navigates its document
 in between, the action fails rather than typing the secret anywhere else.
-Without `slowly` the value is set at once by a script in that document, which
-checks the document's origin again just before (the field gets `input` and
-`change` events but no key events). With `slowly` it is typed key by key into
-the focused element, so a page that moves the focus while typing is under way
-can receive the remaining keys elsewhere; use `slowly` with a secret only for
-a field that needs keystrokes.
+The value is set at once by a script in that document, which checks the
+document's origin again just before (the field gets `input` and `change`
+events but no key events). A field that reacts only to key events cannot take
+a secret, and a `type` action with both `secret` and `slowly` is refused
+before the batch runs, with a message saying to drop `slowly`.
 
 The value must be at least four characters. In every text result it shows as
 `[secret:staging_pw]`, raw and in its URL- and JSON-encoded spellings.
@@ -651,6 +650,8 @@ signature.
   model gets the screenshot's text line (what was captured and where it was
   saved) but not the image. Use `tool_format: native` when screenshots
   matter, or save the screenshot with `path`.
+- A secret is set in one step with `input` and `change` events and no key
+  events, so a field that needs key events cannot take a secret.
 - One browser per creature; its calls run one at a time.
 - Chromium only, through Playwright.
 - The download caps bound the files a session keeps. A download is fetched in

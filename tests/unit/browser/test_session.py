@@ -1049,16 +1049,45 @@ class TestAct:
                 "a navigation interrupted the call"
             )
             result = await session.act(
-                [{"kind": "type", "ref": "e3", "secret": "shop_pw", "slowly": True}]
+                [{"kind": "type", "ref": "e3", "secret": "shop_pw"}]
             )
         finally:
             await session.close()
         assert page.typed == [] and result.is_error
         assert "1. type e3: failed — a navigation interrupted the call" in result.text
         [call] = [c for c in page.calls if c[0] == "type_checked"]
-        assert call[1]["slowly"] is True
-        assert call[1]["timeout"] > 0.3, "typing slowly gets the longer bound"
+        assert call[1]["timeout"] == pytest.approx(0.3)
         assert SECRET_VALUE not in result.text
+
+    async def test_a_secret_typed_slowly_is_refused_before_anything_runs(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SHOP_PW", SECRET_VALUE)
+        session, driver = make(tmp_path, secrets=SHOP_SECRET)
+        try:
+            await session.snapshot()
+            page = driver.browser.page
+            before = list(page.calls)
+            with pytest.raises(ActionSpecError) as info:
+                await session.act(
+                    [
+                        {"kind": "click", "ref": "e2"},
+                        {"kind": "type", "ref": "e3", "secret": "shop_pw", "slowly": True},
+                    ]
+                )
+            after_refusal = list(page.calls)
+            slow_text = await session.act(
+                [{"kind": "type", "ref": "e3", "text": "Ada", "slowly": True}]
+            )
+        finally:
+            await session.close()
+        assert "actions[1] (type): a secret cannot be typed slowly" in str(info.value)
+        assert "set slowly to false or remove it" in str(info.value)
+        assert after_refusal == before, "no action of the batch ran"
+        assert not [c for c in page.calls if c[0] == "type_checked"]
+        assert page.typed == []
+        assert slow_text.meta["ok"], slow_text.text
+        assert [c[1]["text"] for c in page.calls if c[0] == "type_text"] == ["Ada"]
 
     async def test_a_cross_origin_frame_in_an_allowed_page_is_refused(
         self, tmp_path, monkeypatch

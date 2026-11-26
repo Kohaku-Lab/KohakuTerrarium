@@ -275,6 +275,32 @@ class TestAct:
         assert "unknown kind 'fly'" in result.error
         assert driver.plans == []
 
+    async def test_a_secret_typed_slowly_is_refused_with_the_way_out(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_T_SLOW_PW", "slow-secret-value")
+        plugin, driver = scripted_plugin(
+            secrets={"pw": {"env": "KT_T_SLOW_PW", "origins": ["http://shop.test"]}}
+        )
+        await plugin.on_load(plugin_context(tmp_path))
+        try:
+            result = await call(
+                plugin,
+                "browser_act",
+                {
+                    "actions": [
+                        {"kind": "type", "ref": "e3", "secret": "pw", "slowly": True}
+                    ]
+                },
+                tool_context(plugin, tmp_path),
+            )
+        finally:
+            await plugin.on_unload()
+        assert not result.success
+        assert "a secret cannot be typed slowly" in result.error
+        assert "set slowly to false or remove it" in result.error
+        assert driver.plans == [], "nothing was launched"
+
     async def test_a_failed_action_is_an_error_with_statuses(self, env):
         _, _, run = env
         await run("browser_snapshot", {})

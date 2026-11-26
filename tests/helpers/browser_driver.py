@@ -327,14 +327,12 @@ class ScriptedPage:
         owner = frame_owners(parse_snapshot(self.snapshot_text)).get(prefix)
         return self.frame_url_map.get(owner, "") if owner else ""
 
-    async def type_checked(self, ref, text, allow, *, slowly, timeout) -> str:
+    async def type_checked(self, ref, text, allow, *, timeout) -> str:
         """``text`` lands in ``typed`` when ``allow`` accepts the element's document URL.
 
         A ``type_checked`` handler returns the URL the element is in instead.
         """
-        result = await self._enter(
-            "type_checked", ref=ref, slowly=slowly, timeout=timeout
-        )
+        result = await self._enter("type_checked", ref=ref, timeout=timeout)
         url = self.document_url(ref) if result is _MISSING else result
         if allow(url):
             self.typed.append((ref, text))

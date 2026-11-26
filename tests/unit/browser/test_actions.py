@@ -139,6 +139,29 @@ class TestValidation:
         parsed = parse_actions([{"kind": "type", "ref": "e1", "secret": "pw"}])
         assert parsed[0].secret == "pw" and parsed[0].text is None
 
+    @pytest.mark.parametrize("slowly", [True, "true", "True"])
+    def test_a_secret_typed_slowly_is_refused_and_says_to_omit_slowly(self, slowly):
+        with pytest.raises(ActionSpecError) as info:
+            parse_actions(
+                [{"kind": "type", "ref": "e1", "secret": "pw", "slowly": slowly}],
+                secrets=["pw"],
+            )
+        message = str(info.value)
+        assert message.startswith("actions[0] (type): ")
+        assert "a secret cannot be typed slowly" in message
+        assert "set slowly to false or remove it" in message
+
+    def test_a_secret_with_neutral_slowly_and_slow_plain_text_still_parse(self):
+        secret, plain = parse_actions(
+            [
+                {"kind": "type", "ref": "e1", "secret": "pw", "slowly": False},
+                {"kind": "type", "ref": "e2", "text": "abc", "slowly": True},
+            ],
+            secrets=["pw"],
+        )
+        assert (secret.secret, secret.slowly) == ("pw", False)
+        assert (plain.text, plain.slowly) == ("abc", True)
+
     def test_values_are_normalised(self):
         parsed = parse_actions(
             [
@@ -217,8 +240,8 @@ class FakeContext:
         if self.pending:
             raise DialogPendingError("a dialog is waiting")
 
-    async def type_secret(self, name, ref, *, slowly):
-        self.events.append(("type_secret", name, ref, slowly))
+    async def type_secret(self, name, ref):
+        self.events.append(("type_secret", name, ref))
 
     async def check_ref(self, ref):
         self.events.append(("check", ref))
@@ -375,13 +398,10 @@ class TestRunBatch:
         ]
         assert ("check", "e1") in ctx.events and ("check", "e2") in ctx.events
 
-    @pytest.mark.parametrize("slowly", [False, True])
-    async def test_a_secret_is_checked_and_typed_in_one_context_step(self, slowly):
-        report, ctx = await run(
-            [{"kind": "type", "ref": "e1", "secret": "pw", "slowly": slowly}]
-        )
+    async def test_a_secret_is_checked_and_typed_in_one_context_step(self):
+        report, ctx = await run([{"kind": "type", "ref": "e1", "secret": "pw"}])
         assert ctx.page.calls == [], "the secret never goes through a plain fill"
-        assert ctx.events[:2] == [("check", "e1"), ("type_secret", "pw", "e1", slowly)]
+        assert ctx.events[:2] == [("check", "e1"), ("type_secret", "pw", "e1")]
         assert report.outcomes[0].reason == "typed secret pw"
 
     async def test_submit_after_a_secret_presses_enter_on_the_ref(self):
@@ -394,7 +414,7 @@ class TestRunBatch:
     async def test_a_refused_secret_types_nothing(self):
         ctx = FakeContext()
 
-        async def refuse(name, ref, *, slowly):
+        async def refuse(name, ref):
             raise ActionFailedError(f"refused: secret {name} may not go to {ref}")
 
         ctx.type_secret = refuse

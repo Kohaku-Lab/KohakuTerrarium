@@ -396,14 +396,12 @@ class PlaywrightPage:
         text: str,
         allow: Callable[[str], bool],
         *,
-        slowly: bool,
         timeout: float,
     ) -> str:
         """One element handle: its frame's URL is judged, then it alone is typed into.
 
-        Without ``slowly`` the value is set by one synchronous script in that
-        element's document, which re-checks the document's origin first; with
-        ``slowly`` the handle is cleared and typed into key by key.
+        The value is set by one synchronous script in that element's
+        document, which re-checks the document's origin first.
         """
         ms = timeout * 1000
 
@@ -413,10 +411,6 @@ class PlaywrightPage:
                 frame = await handle.owner_frame()
                 url = frame.url if frame is not None else ""
                 if not allow(url):
-                    return url
-                if slowly:
-                    await handle.fill("", timeout=ms)
-                    await handle.type(text, timeout=ms)
                     return url
                 outcome = await handle.evaluate(_PLACE_JS, [text, url])
                 if outcome != "ok":

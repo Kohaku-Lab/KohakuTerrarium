@@ -208,7 +208,6 @@ class PageDriver(Protocol):
         text: str,
         allow: Callable[[str], bool],
         *,
-        slowly: bool,
         timeout: float,
     ) -> str:
         """Type ``text`` into ``ref`` only when ``allow`` accepts its own document's URL.

@@ -856,25 +856,23 @@ async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
     page = live._tabs.active.page
     seen = []
     url = await page.type_checked(
-        name, CHECKED, lambda u: seen.append(u) or True, slowly=False, timeout=5
+        name, CHECKED, lambda u: seen.append(u) or True, timeout=5
     )
     assert url == site.url("/form") and seen == [url]
     assert CHECKED in await field_values(page)
     refused = await page.type_checked(
-        name, "refused-x", lambda u: False, slowly=False, timeout=5
+        name, "refused-x", lambda u: False, timeout=5
     )
     assert refused == url and "refused-x" not in await field_values(page)
-    await page.type_checked(name, "slow-Value", lambda u: True, slowly=True, timeout=5)
-    assert (await field_values(page)).startswith("slow-Value|")
     area = ref_of(
         (await live.navigate(site.url("/fields-area"))).text, "textbox", "Notes"
     )
-    await page.type_checked(area, CHECKED, lambda u: True, slowly=False, timeout=5)
+    await page.type_checked(area, CHECKED, lambda u: True, timeout=5)
     assert await field_values(page) == CHECKED
     bio = ref_of(
         (await live.navigate(site.url("/fields-editable"))).text, "textbox", "Bio"
     )
-    await page.type_checked(bio, CHECKED, lambda u: True, slowly=False, timeout=5)
+    await page.type_checked(bio, CHECKED, lambda u: True, timeout=5)
     shown = await within(
         page.evaluate("document.getElementById('bio').innerText", timeout=5), "bio"
     )
@@ -882,21 +880,20 @@ async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
     pin = ref_of(
         (await live.navigate(site.url("/fields-number"))).text, "spinbutton", "PIN"
     )
-    await page.type_checked(pin, "4821", lambda u: True, slowly=False, timeout=5)
+    await page.type_checked(pin, "4821", lambda u: True, timeout=5)
     assert await field_values(page) == "4821"
     with pytest.raises(DriverError, match="did not accept"):
-        await page.type_checked(pin, CHECKED, lambda u: True, slowly=False, timeout=5)
+        await page.type_checked(pin, CHECKED, lambda u: True, timeout=5)
     assert await field_values(page) == "4821", "a refused value replaced the old one"
     save = ref_of((await live.navigate(site.url("/form"))).text, "button", "Save")
     with pytest.raises(DriverError, match="not a text field"):
-        await page.type_checked(save, CHECKED, lambda u: True, slowly=False, timeout=5)
+        await page.type_checked(save, CHECKED, lambda u: True, timeout=5)
 
 
 @LIVE
-@pytest.mark.parametrize("slowly", [False, True])
 @pytest.mark.parametrize("change", ["reload", "swap"])
 async def test_a_checked_type_fails_when_its_element_changed_after_the_check(
-    live, site, monkeypatch, change, slowly
+    live, site, monkeypatch, change
 ):
     text = (await live.navigate(site.url("/form"))).text
     name = ref_of(text, "textbox", "Name")
@@ -919,7 +916,7 @@ async def test_a_checked_type_fails_when_its_element_changed_after_the_check(
 
     monkeypatch.setattr(handle_type, "owner_frame", changed_first)
     with pytest.raises(DriverError):
-        await page.type_checked(name, CHECKED, lambda u: True, slowly=slowly, timeout=5)
+        await page.type_checked(name, CHECKED, lambda u: True, timeout=5)
     monkeypatch.undo()
     assert CHECKED not in await field_values(page)
     assert CHECKED[:3] not in await field_values(page)

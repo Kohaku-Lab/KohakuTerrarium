@@ -93,7 +93,7 @@ agent = await Agent.build(
 | kind | 字段 |
 |---|---|
 | `click` | `ref`，或以视口像素表示的 `x` / `y`；`button`、`double`、`modifiers` |
-| `type` | `ref`；`text`，或 `secret`（已配置的密钥名）；`submit`、`slowly` |
+| `type` | `ref`；`text`，或 `secret`（已配置的密钥名）；`submit`；`slowly`（仅与 `text` 一起） |
 | `select` | `ref`、`values`（选项文字） |
 | `check` | `ref`、`checked`（默认 true） |
 | `press` | `key`，如 `Enter` 或 `Control+A`；可选 `ref` |
@@ -253,7 +253,7 @@ origin 由协议、主机和可选的端口组成，例如 `https://staging.exam
 
 一个写了 `secret: staging_pw`（代替 `text`）的 `type` 动作，会输入 `STAGING_PASSWORD` 的值；这个值在动作执行时才从环境变量读取。但只有当元素所在文档本身的 origin 在列表中时才会输入。frame 单独计算：允许的页面里嵌着的跨 origin frame 会被拒绝，除非它的 origin 也在列表中。被拒绝的动作会失败，原因里写明密钥名和违规的 origin，绝不写出值，例如 `refused: secret staging_pw may be typed only into https://staging.example.com; e7 is on https://evil.example`。
 
-检查和输入是针对同一个元素的同一步：会话只查找一次元素，判断这个元素自身所在文档的 origin，再输入到同一个元素。如果页面在两者之间替换了这个元素或让它的文档跳转，动作会失败，而不会把密钥输入到别处。不加 `slowly` 时，值由该文档中的一段脚本一次性设置，脚本在设置前会再次检查文档的 origin（输入框会收到 `input` 和 `change` 事件，但没有按键事件）。加上 `slowly` 时，值会逐键输入到当前获得焦点的元素，所以在输入过程中移动焦点的页面可能在别处收到剩余的按键；只有输入框需要按键事件时，才对密钥使用 `slowly`。
+检查和输入是针对同一个元素的同一步：会话只查找一次元素，判断这个元素自身所在文档的 origin，再输入到同一个元素。如果页面在两者之间替换了这个元素或让它的文档跳转，动作会失败，而不会把密钥输入到别处。值由该文档中的一段脚本一次性设置，脚本在设置前会再次检查文档的 origin（输入框会收到 `input` 和 `change` 事件，但没有按键事件）。只响应按键事件的输入框无法接收密钥；同时带 `secret` 和 `slowly` 的 `type` 动作会在批次执行前被拒绝，错误信息会说明去掉 `slowly`。
 
 值至少要有四个字符。在所有文本结果中，它（包括原文以及 URL 编码、JSON 编码后的写法）都显示为 `[secret:staging_pw]`。密码框也会被遮蔽：在快照里，密码框的值显示为 `(redacted)`（如果是这个密钥填进去的，则显示 `[secret:staging_pw]`）；同一个值出现在结果的其他地方（标题、URL）时显示为 `[redacted]`。`autocomplete` 指明为密码的输入框也一样（切换为显示明文的密码框通常保留这个属性）。Chromium 的无障碍树以明文携带密码值，所以当某个页面上查找密码框的检查失败时，所有文本框的值都显示为 `(withheld)`，结果也会说明这一点。
 
@@ -320,6 +320,7 @@ async def summarize_page(url: str, context) -> str:
 - 截图为 PNG；当 PNG 会超过约 500 KB 时改用 JPEG。仍然太大的图片会被缩小，结果会给出把图片坐标换算回 CSS 像素的倍数；需要缩到某边不足 200 像素的图片不会返回。整页截图和元素截图最高 8000 像素，结果会写明这一点。
 - 每个动作之后，会话会等待页面安静下来（150 毫秒内没有 DOM 变化，最多等 2 秒）。它看不到尚未触发的定时器：页面稍后才更新时，加一个 `wait`，等你期待的文字出现。
 - **只有原生工具调用才能把截图送到模型。** 在文本工具格式（`bracket`、`xml`）下，工具结果以文本形式传回，所以模型只拿到截图的文字行（截了什么、存在哪里），看不到图片。需要截图时请使用 `tool_format: native`，或者用 `path` 把截图存下来。
+- 密钥一步设置，只有 `input` 和 `change` 事件，没有按键事件，所以需要按键事件的输入框无法接收密钥。
 - 每个 Creature 一个浏览器；它上面的调用一次执行一个。
 - 只支持经由 Playwright 驱动的 Chromium。
 - 下载上限约束的是会话保留的文件。超过上限的文件会先被完整下载再删除，所以它们不约束下载进行中的磁盘占用和流量；Chromium 自己的临时下载文件、profile 和缓存也不在上限之内。

@@ -15,7 +15,6 @@ from kohakuterrarium.browser import snapshot as snap
 from kohakuterrarium.browser.actions import (
     DONE,
     FAILED,
-    SLOW_KEY_S,
     BatchReport,
     format_details,
     format_report,
@@ -81,18 +80,16 @@ class ActContext:
     def require_no_dialog(self) -> None:
         self._session._dialogs.require_none()
 
-    async def type_secret(self, name: str, ref: str, *, slowly: bool) -> None:
+    async def type_secret(self, name: str, ref: str) -> None:
         secrets = self._session._secrets
         value = secrets.resolve(name)
-        timeout = self.timeout + (len(value) * SLOW_KEY_S if slowly else 0.0)
+        timeout = self.timeout
 
         def allow(url: str) -> bool:
             return secrets.allows(name, web_origin(url))
 
         url = await self.call(
-            lambda: self.page.type_checked(
-                ref, value, allow, slowly=slowly, timeout=timeout
-            ),
+            lambda: self.page.type_checked(ref, value, allow, timeout=timeout),
             timeout,
         )
         origin = web_origin(url)

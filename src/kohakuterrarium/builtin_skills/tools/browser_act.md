@@ -44,7 +44,7 @@ returns one status line per action plus what changed on the page.
 | kind | Fields |
 | --- | --- |
 | click | `ref`, or `x`/`y`; `button`, `double`, `modifiers` |
-| type | `ref`; `text` or `secret` (a configured secret name); `submit`, `slowly` |
+| type | `ref`; `text` or `secret` (a configured secret name); `submit`; `slowly` (with `text`) |
 | select | `ref`, `values` (option labels) |
 | check | `ref`, `checked` (default true) |
 | press | `key` such as `Enter` or `Control+A`; optional `ref` |
@@ -94,6 +94,6 @@ A `type` action with `secret` types the value of a configured secret; the
 value never appears in results. Each secret lists the origins it may be typed
 into: a field on any other origin, a cross-origin frame included, fails with
 `refused: secret <name> may be typed only into ...`. A secret is set in one
-step (input and change events, no key events); add `slowly` for a field that
-needs keystrokes. Screenshots and `browser_eval` can still see what a page
-shows.
+step (input and change events, no key events), so a field that needs
+keystrokes cannot take one; `slowly` with a secret is refused. Screenshots and
+`browser_eval` can still see what a page shows.
