@@ -25,6 +25,7 @@ from kohakuterrarium.browser.protocol import NavResponse, PageContent
 from kohakuterrarium.browser.read import read_page
 from kohakuterrarium.browser.session import BrowserSession
 from kohakuterrarium.browser.session.reading import READ_MAX_CHARS, PageRead
+from kohakuterrarium.browser.session.types import CALL_MARGIN_S
 from tests.helpers.browser_driver import (
     ScriptedDialog,
     ScriptedDownload,
@@ -781,14 +782,20 @@ class TestOpenSeams:
         release = asyncio.Event()
         made = browser_keeps_opening(browser, release)
         browser.sink.window_opening(browser.page)
-        with pytest.raises(BrowserTimeoutError):
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with pytest.raises(BrowserTimeoutError, match="opening a tab to read in"):
             await session.read_page(NEWS)
+        assert loop.time() - started < 0.3 + CALL_MARGIN_S + 1.0
         assert made == []
         release.set()
         await asyncio.sleep(0.05)
         assert made[0].closed and session._tabs.find(made[0]) is None
         assert session._windows_due == 1 and session._windows_early == 0
         assert session._expect_page == 0 and session._arrived == []
+        got = await session.read_page(NEWS)
+        assert got.title == "News" and made[1].closed
+        assert_no_read_left(session, driver)
         await session.close()
 
     async def test_a_pending_late_tab_open_never_takes_a_window_of_the_read(
