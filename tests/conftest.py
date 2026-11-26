@@ -75,6 +75,7 @@ from kohakuterrarium.testing.llm_seam import (  # noqa: E402
     install_llm_seam,
 )
 from tests.helpers import real_config_guard  # noqa: E402
+from tests.helpers.browser_site import enforce_browser  # noqa: E402
 
 _LOOPBACK_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", ""}
 _NETWORK_GUARD = {"blocked": False}
@@ -124,6 +125,14 @@ def pytest_sessionstart(session):
     if hasattr(session.config, "workerinput"):
         return
     _REAL_CONFIG_SNAPSHOT = real_config_guard.snapshot()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Browser tests fail instead of skipping under ``KT_TEST_REQUIRE_BROWSER=1``."""
+    report = yield
+    enforce_browser(report)
+    return report
 
 
 @pytest.hookimpl(trylast=True)

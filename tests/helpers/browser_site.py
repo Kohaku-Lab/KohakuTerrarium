@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 SITE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "browser" / "site"
+REQUIRE_BROWSER_ENV = "KT_TEST_REQUIRE_BROWSER"
+BROWSER_SKIP_REASONS = ("no Chromium for Playwright", "could not import 'playwright")
 Route = tuple[int, dict[str, str], bytes] | Callable[[BaseHTTPRequestHandler], None]
 
 
@@ -138,6 +140,21 @@ def browsers_env() -> dict[str, str]:
         return {}
     path = real_browsers_path()
     return {"PLAYWRIGHT_BROWSERS_PATH": str(path)} if path and path.is_dir() else {}
+
+
+def enforce_browser(report, environ=os.environ) -> None:
+    """Make ``report`` a failure when it skipped for want of Playwright or Chromium.
+
+    Only while ``KT_TEST_REQUIRE_BROWSER=1``, as in the CI job that installs
+    Chromium; every other report is left as it is.
+    """
+    if environ.get(REQUIRE_BROWSER_ENV) != "1" or not report.skipped:
+        return
+    longrepr = report.longrepr
+    reason = longrepr[2] if isinstance(longrepr, tuple) else str(longrepr)
+    if any(marker in reason for marker in BROWSER_SKIP_REASONS):
+        report.outcome = "failed"
+        report.longrepr = f"{REQUIRE_BROWSER_ENV}=1 but the test skipped: {reason}"
 
 
 def process_alive(pid: int) -> bool:

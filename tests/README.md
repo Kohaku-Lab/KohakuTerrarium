@@ -76,6 +76,9 @@ playwright install chromium
 ```
 
 Without Playwright or Chromium they skip; any other launch failure fails.
+With `KT_TEST_REQUIRE_BROWSER=1` that skip is reported as a failure instead
+(`enforce_browser` in `tests/helpers/browser_site.py`, applied by
+`tests/conftest.py`), so a run that installed Chromium cannot pass on skips.
 They read Playwright's browser cache from the operator's real home
 (`KT_TEST_REAL_HOME`; `%LOCALAPPDATA%` on Windows) unless
 `PLAYWRIGHT_BROWSERS_PATH` is set. CI does not install Playwright, so there
