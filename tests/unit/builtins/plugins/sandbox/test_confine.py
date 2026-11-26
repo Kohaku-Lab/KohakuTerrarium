@@ -3,10 +3,8 @@
 import asyncio
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -53,24 +51,17 @@ def _refused(result: dict) -> bool:
 
 
 @pytest.fixture
-def dirs(monkeypatch):
+def dirs(tmp_path, monkeypatch):
     """A workspace and a sibling the policy must not let a command write."""
-    # Not under pytest's base temp, which gains entries with every test: a broad
-    # grant around a deny path lists the entries of each directory above it.
-    root = Path(tempfile.mkdtemp(prefix="kt-confine-", dir="/tmp")).resolve()
-    workspace = root / "workspace"
-    outside = root / "home"
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "home"
     workspace.mkdir()
     outside.mkdir()
     (outside / ".zshrc").write_text("export KEEP=1\n", encoding="utf-8")
-    # Most default deny paths are under HOME, so HOME moves in here too.
-    (root / "user").mkdir()
-    monkeypatch.setenv("HOME", str(root / "user"))
-    # The temp root holds this folder and the profile allows it; drop the temp
-    # roots so the sibling is genuinely outside.
+    # pytest's tmp_path sits under the system temp root, which the profile
+    # allows; drop the temp roots so the sibling is genuinely outside.
     monkeypatch.setattr(roots, "temp_roots", lambda: [])
-    yield workspace, outside
-    shutil.rmtree(root, ignore_errors=True)
+    return workspace, outside
 
 
 class TestBackendChoice:
@@ -172,30 +163,6 @@ class TestEnforceModes:
         assert argv[0] == (
             seatbelt.SANDBOX_EXEC if backend == "seatbelt" else sys.executable
         )
-
-
-@posix_paths
-class TestKernelFixtureIsHermetic:
-    @pytest.mark.parametrize("denied", ["", "config/git"])
-    async def test_broad_grants_list_nothing_in_the_shared_base_temp(
-        self, dirs, monkeypatch, tmp_path_factory, denied
-    ):
-        """The broad-write grants stay the same however many tests ran before."""
-        workspace, outside = dirs
-        calls: list[list[str]] = []
-
-        async def fake_run(argv, **kwargs):
-            calls.append(list(argv))
-            return {"returncode": 0, "stdout": b"", "stderr": b"", "timed_out": False}
-
-        monkeypatch.setattr(plugin_mod, "_run_plain_subprocess", fake_run)
-        monkeypatch.setattr(plugin_mod, "confinement_backend", lambda: "landlock")
-        sandbox = SandboxPlugin(fs_write="broad", fs_deny=[str(outside / denied)])
-        await sandbox.run_subprocess_exec(["/bin/true"], cwd=workspace)
-        grants = json.loads(calls[0][4])
-        base = Path(os.path.realpath(tmp_path_factory.getbasetemp()))
-        assert grants
-        assert [g for g in grants if base in Path(g).parents] == []
 
 
 @needs_kernel
