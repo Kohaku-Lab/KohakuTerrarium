@@ -43,10 +43,12 @@ class Page:
 
 async def test_quiet_page_returns_after_the_grace():
     page = Page("quiet")
-    started = time.monotonic()
+    loop = asyncio.get_running_loop()
+    early = 2 * time.get_clock_info("monotonic").resolution
+    started = loop.time()
     result = await settle(page, asyncio.Event(), grace=0.05, quiet_ms=150, cap=2.0)
     assert result.reason == "quiet" and not result.navigated
-    assert time.monotonic() - started >= 0.04
+    assert loop.time() - started >= 0.05 - early, "the grace was not waited"
     [(kind, arg, timeout)] = page.calls
     assert kind == "evaluate" and arg[0] == 150 and 1800 < arg[1] <= 2000
     assert timeout <= 2.05

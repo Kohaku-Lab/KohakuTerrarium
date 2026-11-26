@@ -38,10 +38,11 @@ async def test_a_running_browser_keeps_its_profile_until_it_exits(tmp_path):
     first = await claim_profile(path)
     browser = Process()
     first.held_by(browser)
-    started = time.perf_counter()
+    loop = asyncio.get_running_loop()
+    started = loop.time()
     with pytest.raises(BrowserUnavailableError) as info:
         await claim_profile(path)
-    assert time.perf_counter() - started >= 0.2
+    assert loop.time() >= started + profiles.RELEASE_WAIT_S, "it did not wait"
     assert str(tmp_path / "p") in str(info.value)
     assert "could not be confirmed" in str(info.value)
     browser.running = False
