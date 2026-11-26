@@ -395,6 +395,13 @@ class FilteringProxy:
         self._blocked.clear()
         return blocked
 
+    def forget_blocked(self, records: list[EgressRecord]) -> None:
+        """Leave these exact records (not equal ones) out of the next drain."""
+        gone = {id(record) for record in records}
+        kept = [record for record in self._blocked if id(record) not in gone]
+        self._blocked.clear()
+        self._blocked.extend(kept)
+
     def _record(
         self, host: str, port: int, method: str, decision: Decision, address: str | None
     ) -> None:

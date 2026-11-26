@@ -539,26 +539,29 @@ class TestNoTrace:
         assert "pop.test" not in after.text and "t2" not in after.text
         await session.close()
 
-    async def test_blocked_requests_of_the_read_are_not_reported_to_the_agent(
-        self, tmp_path
-    ):
-        session, driver = make(tmp_path, block_hosts=["ads.test", "old.test"])
+    async def test_blocked_requests_during_a_read_stay_with_the_agent(self, tmp_path):
+        session, driver = make(
+            tmp_path, block_hosts=["ads.test", "old.test", "tick.test"]
+        )
         await session.snapshot()
         await proxied_get(session, "old.test")
 
         def setup(page):
             async def goto(url, timeout):
-                page.load(url)
+                await proxied_get(session, "tick.test")
+                driver.browser.sink.navigation_started(page, "http://ads.test/landing")
                 await proxied_get(session, "ads.test")
-                return NavResponse(url, 200)
+                return NavResponse("http://ads.test/landing", 403, "block_hosts")
 
             page.handlers["goto"] = goto
 
         driver.browser.page_setup = setup
-        await session.read_page("http://a.test/")
+        with pytest.raises(NavigationBlockedError, match="it led to ads.test"):
+            await session.read_page("http://a.test/")
         after = await session.snapshot()
         assert "old.test" in after.text
-        assert "ads.test" not in after.text
+        assert "tick.test" in after.text, "an agent tab's blocked request was lost"
+        assert "ads.test" not in after.text, "the read's own hop went to the agent"
         await session.close()
 
     async def test_reads_and_agent_calls_never_interleave(self, tmp_path):

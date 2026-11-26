@@ -999,6 +999,40 @@ async def test_during_a_read_only_the_read_page_windows_are_closed(live, site):
 
 
 @LIVE
+async def test_blocked_requests_of_agent_tabs_during_a_read_are_still_reported(
+    live, site
+):
+    def slow_reader(handler) -> None:
+        time.sleep(3.0)
+        body = b"<!doctype html><title>Slow</title><p>slow</p>"
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+
+    site.routes["/slow-plain"] = slow_reader
+    site.redirect("/to-private", "http://10.0.0.8/landing")
+    site.html(
+        "/tick-soon",
+        '<!doctype html><title>Tick soon</title><button onclick="setTimeout(() =>'
+        " fetch('http://10.0.0.9/tick').catch(() => {}), 1500)\">Tick soon</button>",
+    )
+    text = (await live.navigate(site.url("/tick-soon"))).text
+    clicked = await live.act(
+        [{"kind": "click", "ref": ref_of(text, "button", "Tick soon")}]
+    )
+    assert "10.0.0.9" not in clicked.text, "the tick fired before the read"
+    got = await live.read_page(site.url("/slow-plain"))
+    assert got.title == "Slow"
+    with pytest.raises(NavigationBlockedError, match="10.0.0.8"):
+        await live.read_page(site.url("/to-private"))
+    after = await live.snapshot()
+    assert "10.0.0.9" in after.text, "the agent tab's blocked request was dropped"
+    assert "10.0.0.8" not in after.text, "the read's own blocked hop reached the agent"
+
+
+@LIVE
 async def test_a_connection_cut_by_the_rejudge_mid_read_raises_a_typed_error(
     site, browser_env
 ):

@@ -2,9 +2,11 @@
 
 A read passes the URL check, filtering proxy and network policy ``navigate``
 uses and raises the same typed errors. Its tab, and any window that tab
-opens, is never an agent tab: the tab list, refs, observations, dialogs,
-downloads and blocked-request reports never see it. ``browser/README.md``
-says what ``html`` and ``text`` hold and which filters apply.
+opens, is never an agent tab: the tab list, refs, observations, dialogs and
+downloads never see it, nor do the blocked hops of its own load; other
+requests the proxy blocked while it ran are reported to the agent.
+``browser/README.md`` says what ``html`` and ``text`` hold and which filters
+apply.
 """
 
 import asyncio
@@ -40,7 +42,6 @@ from kohakuterrarium.browser.protocol import (
     PageContent,
     PageDriver,
 )
-from kohakuterrarium.browser.proxy import EgressRecord
 from kohakuterrarium.browser.secrets import (
     MIN_REDACT_LENGTH,
     SecretStore,
@@ -102,13 +103,14 @@ class SessionReadMixin:
     _refused_pages: set[PageDriver]
     # owned by SessionObserveMixin
     _secrets: SecretStore
-    _blocked: list[EgressRecord]
 
     def _init_read(self) -> None:
         self._read_owned: weakref.WeakSet[PageDriver] = weakref.WeakSet()
         self._read_page: PageDriver | None = None
         self._read_nav = asyncio.Event()
         self._read_chain: list[str] = []
+        self._read_url = ""
+        self._read_mark: tuple[Stack, int] | None = None
         self._read_windows = 0
         self._read_popups = 0
         self._read_arrived = asyncio.Event()
@@ -207,8 +209,9 @@ class SessionReadMixin:
 
     async def _read(self, page: PageDriver, url: str, limit: int) -> PageRead:
         stack = self._stack
-        self._blocked.extend(stack.proxy.drain_blocked())
         mark = stack.proxy.mark()
+        self._read_mark = (stack, mark)
+        self._read_url = url
         timeout = self.options.nav_timeout_s
         try:
             response = await self._bounded(
@@ -364,11 +367,20 @@ class SessionReadMixin:
                 break
 
     async def _end_read(self, page: PageDriver) -> None:
-        """Forget the read, drop its blocked records, and close its page, even if cancelled."""
+        """Forget the read and close its page, even if cancelled.
+
+        Of the blocked records from the read's time, only the hops of its own
+        load are dropped; the rest stay for the agent, since the proxy cannot
+        tell the read page's other connections from those of the agent's tabs.
+        """
+        started = self._read_mark
+        if started is not None and started[0] is self._stack:
+            stack, mark = started
+            urls = [self._read_url, *self._read_chain, page.url]
+            stack.proxy.forget_blocked(blocked_hops(stack.proxy.since(mark), urls))
         self._read_page = None
         self._read_chain = []
-        if self._stack is not None:
-            self._stack.proxy.drain_blocked()
+        self._read_mark = None
         await asyncio.shield(asyncio.ensure_future(self._close_read_page(page)))
 
     async def _close_read_page(self, page: PageDriver) -> None:

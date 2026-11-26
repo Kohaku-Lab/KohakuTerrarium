@@ -653,6 +653,22 @@ async def test_policy_replaced_without_drop_keeps_tunnels_it_allows(
     await writer.wait_closed()
 
 
+async def test_forget_blocked_removes_only_the_records_given(make_proxy):
+    proxy = await make_proxy(
+        NetworkPolicy(block_hosts=("a.test", "b.test")), seams=Seams()
+    )
+    for host in ("a.test", "b.test", "a.test"):
+        status, _, _ = await exchange(proxy, get(f"http://{host}/", host))
+        assert status == 403
+    first_a = proxy.recent()[0]
+    proxy.forget_blocked([first_a])
+    left = proxy.drain_blocked()
+    assert [r.host for r in left] == ["b.test", "a.test"]
+    assert all(r is not first_a for r in left)
+    proxy.forget_blocked([first_a])
+    assert proxy.drain_blocked() == []
+
+
 class TestRejudge:
     """Open connections are judged again by the policy in force."""
 
