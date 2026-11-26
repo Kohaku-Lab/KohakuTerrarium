@@ -228,6 +228,11 @@ host-loop 检查，因此仍需 `compact.auto` 才能自动压缩。两种情况
 `timeout_s` 内没有回应、bus 错误）都会抛 `PluginBlockError`，让 agent
 把它当成普通工具失败处理。
 
+例外只有一种：插件没有可以显示提示的宿主 agent 时，受管的调用会不经询问
+直接放行。这发生在它的 `on_load` 执行之前，以及不带 agent 载入插件的宿主
+（例如 MCP 工具服务器）里。fork 的工具策略比较严格：父 agent 没有 output
+router 时会拒绝该调用。
+
 网页 UI 与 TUI 把批准渲染成输出流上的内联 prompt；CLI 也透过同一个
 output bus 出场，并经由 input loop 回覆。没有使用者介面的无头部署应该
 关掉 permgate 或设 `timeout_s`，让没人回应的调用被拒绝，而不是一直等。
