@@ -1,5 +1,5 @@
 <template>
-  <HistoryPage />
+  <HistoryPage :tab="tab" />
 </template>
 
 <script setup>

@@ -71,6 +71,21 @@ class TestSchema:
         assert not tool.is_provider_native
         assert "referenced_image_paths" in tool.prompt_contribution()
 
+    def test_guidance_leads_with_creating_a_new_image(self):
+        guidance = ImageGenTool().prompt_contribution()
+        assert guidance.startswith("For a new image")
+        assert guidance.index("only prompt") < guidance.index("referenced_image_paths")
+
+    @pytest.mark.parametrize(
+        "name", ["referenced_image_paths", "num_last_images_to_include"]
+    )
+    def test_image_arguments_say_they_are_for_edits_only(self, name):
+        description = ImageGenTool().get_parameters_schema()["properties"][name][
+            "description"
+        ]
+        assert description.startswith("Edit only")
+        assert "Omit for a new image" in description
+
 
 class TestExecute:
     @pytest.mark.asyncio
@@ -110,6 +125,36 @@ class TestExecute:
         assert result.success and client.calls[0][2] == [PNG]
 
     @pytest.mark.asyncio
+    async def test_no_conversation_image_explains_create_and_edit(self, tmp_path):
+        client = _Client()
+        result = await ImageGenTool(client=client).execute(
+            {"prompt": "frog", "num_last_images_to_include": 1}, _context(tmp_path)
+        )
+        assert not result.success and client.calls == []
+        assert result.error == (
+            "the conversation holds no images to edit (1 requested). To create a "
+            "new image, call image_gen again with only prompt (omit "
+            "num_last_images_to_include); to edit a file, pass "
+            "referenced_image_paths."
+        )
+
+    @pytest.mark.asyncio
+    async def test_too_few_conversation_images_name_the_count_available(self, tmp_path):
+        messages = [Message(role="user", content=[ImagePart(url=PNG)])]
+        client = _Client()
+        result = await ImageGenTool(client=client).execute(
+            {"prompt": "blue", "num_last_images_to_include": 3},
+            _context(tmp_path, messages),
+        )
+        assert not result.success and client.calls == []
+        assert result.error == (
+            "the conversation holds only 1 image(s) (3 requested). Pass "
+            "num_last_images_to_include of at most 1, or list the files in "
+            "referenced_image_paths."
+        )
+        assert "create a new image" not in result.error
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("args", "message"),
         [
@@ -120,7 +165,7 @@ class TestExecute:
             ({"num_last_images_to_include": 6}, "from 1 to 5"),
             ({"referenced_image_paths": ["a.png"] * 6}, "at most 5"),
             ({"referenced_image_paths": ["missing.png"]}, "not found"),
-            ({"num_last_images_to_include": 2}, "holds only 0"),
+            ({"num_last_images_to_include": 2}, "holds no images to edit"),
             ({"gif": {}}, "not enabled"),
         ],
     )
@@ -155,6 +200,21 @@ class TestInputs:
             Message(role="tool", content=[ImagePart(url=new)], tool_call_id="t"),
         ]
         assert recent_image_urls(messages, 2) == [new, old]
+
+    def test_no_images_without_a_hint_points_at_files_and_attachments(self):
+        with pytest.raises(ImageInputError) as info:
+            recent_image_urls([Message(role="user", content="hi")], 1)
+        assert str(info.value) == (
+            "the conversation holds no images to edit (1 requested). Pass "
+            "referenced_image_paths or ask the user to attach them."
+        )
+
+    def test_no_images_uses_the_caller_hint(self):
+        with pytest.raises(ImageInputError) as info:
+            recent_image_urls([], 2, none_hint="Do X.")
+        assert str(info.value) == (
+            "the conversation holds no images to edit (2 requested). Do X."
+        )
 
 
 class TestBackendSelection:

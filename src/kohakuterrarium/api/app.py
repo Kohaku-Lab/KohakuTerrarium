@@ -103,6 +103,7 @@ from kohakuterrarium.api.routes.persistence import (
     memory_index as persistence_memory_index,
 )
 from kohakuterrarium.api.routes.persistence import open_sessions as persistence_open
+from kohakuterrarium.api.routes.persistence import projects as persistence_projects
 from kohakuterrarium.api.routes.persistence import (
     restore_state as persistence_restore_state,
 )
@@ -617,6 +618,9 @@ def create_app(
     # under /api/sessions to match the search route's URL shape.
     app.include_router(
         persistence_memory_index.router, prefix="/api/sessions", tags=["sessions"]
+    )
+    app.include_router(
+        persistence_projects.router, prefix="/api/projects", tags=["projects"]
     )
 
     # Registry and config prefixes mount the catalog routers directly so existing

@@ -869,6 +869,33 @@ class TestApiCreatureJourney:
         saved_name = saved["name"]
         assert "alice" in saved["agents"]
 
+        # Projects (frontend: History rail): found, renamed (saved), used as a
+        # session-list filter and label, then forgotten back to found.
+        assert saved["pwd"]
+        found = client.get("/api/projects").json()["projects"]
+        assert [
+            (p["saved"], p["session_count"], p["running_count"]) for p in found
+        ] == [(False, 1, 1)]
+        project = found[0]
+        assert saved["project"] == {"id": project["id"], "name": project["name"]}
+        resp = client.patch(
+            f"/api/projects/{project['id']}", json={"name": "Journey", "pinned": True}
+        )
+        assert resp.status_code == 200
+        assert (resp.json()["saved"], resp.json()["name"]) == (True, "Journey")
+        scoped = client.get("/api/sessions", params={"project": project["id"]}).json()
+        assert [row["name"] for row in scoped["sessions"]] == [saved_name]
+        assert scoped["sessions"][0]["project"]["name"] == "Journey"
+        assert (
+            client.get("/api/sessions", params={"project": "none"}).json()["total"] == 0
+        )
+        live_rows = [r for r in client.get("/api/sessions/open").json() if r["is_live"]]
+        assert [r["project"]["name"] for r in live_rows] == ["Journey"]
+        resp = client.delete(f"/api/projects/{project['id']}")
+        assert resp.json() == {"status": "forgotten", "id": project["id"]}
+        again = client.get("/api/projects").json()["projects"]
+        assert [(p["id"], p["saved"]) for p in again] == [(project["id"], False)]
+
         assert session_id != saved_name
         resp = client.get(
             f"/api/sessions/{session_id}/memory/search",

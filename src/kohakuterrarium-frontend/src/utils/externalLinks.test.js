@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import MarkdownIt from "markdown-it"
 
-import { applyExternalLinkRule, installExternalLinkGuard, isExternalUrl } from "./externalLinks"
+import {
+  applyExternalLinkRule,
+  installExternalLinkGuard,
+  isBackendResourceUrl,
+  isExternalUrl,
+} from "./externalLinks"
+import { closeImageLightbox } from "./imageLightbox"
 
 // jsdom serves the app from http://localhost/ (see vitest.config.js).
 const SAME_ORIGIN = "http://localhost"
@@ -38,6 +44,24 @@ describe("isExternalUrl", () => {
   })
 })
 
+describe("isBackendResourceUrl", () => {
+  it("treats same-origin /api/ and /ws/ paths as backend resources", () => {
+    expect(isBackendResourceUrl("/api/sessions/s/artifacts/exports/x/pose.jpg")).toBe(true)
+    expect(isBackendResourceUrl(`${SAME_ORIGIN}/api/sessions/s/artifacts/a.zip`)).toBe(true)
+    expect(isBackendResourceUrl("/ws/logs")).toBe(true)
+  })
+
+  it("keeps app routes and foreign /api/ URLs out", () => {
+    expect(isBackendResourceUrl("/sessions/abc")).toBe(false)
+    expect(isBackendResourceUrl("/")).toBe(false)
+    expect(isBackendResourceUrl("/apidocs")).toBe(false)
+    expect(isBackendResourceUrl("#/api/x")).toBe(false)
+    expect(isBackendResourceUrl("https://example.test/api/x")).toBe(false)
+    expect(isBackendResourceUrl("javascript:alert(1)")).toBe(false)
+    expect(isBackendResourceUrl("")).toBe(false)
+  })
+})
+
 describe("applyExternalLinkRule", () => {
   function render(markdown) {
     const md = applyExternalLinkRule(new MarkdownIt({ html: false, linkify: true }))
@@ -65,6 +89,13 @@ describe("applyExternalLinkRule", () => {
 
     expect(html).toContain('href="/sessions/abc"')
     expect(html).not.toContain("target=")
+  })
+
+  it("opens a same-origin artifact link in a new tab instead of replacing the app", () => {
+    const html = render("[pose](/api/sessions/s/artifacts/exports/x/pose-overview.jpg)")
+
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
   })
 
   it("runs after an already-installed link_open rule instead of replacing it", () => {
@@ -145,6 +176,28 @@ describe("installExternalLinkGuard", () => {
     expect(opened).toEqual([])
   })
 
+  it("opens an untargeted artifact link in a new tab in a browser", () => {
+    const event = clickAnchor('<a href="/api/sessions/s/artifacts/a.zip">zip</a>')
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(opened).toEqual([
+      {
+        url: `${SAME_ORIGIN}/api/sessions/s/artifacts/a.zip`,
+        target: "_blank",
+        features: "noopener,noreferrer",
+      },
+    ])
+  })
+
+  it("leaves a targeted or download artifact link to the browser", () => {
+    for (const attrs of ['target="_blank"', "download"]) {
+      const event = clickAnchor(`<a href="/api/sessions/s/artifacts/a.zip" ${attrs}>zip</a>`)
+      expect(event.defaultPrevented).toBe(false)
+    }
+
+    expect(opened).toEqual([])
+  })
+
   it("leaves anchors that already carry a target to the platform", () => {
     // pywebview's own new-window handlers already route these correctly;
     // re-opening them here would just add a second path to maintain.
@@ -220,6 +273,7 @@ describe("installExternalLinkGuard in a native shell", () => {
 
   afterEach(() => {
     uninstall()
+    closeImageLightbox()
     delete window.pywebview
     document.body.innerHTML = ""
     vi.restoreAllMocks()
@@ -259,6 +313,64 @@ describe("installExternalLinkGuard in a native shell", () => {
 
     expect(hostOpened).toEqual([])
     expect(browserOpened).toEqual(["/sessions/abc"])
+  })
+
+  it("shows an artifact image in the in-app viewer instead of navigating", () => {
+    const event = click('<a href="/api/sessions/s/artifacts/exports/x/pose-overview.jpg">pose</a>')
+
+    expect(event.defaultPrevented).toBe(true)
+    const viewer = document.querySelector("[data-kt-image-lightbox] img")
+    expect(viewer.getAttribute("src")).toBe(
+      "http://localhost/api/sessions/s/artifacts/exports/x/pose-overview.jpg",
+    )
+    expect(hostOpened).toEqual([])
+    expect(browserOpened).toEqual([])
+
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }))
+    expect(document.querySelector("[data-kt-image-lightbox]")).toBeNull()
+  })
+
+  it("claims a target=_blank artifact image too", () => {
+    const event = click('<a href="/api/sessions/s/artifacts/a.png" target="_blank">a</a>')
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(document.querySelector("[data-kt-image-lightbox]")).not.toBeNull()
+    expect(hostOpened).toEqual([])
+  })
+
+  it("downloads a non-image artifact through the page, never the system browser", () => {
+    const downloads = []
+    const nativeClick = window.HTMLAnchorElement.prototype.click
+    vi.spyOn(window.HTMLAnchorElement.prototype, "click").mockImplementation(function () {
+      if (this.hasAttribute("download")) downloads.push({ href: this.href, name: this.download })
+      else nativeClick.call(this)
+    })
+
+    const event = click('<a href="/api/sessions/s/artifacts/exports/bundle.zip">zip</a>')
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(downloads).toEqual([
+      { href: "http://localhost/api/sessions/s/artifacts/exports/bundle.zip", name: "bundle.zip" },
+    ])
+    expect(document.querySelector("[data-kt-image-lightbox]")).toBeNull()
+    expect(hostOpened).toEqual([])
+    expect(browserOpened).toEqual([])
+  })
+
+  it("routes same-origin artifact window.open calls in-app", () => {
+    expect(window.open("/api/sessions/s/artifacts/a.webp")).toBeNull()
+
+    expect(document.querySelector("[data-kt-image-lightbox] img")).not.toBeNull()
+    expect(browserOpened).toEqual([])
+    expect(hostOpened).toEqual([])
+  })
+
+  it("keeps app routes as in-app navigation", () => {
+    const event = click('<a href="/sessions/abc">session</a>')
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(hostOpened).toEqual([])
+    expect(document.querySelector("[data-kt-image-lightbox]")).toBeNull()
   })
 
   it("never falls back to window.open when the shell cannot open the link", () => {

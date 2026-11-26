@@ -23,6 +23,10 @@ _PLUGINS: dict[str, dict[str, str]] = {
         "module": "kohakuterrarium.builtins.plugins.permgate.plugin",
         "class": "PermGatePlugin",
     },
+    "repeat_guard": {
+        "module": "kohakuterrarium.builtins.plugins.repeat_guard.plugin",
+        "class": "RepeatGuardPlugin",
+    },
     "sandbox": {
         "module": "kohakuterrarium.builtins.plugins.sandbox.plugin",
         "class": "SandboxPlugin",
@@ -37,9 +41,9 @@ _PLUGINS: dict[str, dict[str, str]] = {
     },
 }
 
-# Catalog plugins discovered enabled. Both gate themselves on the attached
-# clients' renderers, so a headless creature gets no prompt or tool from them.
-_DEFAULT_ON: frozenset[str] = frozenset({"ui.apps", "ui.declarative"})
+# Catalog plugins discovered enabled. The ui.* pair gates itself on the attached
+# clients' renderers; repeat_guard adds no prompt or tool, only a block message.
+_DEFAULT_ON: frozenset[str] = frozenset({"repeat_guard", "ui.apps", "ui.declarative"})
 
 # Plugin packs are syntactic sugar for opting into multiple plugins by
 # name. Budget is intentionally NOT bundled into any default pack — it

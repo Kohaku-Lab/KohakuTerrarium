@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from kohakuterrarium.api.auth import User, get_optional_user
 from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
 from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
@@ -19,6 +20,11 @@ from kohakuterrarium.api.routes.persistence.resume.coordinator import (
 from kohakuterrarium.session.readonly.view import SessionReadView
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
+from kohakuterrarium.studio.persistence.projects import (
+    annotate_rows,
+    build_view,
+    live_locations,
+)
 from kohakuterrarium.studio.persistence.session_index import get_session_index_default
 from kohakuterrarium.studio.persistence.session_index.refresh import reconcile_guarded
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
@@ -318,12 +324,31 @@ async def end_open_conversation(
         raise
 
 
+def build_open_rows_with_projects(
+    service: TerrariumService, session_dir: Path, user_id: int | None = None
+) -> list[dict[str, Any]]:
+    """Open rows, each with ``project`` (``{"id", "name"}`` or ``None``)."""
+    rows = build_open_session_rows(service, session_dir)
+    view = build_view(
+        get_session_index_default(session_dir),
+        user_id=user_id,
+        live=live_locations(rows),
+        strict=False,
+    )
+    annotate_rows(view, rows)
+    return rows
+
+
 @router.get("/open")
 async def list_open_sessions(
     session_dir: Path = Depends(resolve_request_session_dir),
     service: TerrariumService = Depends(get_service),
+    user: User | None = Depends(get_optional_user),
 ):
     """Return conversations that are live or not explicitly ended by the user."""
     return await run_in_persistence_executor(
-        build_open_session_rows, service, session_dir
+        build_open_rows_with_projects,
+        service,
+        session_dir,
+        user.id if user is not None else None,
     )

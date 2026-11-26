@@ -10,9 +10,9 @@
       <div>
         <label class="text-[11px] text-warm-400 block mb-1">{{ t("settings.mcp.transport") }}</label>
         <el-select v-model="form.transport" size="small" class="w-full">
-          <el-option value="stdio" :label="t('settings.mcp.transportStdio')" />
-          <el-option value="http" :label="t('settings.mcp.transportHttp')" />
+          <el-option v-for="option in transportOptions" :key="option.value" :value="option.value" :label="t(option.labelKey)" />
         </el-select>
+        <p class="text-[11px] text-warm-400 mt-1" data-test="mcp-transport-hint">{{ t(transportOption(form.transport).hintKey) }}</p>
       </div>
 
       <template v-if="form.transport === 'stdio'">
@@ -35,7 +35,7 @@
       <template v-else>
         <div>
           <label class="text-[11px] text-warm-400 block mb-1">{{ t("settings.mcp.url") }}</label>
-          <el-input v-model="form.url" size="small" placeholder="https://mcp.example.com/api" />
+          <el-input v-model="form.url" size="small" placeholder="https://mcp.example.com/mcp" data-test="mcp-url" />
         </div>
         <div>
           <label class="text-[11px] text-warm-400 block mb-1">{{ t("settings.mcp.headers") }}</label>
@@ -102,6 +102,7 @@ import { ElMessage } from "element-plus"
 
 import { settingsAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { MCP_TRANSPORT_OPTIONS, transportChoice, transportOption } from "@/utils/mcpTransports"
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -125,6 +126,7 @@ const form = reactive({
   connectTimeout: null,
 })
 
+const transportOptions = MCP_TRANSPORT_OPTIONS
 const saving = ref(false)
 const testing = ref(false)
 const testResult = ref(null)
@@ -171,7 +173,7 @@ function headersStrToObject(text) {
 
 function reset(srv) {
   if (!srv) return
-  form.transport = srv.transport || "stdio"
+  form.transport = transportChoice(srv.transport)
   form.command = srv.command || ""
   form.argsStr = (srv.args || []).join(" ")
   form.envStr = envObjectToStr(srv.env)

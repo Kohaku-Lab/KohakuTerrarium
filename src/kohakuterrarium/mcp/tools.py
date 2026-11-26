@@ -8,6 +8,8 @@ import json
 from typing import Any
 
 from kohakuterrarium.builtins.tool_catalog import register_builtin
+from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
+from kohakuterrarium.errors import MCPError
 from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.utils.logging import get_logger
@@ -226,7 +228,7 @@ class MCPConnectTool(BaseTool):
                 "name": {"type": "string", "description": "Name for this MCP server"},
                 "transport": {
                     "type": "string",
-                    "description": "Transport: stdio, http/sse, or streamable_http",
+                    "description": "Transport: stdio, streamable_http, or sse (http is the old name of sse)",
                 },
                 "command": {
                     "type": "string",
@@ -278,9 +280,7 @@ class MCPConnectTool(BaseTool):
         if not name:
             return ToolResult(error="Missing 'name' argument. Give this server a name.")
         if not command and not url:
-            return ToolResult(
-                error="Provide either 'command' (for stdio) or 'url' (for HTTP transports)."
-            )
+            return await self._connect_registered(mgr, name)
 
         if isinstance(cmd_args, str):
             cmd_args = cmd_args.split()
@@ -299,17 +299,46 @@ class MCPConnectTool(BaseTool):
         except (TypeError, ValueError):
             return ToolResult(error="'connect_timeout' must be a number if provided.")
 
-        config = MCPServerConfig(
-            name=name,
-            transport=resolved_transport,
-            command=command,
-            args=cmd_args,
-            env=env,
-            url=url,
-            headers=headers,
-            connect_timeout=timeout_value,
-        )
+        try:
+            config = MCPServerConfig.from_entry(
+                {
+                    "name": name,
+                    "transport": resolved_transport,
+                    "command": command,
+                    "args": cmd_args,
+                    "env": env,
+                    "url": url,
+                    "headers": headers,
+                    "connect_timeout": timeout_value,
+                },
+                expand_env=False,
+            )
+        except MCPError as e:
+            return ToolResult(error=str(e))
+        return await self._connect(mgr, config)
 
+    async def _connect_registered(self, mgr: MCPClientManager, name: str) -> ToolResult:
+        """Connect a server from the global registry by name."""
+        entry = next(
+            (s for s in load_global_mcp_servers() if s.get("name") == name), None
+        )
+        if entry is None:
+            return ToolResult(
+                error=(
+                    f"No registered MCP server named '{name}'. Provide either "
+                    "'command' (for stdio) or 'url' (for HTTP transports)."
+                )
+            )
+        try:
+            config = MCPServerConfig.from_entry(entry)
+        except MCPError as e:
+            return ToolResult(error=str(e))
+        return await self._connect(mgr, config)
+
+    async def _connect(
+        self, mgr: MCPClientManager, config: MCPServerConfig
+    ) -> ToolResult:
+        name = config.name
         try:
             info = await mgr.connect(config)
             tool_count = len(info.tools)
@@ -325,6 +354,8 @@ class MCPConnectTool(BaseTool):
             return ToolResult(
                 error="MCP SDK not installed. Install with: pip install mcp"
             )
+        except MCPError as e:
+            return ToolResult(error=str(e))
         except Exception as e:
             return ToolResult(error=f"Failed to connect to {name}: {e}")
 

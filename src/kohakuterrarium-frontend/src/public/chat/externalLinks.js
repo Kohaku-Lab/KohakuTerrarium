@@ -12,6 +12,44 @@ export function isExternalUrl(href, origin = null) {
   return origin === null || url.origin !== origin
 }
 
+/** Path prefixes the backend serves itself; every other same-origin path is a page of the app. */
+export const BACKEND_PATH_PREFIXES = Object.freeze(["/api/", "/ws/"])
+
+const IMAGE_EXTENSION = /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i
+
+/**
+ * Whether `href` is a backend file or endpoint (for example an artifact under
+ * `/api/`) on `origin` rather than a page of the app. With no `origin` only a
+ * root-relative path can qualify.
+ */
+export function isBackendResourceUrl(href, origin = null) {
+  if (typeof href !== "string" || !href.trim()) return false
+  const raw = href.trim()
+  if (!origin && (HAS_SCHEME.test(raw) || raw.startsWith("//") || !raw.startsWith("/")))
+    return false
+  let url
+  try {
+    url = new URL(raw, origin ? `${origin}/` : "http://localhost/")
+  } catch {
+    return false
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false
+  if (origin && url.origin !== origin) return false
+  return BACKEND_PATH_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))
+}
+
+/** Whether the path of `href` names an image file by its extension. */
+export function isImageUrl(href) {
+  if (typeof href !== "string") return false
+  let path
+  try {
+    path = new URL(href, "http://localhost/").pathname
+  } catch {
+    return false
+  }
+  return IMAGE_EXTENSION.test(path)
+}
+
 // Any explicit scheme (including `javascript:`, `data:`, `mailto:`, protocol
 // relative `//host`). A href with a scheme is never a bare relative path.
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i
@@ -98,14 +136,18 @@ export function shouldOpenThroughHost(value) {
   return true
 }
 
-/** Teach a markdown-it instance to render external links as `_blank`. */
+/**
+ * Teach a markdown-it instance to render external links and backend file links
+ * as `_blank`, so neither replaces the app in its own tab.
+ */
 export function applyExternalLinkRule(md, origin = null) {
   const fallback =
     md.renderer.rules.link_open ||
     ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options, env, self))
   md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
     const token = tokens[idx]
-    if (isExternalUrl(token.attrGet("href"), origin)) {
+    const href = token.attrGet("href")
+    if (isExternalUrl(href, origin) || isBackendResourceUrl(href, origin)) {
       token.attrSet("target", "_blank")
       token.attrSet("rel", "noopener noreferrer")
     }

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
 
-import { resolvePlatformLink, shouldOpenThroughHost } from "./externalLinks.js"
+import MarkdownIt from "markdown-it"
+
+import {
+  BACKEND_PATH_PREFIXES,
+  applyExternalLinkRule,
+  isBackendResourceUrl,
+  isImageUrl,
+  resolvePlatformLink,
+  shouldOpenThroughHost,
+} from "./externalLinks.js"
 
 // Browsers in this suite serve from http://localhost/ (see vitest.config.js).
 const DASHBOARD = "http://localhost"
@@ -92,5 +101,51 @@ describe("shouldOpenThroughHost — who owns the click", () => {
     expect(shouldOpenThroughHost("command:foo")).toBe(false)
     expect(shouldOpenThroughHost("")).toBe(false)
     expect(shouldOpenThroughHost(null)).toBe(false)
+  })
+})
+
+describe("isBackendResourceUrl — backend files are not app pages", () => {
+  it("keeps the prefix list in one place", () => {
+    expect(BACKEND_PATH_PREFIXES).toEqual(["/api/", "/ws/"])
+  })
+
+  it("matches same-origin /api/ paths, relative or absolute", () => {
+    expect(isBackendResourceUrl("/api/sessions/s/artifacts/x.jpg", DASHBOARD)).toBe(true)
+    expect(isBackendResourceUrl(`${DASHBOARD}/api/sessions/s/artifacts/x.zip`, DASHBOARD)).toBe(
+      true,
+    )
+  })
+
+  it("leaves app routes, foreign origins and look-alike paths out", () => {
+    expect(isBackendResourceUrl("/sessions/abc", DASHBOARD)).toBe(false)
+    expect(isBackendResourceUrl("/apix/a", DASHBOARD)).toBe(false)
+    expect(isBackendResourceUrl("https://example.test/api/x", DASHBOARD)).toBe(false)
+    expect(isBackendResourceUrl("mailto:a@example.test", DASHBOARD)).toBe(false)
+  })
+
+  it("only accepts a root-relative path when the origin is unknown", () => {
+    expect(isBackendResourceUrl("/api/x.png", null)).toBe(true)
+    expect(isBackendResourceUrl("api/x.png", null)).toBe(false)
+    expect(isBackendResourceUrl("//example.test/api/x.png", null)).toBe(false)
+    expect(isBackendResourceUrl("https://example.test/api/x.png", null)).toBe(false)
+  })
+})
+
+describe("isImageUrl", () => {
+  it("recognises image extensions on the path only", () => {
+    expect(isImageUrl("/api/a/pose-overview.JPG")).toBe(true)
+    expect(isImageUrl("/api/a/b.webp?v=1")).toBe(true)
+    expect(isImageUrl("/api/a/b.zip")).toBe(false)
+    expect(isImageUrl("/api/a/b.zip?name=x.png")).toBe(false)
+    expect(isImageUrl(null)).toBe(false)
+  })
+})
+
+describe("applyExternalLinkRule with an explicit origin", () => {
+  const md = applyExternalLinkRule(new MarkdownIt(), DASHBOARD)
+
+  it("targets backend file links _blank and leaves app routes in-app", () => {
+    expect(md.render("[f](/api/sessions/s/artifacts/a.zip)")).toContain('target="_blank"')
+    expect(md.render("[s](/sessions/abc)")).not.toContain("target=")
   })
 })

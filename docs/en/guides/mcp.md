@@ -61,20 +61,49 @@ Managed interactively:
 
 ```bash
 kt config mcp list
-kt config mcp add              # interactive: transport, command, args, env, url
+kt config mcp add              # interactive: transport (stdio, streamable_http, sse), command, args, env, url, headers
 kt config mcp edit sqlite
 kt config mcp delete sqlite
 ```
 
 Global servers are available to any creature that references them.
 
+Registry entries may use `${VAR}` and `${VAR:default}` in `command`, `args`,
+`env`, `url` and `headers`, so a token does not have to live in the file:
+
+```yaml
+- name: sandbox
+  transport: streamable_http
+  url: http://127.0.0.1:8765/mcp
+  headers:
+    Authorization: "Bearer ${SANDBOX_TOKEN}"
+```
+
+The markers are expanded from the KT process environment each time the entry
+is turned into a connection: when a creature starts, when `mcp_connect` names a
+registered server, and when Settings > MCP > **Test connection** runs. The file
+and the `GET /api/settings/mcp` response keep the raw `${VAR}` text, never the
+value. A variable that is not set and has no default stops that server with
+`environment variable SANDBOX_TOKEN is not set (used in headers of server
+sandbox)` instead of sending the literal `${SANDBOX_TOKEN}`; the creature still
+starts without it. `${VAR:}` means "empty when unset". An inline
+`mcp_connect` definition written by the model is used as given and is not
+expanded.
+
 ## Transports
 
 - **stdio**: launches a subprocess (`command` + `args` + `env`). Best for local servers, low latency, isolated-per-agent process lifetime.
-- **http** / **sse**: opens a legacy SSE session to `url`. Use this for servers that explicitly expose SSE endpoints such as `/sse`.
-- **streamable_http**: opens a modern streamable HTTP session to `url`. This is the default for many newer FastMCP servers (`FastMCP.streamable_http_app()`).
+- **streamable_http**: opens a modern streamable HTTP session to `url` (usually ending in `/mcp`). This is what current remote servers speak, including FastMCP's `streamable_http_app()`.
+- **sse**: opens a legacy SSE session to `url` (usually ending in `/sse`). `http` is the old name of this transport and still works.
 
-Pick stdio for local MCP servers (sqlite, filesystem, git), `streamable_http` for most modern hosted servers, and `http` / `sse` only when the server specifically exposes legacy SSE.
+Pick stdio for local MCP servers (sqlite, filesystem, git), `streamable_http` for remote servers, and `sse` only when the server only exposes legacy SSE.
+
+Every editor offers the same three choices: the web UI (Settings > MCP, both the
+Add form and the Edit dialog: "stdio (subprocess)", "Streamable HTTP
+(recommended for remote)", "SSE (legacy)"), `kt config mcp add`, and the rich
+CLI and ktui settings screens. An existing `http` entry is shown as SSE. The
+HTTP API accepts `stdio`, `streamable_http`, `sse` and `http`, and rejects
+anything else with `422`.
 
 ## How MCP tools reach the LLM
 
@@ -136,15 +165,38 @@ images, the `isError` flag) for callers that want to render it themselves.
 Both raise `ValueError` when the server is not connected or does not list the
 tool. After `connect`, `MCPServerInfo.instructions` holds the instructions the
 server sent in its `initialize` result (an empty string when it sent none).
-The framework does not add these instructions to the system prompt.
+`list_servers()` reports them as `instructions`. In a creature, the "Available
+MCP Tools" prompt section shows each server's instructions under its
+`### Server: <name>` heading (capped at 4000 characters, with a truncation
+marker); a server that sent none adds nothing.
 
 ## Troubleshooting
+
+A failed connect raises one typed error (`kohakuterrarium.errors.MCPConnectionError`,
+`MCPTimeoutError` or `MCPCommandNotFoundError`, all `MCPError`) whose message
+names the server, its URL (without query string or credentials) and the cause.
+The Settings > MCP **Test connection** button, `mcp_connect` and the agent log
+show the same text. An HTTP error status or a refused connection ends the
+attempt at once instead of waiting for `connect_timeout`. Header values never
+appear in messages or logs.
+
+| Message | What to do |
+| --- | --- |
+| `HTTP 401 Unauthorized from <url>; check the headers/token` (or 403) | The `Authorization` header is missing or wrong. If it uses `${VAR}`, check the variable is set for the KT process. |
+| `HTTP 400 Bad Request from <url>; the server may speak streamable HTTP: try the streamable_http transport` | The entry uses `sse` / `http` but the server only speaks streamable HTTP. |
+| `HTTP 404 Not Found from <url>; check the URL path (for example /mcp)` | Wrong endpoint path. FastMCP serves streamable HTTP at `/mcp` and SSE at `/sse`. |
+| `HTTP 5xx ...; server error: check the MCP server's logs` | The server failed while answering. |
+| `cannot connect to <url>: <reason>` | Nothing listens at that host and port, or DNS failed. |
+| `TLS handshake with <url> failed: <reason>` | Certificate or TLS problem. |
+| `timed out after Ns; last HTTP response was ...` | The server answered but never finished the MCP handshake. |
+| `command not found: <command>` | A stdio server whose `command` is not on `PATH`. |
+| `the server process exited before the handshake finished` | A stdio server crashed on start. Run its command in a shell to see its error. |
 
 - **Server not connecting (stdio).** Run `kt config mcp list` to see the resolved command. Try it in a shell first (`mcp-server-sqlite /path/to/db`) and check the server prints its handshake.
 - **Server not connecting (http / sse).** Verify the URL is SSE-compatible. Some servers expose both `/sse` and `/ws`; KohakuTerrarium's `http` / `sse` transport expects the SSE endpoint.
 - **Server not connecting (streamable_http).** Verify the URL points at the server's streamable HTTP endpoint (for example FastMCP's `streamable_http_app()` route) rather than a legacy SSE path.
 - **Tool not found.** The meta-tools list is computed at connection time. Reconnect (`mcp_disconnect` + `mcp_connect`) if the server hot-added tools.
-- **Env vars not substituted.** MCP config supports `${VAR}` and `${VAR:default}`, same as creature configs.
+- **Env vars not substituted.** MCP config supports `${VAR}` and `${VAR:default}`, same as creature configs. The variable must be set in the environment of the process that runs KT (the `kt serve` / `kt app` process for the web UI), not only in your shell.
 - **Server crashes mid-session.** Stdio servers respawn on next `mcp_call`. Check the server's own logs.
 
 ## See also

@@ -988,6 +988,67 @@ class TestModulesIntegration:
             assert ctx.get_state("turns") == 7
             assert peer.get_state("turns") == 2
 
+        # ── repeat_guard: on by default, stops a model that repeats a failing call ──
+        fail = "[/recorder]@@msg=explode\n[recorder/]"
+        looper = make_agent(
+            script=[
+                ScriptEntry(fail, match="loop explode"),
+                *[ScriptEntry(fail, match="deliberate explosion") for _ in range(4)],
+                ScriptEntry(
+                    "[/recorder]@@msg=calm\n[recorder/]",
+                    match="repeating it will fail the same way",
+                ),
+                ScriptEntry("gave up looping", match="recorder saw: calm"),
+                ScriptEntry(fail, match="explode again"),
+                ScriptEntry("fresh turn done", match="deliberate explosion"),
+            ]
+        )
+        assert looper.plugins.is_enabled("repeat_guard")
+        assert "repeat_guard" in looper.plugins.default_on_names()
+        looped = RecordingTool()
+        looper.registry.register_tool(looped)
+        looper.executor.register_tool(looped)
+        await looper.start()
+        try:
+            await looper._process_event(create_user_input_event("loop explode"))
+            # The model asked five times; only the first three reached the tool.
+            assert looped.executed_with == [{"msg": "explode"}] * 3 + [{"msg": "calm"}]
+            convo_text = " ".join(
+                m.get_text_content()
+                for m in looper.controller.conversation.get_messages()
+            )
+            block = (
+                "This exact call to recorder failed 3 times in a row with the same "
+                "arguments: recorder failed: deliberate explosion. Change the "
+                "arguments or take another approach; repeating it will fail the "
+                "same way."
+            )
+            assert convo_text.count(block) == 2
+            assert "gave up looping" in convo_text
+
+            # A new user turn starts clean: the same call runs again.
+            await looper._process_event(create_user_input_event("explode again"))
+            assert looped.executed_with[-1] == {"msg": "explode"}
+            assert len(looped.executed_with) == 5
+
+            # A lower limit applies to the open streak; option 0 turns the guard off.
+            looper.plugins.set_plugin_options("repeat_guard", {"repeat_failures": 1})
+            job = await looper.executor.submit(
+                "recorder", {"msg": "explode"}, is_direct=True
+            )
+            assert "failed 1 times" in (await looper.executor.wait_for(job)).error
+            assert len(looped.executed_with) == 5
+            looper.plugins.set_plugin_options("repeat_guard", {"repeat_failures": 0})
+            for runs in (6, 7):
+                job = await looper.executor.submit(
+                    "recorder", {"msg": "explode"}, is_direct=True
+                )
+                result = await looper.executor.wait_for(job)
+                assert "deliberate explosion" in result.error
+                assert len(looped.executed_with) == runs
+        finally:
+            await looper.stop()
+
     async def test_trigger_produces_event_and_drives_a_turn(self, make_agent):
         """trigger protocol — a real :class:`TimerTrigger` is hot-plugged
         onto the running agent, its ``wait_for_trigger`` produces a

@@ -59,11 +59,17 @@ def file_data_url(path: Path) -> str:
     return f"data:{_MIME[fmt]};base64,{base64.b64encode(data).decode('ascii')}"
 
 
-def recent_image_urls(messages: Iterable[Any], count: int) -> list[str]:
+def recent_image_urls(
+    messages: Iterable[Any],
+    count: int,
+    *,
+    none_hint: str = "Pass referenced_image_paths or ask the user to attach them.",
+) -> list[str]:
     """The last ``count`` conversation images as inline URLs, newest first.
 
     Looks through user messages and tool results; a reference that cannot be
     inlined (a deleted artifact) is an error rather than a silent skip.
+    ``none_hint`` ends the error raised when the conversation has no image.
     """
     found: list[str] = []
     for message in reversed(list(messages)):
@@ -77,9 +83,14 @@ def recent_image_urls(messages: Iterable[Any], count: int) -> list[str]:
             found.append(_inline(url))
             if len(found) == count:
                 return found
+    if not found:
+        raise ImageInputError(
+            f"the conversation holds no images to edit ({count} requested). {none_hint}"
+        )
     raise ImageInputError(
-        f"the conversation holds only {len(found)} image(s); "
-        f"{count} requested - pass referenced_image_paths or ask the user to attach them"
+        f"the conversation holds only {len(found)} image(s) ({count} requested). "
+        f"Pass num_last_images_to_include of at most {len(found)}, or list the "
+        "files in referenced_image_paths."
     )
 
 

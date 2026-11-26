@@ -283,6 +283,7 @@ your own plugins do. Full reference:
 |---|---|---|---|
 | `sandbox` | plugin | `pre_tool_execute`, `runtime_services` | Hard capability gate: filesystem read / write scope, network allowlist, subprocess syscall level. Capability profile (`PURE` / `READ_ONLY` / `WORKSPACE` / `NETWORK` / `SHELL`) plus per-axis overrides. Hot-reconfigurable. |
 | `budget` | plugin | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Multi-axis budget accounting and enforcement (turns, tool calls, walltime). Configure axes under `options`. |
+| `repeat_guard` | plugin | `pre_tool_execute`, `post_tool_execute`, `on_event` | On by default. Blocks a tool call after it failed 3 times in a row (option `repeat_failures`) with the same arguments and the same error, until the arguments change or a new turn opens. |
 | `permgate` | plugin | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls; emits a confirmation prompt to the output bus and waits on the reply. |
 | `compact.auto` | plugin | `post_llm_call`, `on_load` | Trigger context compaction after high-token LLM calls. |
 | `ui.apps` | plugin | `contribute_tools`, `presentation_contribution` | Adds `show_app`: the agent can show interactive HTML apps in the web UI. See [Chat widgets](chat-widgets.md). |

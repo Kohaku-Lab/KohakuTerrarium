@@ -860,3 +860,49 @@ class TestQueuedUpdates:
                 reopened.close()
         finally:
             release.set()
+
+
+class TestLocations:
+    """``location_counts`` groups by folder; ``list(locations=)`` filters by it."""
+
+    @staticmethod
+    def _put(idx, filename, *, pwd, node_id="", last_active="2026-01-01"):
+        entry = _entry(filename=filename, node_id=node_id, last_active=last_active)
+        entry.pwd = pwd
+        idx.upsert(entry)
+
+    def test_counts_and_latest_activity_per_node_and_folder(self, idx):
+        self._put(idx, "a1.kohakutr", pwd="/a", last_active="2026-01-01")
+        self._put(idx, "a2.kohakutr", pwd="/a", last_active="2026-03-01")
+        self._put(idx, "a3.kohakutr", pwd="/a", node_id="w1")
+        self._put(idx, "none.kohakutr", pwd="")
+        assert idx.location_counts() == {
+            ("", "/a"): (2, "2026-03-01"),
+            ("w1", "/a"): (1, "2026-01-01"),
+            ("", ""): (1, "2026-01-01"),
+        }
+
+    def test_list_keeps_only_selected_locations(self, idx):
+        self._put(idx, "a.kohakutr", pwd="/a", last_active="2026-01-02")
+        self._put(idx, "b.kohakutr", pwd="/b")
+        self._put(idx, "remote.kohakutr", pwd="/a", node_id="w1")
+        page = idx.list(locations={("", "/a")})
+        assert [row["filename"] for row in page.rows] == ["a.kohakutr"]
+        assert page.total == 1
+        assert idx.list(locations=set()).total == 0
+        assert idx.list(locations=None).total == 3
+
+    def test_searched_list_applies_locations_too(self, idx):
+        for name, pwd in (("x1", "/a"), ("x2", "/b")):
+            entry = _entry(filename=f"{name}.kohakutr", preview="needle text")
+            entry.pwd = pwd
+            idx.upsert(entry)
+        page = idx.list(search="needle", locations={("", "/b")})
+        assert [row["filename"] for row in page.rows] == ["x2.kohakutr"]
+
+    def test_many_sessions_group_in_one_pass(self, idx):
+        for i in range(1500):
+            self._put(idx, f"s{i}.kohakutr", pwd=f"/repo{i % 30}/sub{i % 7}")
+        counts = idx.location_counts()
+        assert sum(count for count, _ in counts.values()) == 1500
+        assert len(counts) == 210
