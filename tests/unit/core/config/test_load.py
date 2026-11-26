@@ -376,6 +376,14 @@ class TestLoadAgentConfig:
         assert c.name == "x"
         assert not hasattr(c, "max_subagent_depth")
 
+    def test_numeric_variation_selections_load_as_text(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "name: x\ncontroller:\n  variation_selections:\n"
+            "    context: 500000\n    reasoning: high\n"
+        )
+        c = load_agent_config(tmp_path)
+        assert c.variation_selections == {"context": "500000", "reasoning": "high"}
+
     def test_env_interpolation(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MY_MODEL", "gpt-7")
         (tmp_path / "config.yaml").write_text("name: a\nmodel: ${MY_MODEL}\n")

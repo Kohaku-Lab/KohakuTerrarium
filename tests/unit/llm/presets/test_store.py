@@ -222,6 +222,32 @@ class TestSerializeUserData:
         assert loaded[("openai", "rt")].max_output == 999
         assert loaded[("openai", "rt")].model == "gpt-4o"
 
+    def test_legacy_context_group_is_folded_on_load_and_written_back_unchanged(self):
+        legacy = {
+            "model": "claude-x",
+            "max_context": 200000,
+            "max_output": 65536,
+            "variation_groups": {
+                "context": {
+                    "200k": {"max_context": 200000},
+                    "long": {"max_context": 1000000},
+                }
+            },
+        }
+        save_yaml_store({"version": 3, "presets": {"anthropic": {"cc": legacy}}})
+        loaded = load_presets()
+        preset = loaded[("anthropic", "cc")]
+        assert preset.variation_groups == {}
+        assert preset.context_window == 1000000
+        assert preset.context_aliases == {"long": 1000000}
+
+        # Saving any preset writes this one back as the user wrote it.
+        other = LLMPreset(name="o", model="gpt-4o", provider="openai")
+        data = serialize_user_data({**loaded, ("openai", "o"): other}, {})
+        assert data["presets"]["anthropic"]["cc"] == legacy
+        save_yaml_store(data)
+        assert load_presets()[("anthropic", "cc")] == preset
+
     def test_named_subagent_models_are_serialised_without_normalisation(self):
         mapping = {"researcher": "anthropic/claude-sonnet", "Reviewer": "raw-model"}
         data = serialize_user_data({}, {}, subagent_models=mapping)

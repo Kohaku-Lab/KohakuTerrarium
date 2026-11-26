@@ -382,12 +382,15 @@ def _construct_agent_config(
         ),
         model=controller_data.get("model", config_data.get("model", "")),
         provider=controller_data.get("provider", config_data.get("provider", "")),
-        variation_selections=dict(
-            controller_data.get(
-                "variation_selections", config_data.get("variation_selections", {})
-            )
-            or {}
-        ),
+        variation_selections={
+            str(group): str(option)
+            for group, option in (
+                controller_data.get(
+                    "variation_selections", config_data.get("variation_selections", {})
+                )
+                or {}
+            ).items()
+        },
         variation=controller_data.get("variation", config_data.get("variation", "")),
         auth_mode=controller_data.get("auth_mode", config_data.get("auth_mode", "")),
         api_key_env=controller_data.get(

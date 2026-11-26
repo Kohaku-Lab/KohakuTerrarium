@@ -121,6 +121,15 @@ controller:
 - Variation patch 只能寫入下列 root：`temperature`、`reasoning_effort`、`service_tier`、`max_context`、`max_output`、`extra_body`。其他都會被拒絕。
 - 同一個 dotted path 上的跨 group 碰撞會 raise：兩個 selection 不能同時宣告 `extra_body.reasoning.effort`。
 
+`context=<大小>` 對所有 preset 都能用，不需要 group。它設定 `max_context`，也就是 KT 壓縮歷史所依據的預算；它不會送給 provider。大小可以是整數 token 數，或 `<n>k` / `<n>m` (不分大小寫，`k` = 1,000，`m` = 1,000,000，結果為整數時可以帶小數：`1.5m`)。它可以和其他 group 組合：
+
+```text
+codex/gpt-6.1-sol@reasoning=high,context=500k
+codex/gpt-6.1-sol@context=500000                # 同一個預算
+```
+
+標準識別字用最短形式寫大小 (`context=500k`、`context=1m`)，所以儲存的 selector 會解析回同一個數字。每個 option 都只設定 `max_context` 的 `context` group (舊的 `200k` / `1m` 寫法，有些套件仍在使用) 按這個數字選擇處理：它不再作為 group 列出，`context_window` 預設取最大的 option，名字不是大小的 option (`long`) 仍解析到它的數字。option 還修改其他欄位的 `context` group 保留它的命名 option；其他值當成大小解析。Preset 帶有一個僅供參考的 `context_window` (KT 已知的模型視窗大小)。它不限制任何值：UI 用它在 `max_context` 比較大時給出提示。
+
 每個 preset 的 group 與 option 目錄請看 [builtins.md：Variation groups](builtins.md#variation-groups)。
 
 ### Provider 專屬 `extra_body` 說明

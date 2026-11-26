@@ -18,7 +18,7 @@ from kohakuterrarium.core.conversation.context_snapshot import (
 from kohakuterrarium.core.conversation.pinned import (
     sync_with_store as sync_pinned_with_store,
 )
-from kohakuterrarium.core.token_ledger import context_window
+from kohakuterrarium.core.token_ledger import context_window, model_context_window
 from kohakuterrarium.session.attach.agent import attach_to_session as _attach_to_session
 from kohakuterrarium.session.attach.agent import (
     detach_from_session as _detach_from_session,
@@ -88,6 +88,7 @@ class AgentSessionMixin:
                 "llm_name": llm_identifier,
                 "agent_name": self.config.name,
                 "max_context": max_context,
+                "context_window": model_context_window(self),
                 "compact_threshold": compact_at,
             },
         )

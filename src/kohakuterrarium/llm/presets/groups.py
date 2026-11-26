@@ -35,21 +35,10 @@ _GPT6_REASONING_GROUP: dict[str, dict[str, Any]] = {
     "ultra": {"reasoning_effort": "ultra"},
 }
 
-# Operating context window, selectable per run. ``max_context`` is not just
-# wire metadata: it sets the auto-compaction threshold
-# (``compact_at = max_context * threshold``), so picking a variant changes when
-# the conversation gets summarised, not only what the backend is asked for.
-#
-# 1M is the full window. Codex's catalog reports 872k because it subtracts the
-# 128k output reservation; at the default 0.8 threshold compaction fires at
-# 800k input, inside that ceiling. Raising ``compact.threshold`` above ~0.87
-# with this variant selected would let input exceed what the model accepts.
-_GPT5X_CONTEXT_GROUP: dict[str, dict[str, Any]] = {
-    "272k": {"max_context": 272000},
-    "400k": {"max_context": 400000},
-    "700k": {"max_context": 700000},
-    "1m": {"max_context": 1000000},
-}
+# Full Codex window for the 5.6 / GPT-6 line, recorded as ``context_window``.
+# Codex's catalog reports 872k because it subtracts the 128k output reservation,
+# so a ``max_context`` above ~870k lets input exceed what the model accepts.
+CODEX_CONTEXT_WINDOW = 1_000_000
 
 # Codex fast mode maps to the API's priority tier; the literal fast tier is invalid.
 _CODEX_SPEED_GROUP: dict[str, dict[str, Any]] = {
@@ -251,13 +240,4 @@ _OR_REASONING_GROUP_LHM_TOGGLE: dict[str, dict[str, Any]] = {
 _OR_REASONING_GROUP_GROK_47: dict[str, dict[str, Any]] = {
     **_OR_REASONING_GROUP_NO_MINIMAL,
     "xhigh": {"extra_body.reasoning.effort": "xhigh"},
-}
-
-# Local context budgets for 1M-class OpenRouter models: KT compacts at
-# ``max_context * threshold``, so a smaller value compacts earlier.
-_OR_CONTEXT_GROUP: dict[str, dict[str, Any]] = {
-    "200k": {"max_context": 200000},
-    "400k": {"max_context": 400000},
-    "700k": {"max_context": 700000},
-    "1m": {"max_context": 1000000},
 }

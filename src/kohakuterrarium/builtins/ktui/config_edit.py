@@ -384,6 +384,8 @@ class ConfigEdit:
             updated.retry_policy = preset.retry_policy
             updated.provider_native_tools = preset.provider_native_tools
             updated.variation_groups = preset.variation_groups
+            updated.context_window = preset.context_window
+            updated.inherit_context_fold(preset)
         save_profile(updated)
         shell.app.notify(f"model {updated.provider}/{updated.name} saved", "success")
 

@@ -19,6 +19,7 @@ from kohakuterrarium.llm.presets import catalog as presets_mod
 from kohakuterrarium.llm.profiles import resolve as profiles_mod
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.grok.auth import GrokTokens
+from kohakuterrarium.llm.profiles.backends import save_yaml_store
 from kohakuterrarium.llm.profiles.types import LLMBackend, LLMPreset
 from kohakuterrarium.llm.profiles.resolve import (
     _find_profile_by_model,
@@ -897,3 +898,226 @@ class TestMiscHelpers:
         # no explicit provider -> legacy inference from base_url
         inferred = _login_provider_for({"base_url": "https://openrouter.ai/api/v1"})
         assert inferred == "openrouter"
+
+
+# ---------------------------------------------------------------------------
+# context=<n> selections and the informational context_window
+# ---------------------------------------------------------------------------
+
+
+class TestContextSelection:
+    def test_any_preset_accepts_a_numeric_context(self):
+        # gpt-5.4 never had a context group.
+        profile = get_profile("codex/gpt-5.4@context=150k")
+        assert profile.max_context == 150_000
+        assert profile.selected_variations == {"context": "150k"}
+
+    def test_default_max_context_is_unchanged_without_a_selection(self):
+        assert get_profile("codex/gpt-6.1-sol").max_context == 272_000
+        assert get_profile("codex/gpt-6-astra").max_context == 1_000_000
+
+    @pytest.mark.parametrize(
+        "old,tokens", [("1m", 1_000_000), ("272k", 272_000), ("700k", 700_000)]
+    )
+    def test_removed_group_option_names_still_resolve(self, old, tokens):
+        profile = get_profile(f"codex/gpt-6-astra@reasoning=ultra,context={old}")
+        assert profile.max_context == tokens
+        assert profile.reasoning_effort == "ultra"
+
+    def test_old_shorthand_size_still_resolves(self):
+        assert get_profile("codex/gpt-5.6-sol@1m").max_context == 1_000_000
+
+    def test_combined_selection_round_trips_through_the_identifier(self):
+        profile = get_profile("codex/gpt-6.1-sol@reasoning=high,context=500000")
+        ident = profile_to_identifier(profile)
+        assert ident == "codex/gpt-6.1-sol@context=500k,reasoning=high"
+        again = get_profile(ident)
+        assert (again.max_context, again.reasoning_effort) == (500_000, "high")
+        assert profile_to_identifier(again) == ident
+
+    def test_decimal_size_round_trips(self):
+        ident = profile_to_identifier(get_profile("openai/gpt-5.6-sol@context=1.5m"))
+        assert ident == "openai/gpt-5.6-sol@context=1500k"
+        assert get_profile(ident).max_context == 1_500_000
+
+    def test_invalid_context_raises(self):
+        with pytest.raises(ValueError, match="Invalid context size 'lots'"):
+            get_profile("codex/gpt-5.4@context=lots")
+
+    def test_controller_variation_selections_carry_context(self):
+        profile = resolve_controller_llm(
+            {
+                "llm": "codex/gpt-6.1-sol",
+                "variation_selections": {"context": "400k", "reasoning": "max"},
+            }
+        )
+        assert profile.max_context == 400_000
+        assert profile.reasoning_effort == "max"
+        assert profile.selected_variations == {"context": "400k", "reasoning": "max"}
+
+    def test_raw_model_selector_carries_context(self):
+        profile = resolve_controller_llm(
+            {"model": "gpt-5.4@context=64k", "provider": "codex"}
+        )
+        assert profile.max_context == 64_000
+
+    def test_context_window_is_resolved_but_never_caps(self):
+        profile = get_profile("codex/gpt-6-astra@context=2m")
+        assert profile.context_window == 1_000_000
+        assert profile.max_context == 2_000_000
+
+    def test_user_preset_context_window_round_trips_and_lists(self):
+        save_profile(
+            LLMPreset(
+                name="wide",
+                model="m",
+                provider="openai",
+                max_context=300_000,
+                context_window=400_000,
+            )
+        )
+        assert get_profile("openai/wide").context_window == 400_000
+        entries = {(e["provider"], e["name"]): e for e in list_all()}
+        assert entries[("openai", "wide")]["context_window"] == 400_000
+        assert entries[("openai", "wide")]["max_context"] == 300_000
+        assert entries[("codex", "gpt-6-astra")]["context_window"] == 1_000_000
+        assert entries[("codex", "gpt-5.4")]["context_window"] is None
+
+    def test_saving_a_profile_keeps_the_stored_context_window(self):
+        save_profile(
+            LLMPreset(name="kept", model="m", provider="openai", context_window=9000)
+        )
+        profile = get_profile("openai/kept")
+        profile.max_context = 5000
+        save_profile(profile)
+        again = get_profile("openai/kept")
+        assert (again.max_context, again.context_window) == (5000, 9000)
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("max_context", 0),
+            ("max_output", -1),
+            ("context_window", 0),
+            ("context_window", "big"),
+            ("variation_groups", {"g": {"o": {"model": "x"}}}),
+            ("variation_groups", {"g": ["not", "a", "map"]}),
+            ("extra_body", ["x"]),
+            ("provider_native_tools", "image_gen"),
+            ("context_aliases", {"long": 0}),
+            ("context_aliases", ["long"]),
+        ],
+    )
+    def test_invalid_preset_fields_are_rejected_on_save(self, field, value):
+        preset = LLMPreset(name="bad", model="m", provider="openai")
+        setattr(preset, field, value)
+        with pytest.raises(ValueError):
+            save_profile(preset)
+        assert get_profile("openai/bad") is None
+
+
+# ---------------------------------------------------------------------------
+# Legacy ``context`` groups read as the numeric context
+# ---------------------------------------------------------------------------
+
+_CC_CONTEXT = {
+    "200k": {"max_context": 200000},
+    "400k": {"max_context": 400000},
+    "700k": {"max_context": 700000},
+    "1m": {"max_context": 1000000},
+}
+
+
+def _install_cc_package(monkeypatch, context=None):
+    """A kt-claude-code-shaped package preset with a legacy context group."""
+    presets_mod._all_presets_cache = None
+    presets_mod._all_presets_key = None
+    monkeypatch.setattr(
+        presets_mod,
+        "list_packages",
+        lambda: [
+            {
+                "name": "kt-claude-code",
+                "llm_presets": [
+                    {
+                        "name": "cc-opus",
+                        "provider": "openai",
+                        "model": "claude-opus",
+                        "max_context": 200000,
+                        "variation_groups": {
+                            "context": context or _CC_CONTEXT,
+                            "reasoning": {"high": {"reasoning_effort": "high"}},
+                        },
+                    }
+                ],
+            }
+        ],
+    )
+
+
+class TestLegacyContextGroups:
+    def test_package_preset_group_is_folded_into_numeric_context(self, monkeypatch):
+        _install_cc_package(monkeypatch)
+        assert get_profile("openai/cc-opus@context=1m").max_context == 1000000
+        assert get_profile("openai/cc-opus@context=200k").max_context == 200000
+        assert get_profile("openai/cc-opus@700k").max_context == 700000
+        assert get_profile("openai/cc-opus@context=300k").max_context == 300000
+        plain = get_profile("openai/cc-opus")
+        assert (plain.max_context, plain.context_window) == (200000, 1000000)
+        entry = next(e for e in list_all() if e["name"] == "cc-opus")
+        assert entry["variation_groups"] == {
+            "reasoning": {"high": {"reasoning_effort": "high"}}
+        }
+        assert entry["context_window"] == 1000000
+
+    def test_group_numbers_win_and_identifiers_re_resolve(self, monkeypatch):
+        _install_cc_package(
+            monkeypatch,
+            {"long": {"max_context": 900000}, "1m": {"max_context": 1048576}},
+        )
+        long = get_profile("openai/cc-opus@context=long")
+        assert long.max_context == 900000
+        remapped = get_profile("openai/cc-opus@1m")
+        assert remapped.max_context == 1048576
+        # A resumed session re-resolves the stored identifier to the same size.
+        assert profile_to_identifier(long) == "openai/cc-opus@context=900k"
+        assert get_profile(profile_to_identifier(long)).max_context == 900000
+        assert get_profile(profile_to_identifier(remapped)).max_context == 1048576
+
+    def test_mixed_context_group_keeps_its_named_options(self, monkeypatch):
+        mixed = {"1m": {"max_context": 1000000, "extra_body.beta": "1m"}}
+        _install_cc_package(monkeypatch, mixed)
+        profile = get_profile("openai/cc-opus@context=1m")
+        assert profile.extra_body == {"beta": "1m"}
+        assert profile.context_window is None
+        entry = next(e for e in list_all() if e["name"] == "cc-opus")
+        assert entry["variation_groups"]["context"] == mixed
+
+    def test_user_preset_file_keeps_its_group_across_saves(self):
+        legacy = {
+            "model": "m",
+            "max_context": 200000,
+            "max_output": 65536,
+            "variation_groups": {
+                "context": {"long": {"max_context": 900000}, **_CC_CONTEXT}
+            },
+        }
+        save_yaml_store({"version": 3, "presets": {"openai": {"leg": legacy}}})
+        assert get_profile("openai/leg@context=long").max_context == 900000
+        assert get_profile("openai/leg").context_window == 1000000
+
+        # Saving another preset leaves this one as the user wrote it.
+        save_profile(LLMPreset(name="other", model="o", provider="openai"))
+        stored = profiles_mod._load_yaml()["presets"]["openai"]["leg"]
+        assert stored == legacy
+
+        # Editing it through a resolved profile keeps the alias working.
+        edited = get_profile("openai/leg")
+        edited.max_output = 4096
+        save_profile(edited)
+        stored = profiles_mod._load_yaml()["presets"]["openai"]["leg"]
+        assert stored["max_output"] == 4096
+        assert stored["variation_groups"] == legacy["variation_groups"]
+        assert get_profile("openai/leg@context=long").max_context == 900000
+        entry = next(e for e in list_all() if e["name"] == "leg")
+        assert entry["variation_groups"] == {}

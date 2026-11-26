@@ -174,7 +174,9 @@ def add_or_update_cli(name: str | None = None) -> int:
             "Variation groups JSON",
             existing_preset.variation_groups if existing_preset else None,
         ),
+        context_window=existing_preset.context_window if existing_preset else None,
     )
+    profile.inherit_context_fold(existing_preset)
     save_profile(profile)
     identifier = f"{profile.provider}/{profile.name}"
     print(f"Saved preset: {identifier}")

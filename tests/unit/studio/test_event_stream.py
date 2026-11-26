@@ -81,7 +81,24 @@ class TestSessionInfoFrame:
         }
         assert frame["context_tokens"] == 650
         assert frame["max_context"] == 8000
+        assert frame["context_window"] is None
         assert frame["compact_threshold"] == 6000
+
+    def test_carries_the_preset_context_window(self):
+        creature = self._creature()
+        creature.agent.llm._profile_context_window = 1_000_000
+        assert session_info_frame(creature)["context_window"] == 1_000_000
+
+    def test_session_info_activity_forwards_context_window(self):
+        q: asyncio.Queue = asyncio.Queue()
+        so = StreamOutput("alice", q, [])
+        so.on_activity_with_metadata(
+            "session_info",
+            "Model switched",
+            {"max_context": 500_000, "context_window": 1_000_000},
+        )
+        frame = q.get_nowait()
+        assert (frame["max_context"], frame["context_window"]) == (500_000, 1_000_000)
 
     def test_fresh_creature_reports_zero(self):
         frame = session_info_frame(self._creature())

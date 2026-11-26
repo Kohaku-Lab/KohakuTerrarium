@@ -41,13 +41,15 @@ Orchestrator 使用固定 ID 和 HIGH thinking，不追加档位后缀，也不�
 读取凭据前报错。Gemini 4 Argon 需要 Google AI Ultra（或符合条件的 Enterprise）账号。
 目录标注 GPT-OSS 将于 2026-11-02 下线。
 
-`context` variation 设置 profile 的 `max_context`，即 KT 压缩历史所依据的预算。
+`context=<大小>` 设置 profile 的 `max_context`，即 KT 压缩历史所依据的预算。
 其他模型沿用 agy 的压缩上限；Hydrogen 和 Orchestrator 使用保守的 256k 默认值，
-可选目录上限 1,048,576（`context=1048k`）。其他更大的选项分别来自 agy 的 Argon 上下文选择（512k / 900k）、
-agy 的 Claude 长上下文上限（840k）以及目录最大值（Flash 1048k、GPT-OSS 131k）。
-该选项不发送给服务端；窗口越大，每轮请求携带的输入越多，额度消耗也随之增加。
-两个 variation 可以组合，例如
-`google-antigravity/gemini-4-argon@reasoning=medium,context=512k`。
+可选目录上限 1,048,576（`context=1048576`）。每个 preset 把已知的最大窗口记为
+`context_window`：agy 的 Argon 上下文选择（900k）、agy 的 Claude 长上下文上限（840k）
+以及目录最大值（Flash 1,048,576、GPT-OSS 131,072）。
+该大小不发送给服务端；窗口越大，每轮请求携带的输入越多，额度消耗也随之增加。
+大小可以和 group 组合，例如
+`google-antigravity/gemini-4-argon@reasoning=medium,context=512k`。`k` 表示 1,000，
+所以 `context=1048k` 是 1,048,000。
 
 已退役的预设会解析到后继预设并记录警告：`gemini-3.6-flash`、`gemini-3.7-flash`、
 `gemini-3-flash` → `gemini-3.8-flash`；`gemini-3.1-pro` → `gemini-4-argon`；

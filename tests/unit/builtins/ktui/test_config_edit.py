@@ -8,6 +8,7 @@ import pytest
 
 from kohakuterrarium.builtins.ktui.config_edit import TRANSPORTS, ConfigEdit, model_rows
 from kohakuterrarium.llm.profiles.resolve import load_presets, save_profile
+from kohakuterrarium.llm.profiles.types import LLMPreset
 from kohakuterrarium.mcp.transports import MCP_TRANSPORT_CHOICES
 
 
@@ -60,3 +61,37 @@ async def test_catalog_action_respects_confirmation_and_preserves_existing(
 
 def test_mcp_form_offers_the_shared_transport_choices():
     assert tuple(TRANSPORTS) == MCP_TRANSPORT_CHOICES
+
+
+async def test_model_edit_keeps_fields_the_form_does_not_show():
+    save_profile(
+        LLMPreset(
+            name="wide",
+            model="m",
+            provider="openai",
+            max_context=300000,
+            context_window=400000,
+            variation_groups={"reasoning": {"high": {"reasoning_effort": "high"}}},
+        )
+    )
+    shell = SimpleNamespace(
+        panel=AsyncMock(return_value="edit"),
+        forms=SimpleNamespace(
+            ask=AsyncMock(
+                return_value={
+                    "name": "wide",
+                    "provider": "openai",
+                    "model": "m",
+                    "max_context": "350000",
+                    "max_output": "8000",
+                    "temperature": "",
+                    "reasoning_effort": "",
+                }
+            )
+        ),
+        app=Mock(),
+    )
+    await ConfigEdit(shell).model("openai/wide")
+    saved = load_presets()[("openai", "wide")]
+    assert (saved.max_context, saved.context_window) == (350000, 400000)
+    assert list(saved.variation_groups) == ["reasoning"]

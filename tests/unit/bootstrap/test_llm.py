@@ -24,6 +24,7 @@ from kohakuterrarium.bootstrap.llm import (
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.llm.anthropic.provider import AnthropicProvider
+from kohakuterrarium.llm.antigravity.presets import MODELS
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.grok.auth import GrokToken
 from kohakuterrarium.llm.grok.provider import GrokSubscriptionProvider
@@ -266,7 +267,9 @@ class TestCreateFromProfile:
             max_context=4321,
             backend_provider_name="echo",
         )
+        profile.context_window = 9000
         provider = _create_from_profile(profile)
+        assert provider._profile_context_window == 9000
         assert type(provider).__name__ == "EchoProvider"
         assert type(provider).built_from == [profile]
         assert provider.config.model == "echo-model"
@@ -313,6 +316,7 @@ class TestCreateFromProfile:
         assert isinstance(provider, OpenAIProvider)
         # max_context from the profile is stamped onto the provider.
         assert provider._profile_max_context == 123456
+        assert provider._profile_context_window is None
         assert provider._llm_identifier == "openai/p"
         assert provider.config.model == "gpt-4o"
 
@@ -702,7 +706,7 @@ def test_antigravity_inline_unknown_model_uses_consumer_transport():
     "selector,effort,output,context",
     [
         ("gemini-3.8-flash@reasoning=low", "low", 65536, 256000),
-        ("gemini-3.8-flash@reasoning=high,context=1048k", "high", 65536, 1048576),
+        ("gemini-3.8-flash@reasoning=high,context=1048576", "high", 65536, 1048576),
         ("gemini-4-argon", "medium", 65536, 256000),
         ("gemini-4-argon@reasoning=high,context=900k", "high", 65536, 900000),
         ("claude-opus-5-5@reasoning=low", "low", 128000, 256000),
@@ -717,6 +721,8 @@ def test_antigravity_variation_bootstrap(selector, effort, output, context):
     assert provider.reasoning_effort == effort
     assert provider.config.max_tokens == output
     assert provider._profile_max_context == context
+    window = MODELS[selector.split("@")[0].replace("gemini-3.1-pro", "gemini-4-argon")]
+    assert provider._profile_context_window == max(window.context_windows)
 
 
 def test_antigravity_inline_claude_limits():
