@@ -2633,6 +2633,52 @@ class TestTurnTokenUsageEmission:
         finally:
             await agent.stop()
 
+    async def test_reasoning_tokens_sum_per_turn_and_reset(self, make_agent):
+        agent = make_agent(
+            script=[
+                ScriptEntry(
+                    "[/echo]\n@@msg=hi\n[echo/]",
+                    usage={
+                        "prompt_tokens": 100,
+                        "completion_tokens": 40,
+                        "total_tokens": 140,
+                        "reasoning_tokens": 30,
+                    },
+                ),
+                ScriptEntry(
+                    "Done!",
+                    usage={
+                        "prompt_tokens": 150,
+                        "completion_tokens": 20,
+                        "total_tokens": 170,
+                        "reasoning_tokens": 12,
+                    },
+                ),
+                ScriptEntry(
+                    "Plain.",
+                    usage={
+                        "prompt_tokens": 200,
+                        "completion_tokens": 5,
+                        "total_tokens": 205,
+                    },
+                ),
+            ]
+        )
+        tool = _EchoTool()
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await agent.start()
+        try:
+            reasoned = await agent.run("run echo")
+            plain = await agent.run("again")
+        finally:
+            await agent.stop()
+        assert tool.calls == [{"msg": "hi"}]
+        assert reasoned.usage["completion_tokens"] == 60
+        assert reasoned.usage["reasoning_tokens"] == 42
+        assert plain.usage["completion_tokens"] == 5
+        assert "reasoning_tokens" not in plain.usage
+
 
 class TestAssistantReasoningEmission:
     async def test_reasoning_activity_emitted_from_latest_round_fields(

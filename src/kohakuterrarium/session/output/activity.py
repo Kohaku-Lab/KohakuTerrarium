@@ -311,12 +311,15 @@ class SessionActivityMixin:
             self._total_cached_tokens += cached
         self._record(
             "token_usage",
-            {
-                "prompt_tokens": prompt,
-                "completion_tokens": completion,
-                "total_tokens": metadata.get("total_tokens", 0),
-                "cached_tokens": cached,
-            },
+            _with_reasoning_tokens(
+                {
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "total_tokens": metadata.get("total_tokens", 0),
+                    "cached_tokens": cached,
+                },
+                metadata,
+            ),
         )
         self._persist_token_totals(metadata.get("context_tokens", prompt))
 
@@ -455,13 +458,16 @@ class SessionActivityMixin:
     def _handle_turn_token_usage(self, name: str, detail: str, metadata: dict) -> None:
         self._record(
             "turn_token_usage",
-            {
-                "turn_index": metadata.get("turn_index", 0),
-                "prompt_tokens": metadata.get("prompt_tokens", 0),
-                "completion_tokens": metadata.get("completion_tokens", 0),
-                "cached_tokens": metadata.get("cached_tokens", 0),
-                "total_tokens": metadata.get("total_tokens", 0),
-            },
+            _with_reasoning_tokens(
+                {
+                    "turn_index": metadata.get("turn_index", 0),
+                    "prompt_tokens": metadata.get("prompt_tokens", 0),
+                    "completion_tokens": metadata.get("completion_tokens", 0),
+                    "cached_tokens": metadata.get("cached_tokens", 0),
+                    "total_tokens": metadata.get("total_tokens", 0),
+                },
+                metadata,
+            ),
         )
         # Persist the derived rollup at the source to avoid repeated event scans.
         turn_index = metadata.get("turn_index", 0)
@@ -532,6 +538,13 @@ def _subagent_name(fallback: str, metadata: dict) -> str:
         if "_" in body:
             return body.rsplit("_", 1)[0]
     return fallback
+
+
+def _with_reasoning_tokens(data: dict, metadata: dict) -> dict:
+    """Return ``data`` plus ``reasoning_tokens`` when the metadata reports it."""
+    if metadata.get("reasoning_tokens") is not None:
+        data["reasoning_tokens"] = metadata["reasoning_tokens"]
+    return data
 
 
 def _token_metadata(metadata: dict) -> dict[str, Any]:

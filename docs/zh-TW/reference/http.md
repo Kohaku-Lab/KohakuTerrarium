@@ -1155,7 +1155,7 @@ Request / response 用到的 Pydantic 模型。
 - `text`：串流文字 chunk。
   - `content: str`。
 - `activity`：多種類型，以 `activity_type` 區分，例如 `session_info`、`tool_call`、`tool_result`、`token_usage`、`job_update`、`job_completed`、`model_switch`、`interrupt`、`regenerate`、`edit`、`rewind`、`promote`、`background_result`、`memory_compact`、`memory_search`、`memory_save`。
-  - 其他欄位視 `activity_type` 而定：`args`、`job_id`、`tools_used`、`result`、`output`、`turns`、`duration`、`task`、`trigger_id`、`event_type`、`channel`、`sender`、`content`、`prompt_tokens`、`completion_tokens`、`total_tokens`、`cached_tokens`、`round`、`summary`、`messages_compacted`、`session_id`、`model`、`agent_name`、`max_context`、`compact_threshold`、`error_type`、`error`、`messages_cleared`、`background`、`subagent`、`tool`、`interrupted`、`final_state`。
+  - 其他欄位視 `activity_type` 而定：`args`、`job_id`、`tools_used`、`result`、`output`、`turns`、`duration`、`task`、`trigger_id`、`event_type`、`channel`、`sender`、`content`、`prompt_tokens`、`completion_tokens`、`total_tokens`、`cached_tokens`、`reasoning_tokens`（僅在供應方回報時）、`round`、`summary`、`messages_compacted`、`session_id`、`model`、`agent_name`、`max_context`、`compact_threshold`、`error_type`、`error`、`messages_cleared`、`background`、`subagent`、`tool`、`interrupted`、`final_state`。
 - `processing_start`、`processing_end`。
 - `user_input`：`content: str | list[dict]`。
 - `channel_message`：`channel`、`sender`、`content`、`message_id`、`timestamp`。

@@ -17,6 +17,7 @@ from kohakuterrarium.llm.codex.rate_limits import (
 from kohakuterrarium.llm.openai.sanitize import strip_surrogates
 from kohakuterrarium.llm.openai.ws import record_ws_assistant_echo
 from kohakuterrarium.llm.responses.reasoning import ResponsesReasoningCollector
+from kohakuterrarium.llm.responses.usage import responses_usage
 from kohakuterrarium.llm.responses.ws import ResponsesWSSession
 from kohakuterrarium.llm.responses.ws_recovery import WSRecovery
 
@@ -120,14 +121,5 @@ def process_codex_event(
             if resp:
                 u = getattr(resp, "usage", None)
                 if u:
-                    cached = 0
-                    details = getattr(u, "input_tokens_details", None)
-                    if details:
-                        cached = getattr(details, "cached_tokens", 0) or 0
-                    provider._last_usage = {
-                        "prompt_tokens": getattr(u, "input_tokens", 0),
-                        "completion_tokens": getattr(u, "output_tokens", 0),
-                        "total_tokens": getattr(u, "total_tokens", 0),
-                        "cached_tokens": cached,
-                    }
+                    provider._last_usage = responses_usage(u)
     return None
