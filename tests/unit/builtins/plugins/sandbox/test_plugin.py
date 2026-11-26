@@ -475,6 +475,14 @@ class TestDeclaredNetworkUse:
         assert await _gate(sandbox, tool, args, context) is None
         assert any("network access denied" in line for line in seen)
 
+    async def test_dynamic_access_is_left_to_the_network_policy_service(self, paths):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network_allowlist=["ok.test"])
+        assert await _gate(sandbox, _ElsewhereTool(), {}, context) is None
+        policy = sandbox.runtime_services(context)["network_policy"]
+        assert policy.check("evil.test", 443) == "host 'evil.test' not allowlisted"
+        assert policy.check("ok.test", 443) is None
+
     async def test_truthy_network_access_fails_closed(self, paths):
         _, _, context = paths
         tool = _ElsewhereTool()

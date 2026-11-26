@@ -207,7 +207,8 @@ class BaseTool(UIOwnerMixin):
     url_arguments: tuple[str, ...] = ()
     # Hosts the tool contacts whatever its arguments.
     network_hosts: tuple[str, ...] = ()
-    # The tool reaches hosts decided elsewhere; refused when network is denied.
+    # The tool picks hosts at run time: network=deny refuses the call, an allowlist
+    # cannot; check each host with runtime_services["network_policy"].check().
     network_access: bool = False
 
     # Widget renderer ids that must be attached for the model to see this tool.
