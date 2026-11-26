@@ -47,6 +47,7 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.mcp_http import bearer_mcp_server
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -470,6 +471,61 @@ class TestApiSettingsJourney:
         assert servers["files"]["args"] == ["--root", "/srv"]
         # Still exactly one entry — upsert replaced, not appended.
         assert len(resp.json()["servers"]) == 1
+
+        # A token-protected streamable-HTTP server through the Settings >
+        # MCP flow: Add (settingsAPI.addMCP), Test, Edit/Save
+        # (settingsAPI.patchMCP) to legacy SSE and back, Test after each.
+        mcp_token = "e2e-s3cret"
+        monkeypatch.setenv("KT_E2E_MCP_TOKEN", mcp_token)
+        with bearer_mcp_server(mcp_token) as mcp_base:
+            mcp_url = f"{mcp_base}/mcp"
+            resp = client.post(
+                "/api/settings/mcp",
+                json={
+                    "name": "sandbox",
+                    "transport": "streamable_http",
+                    "command": "",
+                    "args": [],
+                    "url": mcp_url,
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            probe = client.post("/api/settings/mcp/sandbox/test").json()
+            assert probe["ok"] is False
+            assert probe["error"] == (
+                f"MCP server sandbox: HTTP 401 Unauthorized from {mcp_url}; "
+                "check the headers/token"
+            )
+            resp = client.patch(
+                "/api/settings/mcp/sandbox",
+                json={
+                    "transport": "streamable_http",
+                    "url": mcp_url,
+                    "headers": {"Authorization": "Bearer ${KT_E2E_MCP_TOKEN}"},
+                    "command": "",
+                    "args": [],
+                    "env": {},
+                    "connect_timeout": None,
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            probe = client.post("/api/settings/mcp/sandbox/test").json()
+            assert probe["ok"] is True, probe
+            assert probe["tool_count"] == 1
+            resp = client.patch("/api/settings/mcp/sandbox", json={"transport": "sse"})
+            assert resp.status_code == 200, resp.text
+            probe = client.post("/api/settings/mcp/sandbox/test").json()
+            assert "try the streamable_http transport" in probe["error"]
+            servers = {
+                s["name"]: s for s in client.get("/api/settings/mcp").json()["servers"]
+            }
+            assert servers["sandbox"]["transport"] == "sse"
+            assert servers["sandbox"]["headers"] == {
+                "Authorization": "Bearer ${KT_E2E_MCP_TOKEN}"
+            }
+            assert mcp_token not in client.get("/api/settings/mcp").text
+            resp = client.delete("/api/settings/mcp/sandbox")
+            assert resp.status_code == 200
 
         # Remove it.
         resp = client.delete("/api/settings/mcp/files")

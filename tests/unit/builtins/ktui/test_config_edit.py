@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
-from kohakuterrarium.builtins.ktui.config_edit import ConfigEdit, model_rows
+from kohakuterrarium.builtins.ktui.config_edit import TRANSPORTS, ConfigEdit, model_rows
 from kohakuterrarium.llm.profiles.resolve import load_presets, save_profile
+from kohakuterrarium.mcp.transports import MCP_TRANSPORT_CHOICES
 
 
 @pytest.mark.parametrize("confirm", [False, True])
@@ -55,3 +56,7 @@ async def test_catalog_action_respects_confirmation_and_preserves_existing(
     shell.panel.side_effect = ["opencode-go", "catalog-model", True]
     await edit.act(row["value"].removeprefix("cfg:"))
     assert load_presets()[("opencode-go", "catalog-model")].max_context == 1000
+
+
+def test_mcp_form_offers_the_shared_transport_choices():
+    assert tuple(TRANSPORTS) == MCP_TRANSPORT_CHOICES

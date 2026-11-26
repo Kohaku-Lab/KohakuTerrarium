@@ -852,12 +852,16 @@ export const sessionAPI = {
     refresh = false,
     configType = "",
     sort = "last_active",
+    order = "",
+    project = "",
   } = {}) {
     const params = { limit, offset }
     if (search) params.search = search
     if (refresh) params.refresh = true
     if (configType) params.config_type = configType
-    if (sort !== "last_active") params.sort = sort
+    if (sort !== "last_active" || order) params.sort = sort
+    if (order) params.order = order
+    if (project) params.project = project
     const { data } = await api.get("/sessions", { params })
     return data
   },
@@ -1522,6 +1526,40 @@ export const attachAPI = {
   /** @returns {Promise<{policies: string[]}>} */
   async getSessionPolicies(sessionId) {
     const { data } = await api.get(`/attach/session_policies/${encodeURIComponent(sessionId)}`)
+    return data
+  },
+}
+
+/**
+ * Projects: working folders (plus the node for remote workers) that group
+ * saved sessions. `id` is the server's; `project=none` on the session list
+ * selects sessions in no project.
+ */
+export const projectsAPI = {
+  /** GET /api/projects → `{projects, unassigned}`, in the server's order. */
+  async list({ includeHidden = false } = {}) {
+    const { data } = await api.get("/projects", { params: { include_hidden: includeHidden } })
+    return data
+  },
+
+  /** POST /api/projects: adopt a folder; a missing local path is a 400. */
+  async add({ path, node = null, name = null }) {
+    const body = { path }
+    if (node) body.node = node
+    if (name) body.name = name
+    const { data } = await api.post("/projects", body)
+    return data
+  },
+
+  /** PATCH /api/projects/{id} with any of `name` (null resets), `pinned`, `hidden`. */
+  async update(id, patch) {
+    const { data } = await api.patch(`/projects/${encodeURIComponent(id)}`, patch)
+    return data
+  },
+
+  /** DELETE /api/projects/{id}: drop what was saved about the folder. */
+  async forget(id) {
+    const { data } = await api.delete(`/projects/${encodeURIComponent(id)}`)
     return data
   },
 }

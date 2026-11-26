@@ -1,7 +1,8 @@
 /**
  * MCPServerEditModal tests — a remote server's HTTP headers are edited as
  * ``Name: value`` lines and saved with the patch; switching a server to stdio
- * clears them.
+ * clears them; the transport dropdown offers streamable HTTP and shows legacy
+ * ``http`` entries as SSE.
  */
 
 import { flushPromises, mount } from "@vue/test-utils"
@@ -19,6 +20,7 @@ vi.mock("@/utils/api", () => ({
 }))
 
 import MCPServerEditModal from "./MCPServerEditModal.vue"
+import { translate } from "@/utils/i18n"
 
 const REMOTE = {
   name: "sandbox",
@@ -75,5 +77,64 @@ describe("MCPServerEditModal headers", () => {
     expect(patch.headers).toEqual({})
     expect(patch.command).toBe("npx")
     expect(patch.url).toBe("")
+  })
+})
+
+describe("MCPServerEditModal transport", () => {
+  it("offers stdio, streamable HTTP and SSE with a hint for the current one", async () => {
+    const wrapper = await mountModal({ ...REMOTE, transport: "streamable_http" })
+    const state = wrapper.vm.$.setupState
+    expect(state.transportOptions.map((o) => o.value)).toEqual(["stdio", "streamable_http", "sse"])
+    expect(state.form.transport).toBe("streamable_http")
+    const hint = () =>
+      document.body.querySelector("[data-test=mcp-transport-hint]").textContent.trim()
+    expect(hint()).toBe(translate("en", "settings.mcp.transportStreamableHttpHint"))
+    state.form.transport = "sse"
+    await flushPromises()
+    expect(hint()).toBe(translate("en", "settings.mcp.transportSseHint"))
+  })
+
+  it("saves a streamable HTTP server with its URL and headers", async () => {
+    const wrapper = await mountModal({ ...REMOTE, transport: "streamable_http" })
+    await wrapper.vm.$.setupState.save()
+    const patch = patchMCP.mock.calls[0][1]
+    expect(patch.transport).toBe("streamable_http")
+    expect(patch.url).toBe("http://h/mcp")
+    expect(patch.headers).toEqual({ Authorization: "Bearer t0ken", "X-Team": "kt" })
+    expect(patch.command).toBe("")
+  })
+
+  it("shows a legacy http entry as SSE and keeps it remote", async () => {
+    const wrapper = await mountModal(REMOTE)
+    const state = wrapper.vm.$.setupState
+    expect(state.form.transport).toBe("sse")
+    expect(document.body.querySelector("[data-test=mcp-url]")).not.toBeNull()
+    await state.save()
+    const patch = patchMCP.mock.calls[0][1]
+    expect(patch.transport).toBe("sse")
+    expect(patch.url).toBe("http://h/mcp")
+  })
+
+  it("switching a stdio server to streamable HTTP sends the URL, not the command", async () => {
+    const wrapper = await mountModal({
+      name: "fs",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "x"],
+    })
+    const state = wrapper.vm.$.setupState
+    state.form.transport = "streamable_http"
+    state.form.url = "http://127.0.0.1:8765/mcp"
+    state.form.headersStr = "Authorization: Bearer ${SANDBOX_TOKEN}"
+    await state.save()
+    const patch = patchMCP.mock.calls[0][1]
+    expect(patch).toMatchObject({
+      transport: "streamable_http",
+      url: "http://127.0.0.1:8765/mcp",
+      headers: { Authorization: "Bearer ${SANDBOX_TOKEN}" },
+      command: "",
+      args: [],
+      env: {},
+    })
   })
 })

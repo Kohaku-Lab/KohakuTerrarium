@@ -30,6 +30,7 @@ tool-call result string, or an observable side effect.
 import asyncio
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
@@ -42,13 +43,17 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.agent.mcp import init_mcp
+from kohakuterrarium.core.config.load import build_agent_config
 from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,
     ToolConfigItem,
 )
+from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
 from kohakuterrarium.core.session import Session
+from kohakuterrarium.errors import MCPConfigError, MCPConnectionError
 from kohakuterrarium.mcp.client import (
     MCPClientManager,
     MCPServerConfig,
@@ -59,7 +64,9 @@ from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.runtime_prompt import apply_managed_section
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.testing.mcp_http import bearer_mcp_server, closed_loopback_port
 from kohakuterrarium.testing.output import OutputRecorder
+from kohakuterrarium.utils.logging import ColoredFormatter
 
 # ---------------------------------------------------------------------------
 # Real in-process stdio MCP servers — tiny FastMCP scripts spawned as
@@ -70,7 +77,10 @@ from kohakuterrarium.testing.output import OutputRecorder
 _GREETER_SERVER = '''\
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("kt-greeter")
+mcp = FastMCP(
+    "kt-greeter",
+    instructions="Greet people by their first name; files are greeter:<path>.",
+)
 
 
 @mcp.tool()
@@ -663,13 +673,177 @@ class TestMcpIntegration:
             assert "Hello, Kohaku!" in convo_text
             prompt = agent.get_system_prompt()
             assert prompt.count("## Available MCP Tools") == 1
+            assert (
+                "### Server: greeter\n"
+                "Greet people by their first name; files are greeter:<path>.\n"
+                "- **greet**" in prompt
+            )
             assert prompt.count("PUBLIC-RUNTIME-CONTEXT") == 1
             assert "CURRENT-GRAPH" not in prompt
             await agent._mcp_manager.disconnect("greeter")
             agent._inject_mcp_tools_into_prompt()
             assert "## Available MCP Tools" not in agent.get_system_prompt()
+            assert "greeter:<path>" not in agent.get_system_prompt()
             assert "PUBLIC-RUNTIME-CONTEXT" in agent.get_system_prompt()
 
         # Engine __aexit__ stopped the creature; the manager's servers
         # were connected for the whole run.
         assert creature.is_running is False
+
+    @pytest.mark.timeout(90)
+    async def test_remote_streamable_http_server_with_bearer_token(
+        self, caplog, monkeypatch, tmp_path
+    ):
+        """A token-protected streamable-HTTP server, as the Settings > MCP
+        Test button and every agent connect reach it: the right token
+        connects and calls a tool; every way of getting it wrong fails
+        FAST with one readable sentence that never contains the token."""
+        token = "kt-it-s3cret-bearer"
+        with bearer_mcp_server(token) as base:
+            url = f"{base}/mcp"
+            manager = MCPClientManager()
+
+            info = await manager.connect(
+                MCPServerConfig(
+                    name="remote",
+                    transport="streamable_http",
+                    url=url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    connect_timeout=20,
+                )
+            )
+            assert [t["name"] for t in info.tools] == ["echo"]
+            assert (
+                await manager.call_tool("remote", "echo", {"text": "hi"}) == "echo: hi"
+            )
+            await manager.disconnect("remote")
+
+            loop = asyncio.get_running_loop()
+            closed = f"http://127.0.0.1:{closed_loopback_port()}/mcp"
+            cases = [
+                (
+                    "streamable_http",
+                    url,
+                    {},
+                    f"MCP server bad: HTTP 401 Unauthorized from {url}; "
+                    "check the headers/token",
+                ),
+                (
+                    "streamable_http",
+                    url,
+                    {"Authorization": "Bearer wrong"},
+                    f"MCP server bad: HTTP 401 Unauthorized from {url}; "
+                    "check the headers/token",
+                ),
+                (
+                    "http",
+                    url,
+                    {"Authorization": f"Bearer {token}"},
+                    f"MCP server bad: HTTP 400 Bad Request from {url}; the server "
+                    "may speak streamable HTTP: try the streamable_http transport",
+                ),
+                (
+                    "streamable_http",
+                    f"{base}/nope",
+                    {"Authorization": f"Bearer {token}"},
+                    f"MCP server bad: HTTP 404 Not Found from {base}/nope; "
+                    "check the URL path (for example /mcp)",
+                ),
+                (
+                    "streamable_http",
+                    closed,
+                    {"Authorization": f"Bearer {token}"},
+                    f"MCP server bad: cannot connect to {closed}: ",
+                ),
+            ]
+            with caplog.at_level("DEBUG"):
+                for transport, target, headers, expected in cases:
+                    started = loop.time()
+                    with pytest.raises(MCPConnectionError) as caught:
+                        await manager.connect(
+                            MCPServerConfig(
+                                name="bad",
+                                transport=transport,
+                                url=target,
+                                headers=headers,
+                                connect_timeout=20,
+                            )
+                        )
+                    assert loop.time() - started < 10, expected
+                    message = str(caught.value)
+                    if expected.endswith(": "):
+                        assert message.startswith(expected), message
+                    else:
+                        assert message == expected
+                    assert manager.servers["bad"].status == "error"
+                    assert manager.servers["bad"].error == message
+                    assert "bad" not in manager._sessions
+
+            # The global registry keeps ``${VAR}``; every path that turns an
+            # entry into a connection expands it from the environment.
+            registry_dir = tmp_path / "kt-config"
+            registry_dir.mkdir()
+            monkeypatch.setenv("KT_CONFIG_DIR", str(registry_dir))
+            (registry_dir / "mcp_servers.yaml").write_text(
+                "- name: sandbox\n"
+                "  transport: streamable_http\n"
+                f"  url: {url}\n"
+                "  connect_timeout: 20\n"
+                "  headers:\n"
+                "    Authorization: Bearer ${KT_IT_MCP_TOKEN}\n",
+                encoding="utf-8",
+            )
+            monkeypatch.setenv("KT_IT_MCP_TOKEN", token)
+            agent_config = build_agent_config({"name": "probe"}, tmp_path)
+            assert agent_config.mcp_servers == [
+                {
+                    "name": "sandbox",
+                    "transport": "streamable_http",
+                    "url": url,
+                    "connect_timeout": 20,
+                    "headers": {"Authorization": "Bearer ${KT_IT_MCP_TOKEN}"},
+                }
+            ]
+            agent = types.SimpleNamespace(config=agent_config, _mcp_manager=None)
+            await init_mcp(agent)
+            assert agent._mcp_manager.servers["sandbox"].status == "connected"
+            assert (
+                await agent._mcp_manager.call_tool("sandbox", "echo", {"text": "ok"})
+                == "echo: ok"
+            )
+            ctx = ToolContext(
+                agent_name="probe",
+                session=Session(key="mcp-it-remote"),
+                working_dir=tmp_path,
+                agent=agent,
+            )
+            await agent._mcp_manager.disconnect("sandbox")
+            connected = await get_builtin_tool("mcp_connect")._execute(
+                {"name": "sandbox"}, context=ctx
+            )
+            assert connected.output == "Connected to sandbox (1 tools available): echo"
+            await agent._mcp_manager.shutdown()
+
+            monkeypatch.delenv("KT_IT_MCP_TOKEN")
+            unset = (
+                "environment variable KT_IT_MCP_TOKEN is not set "
+                "(used in headers of server sandbox)"
+            )
+            with pytest.raises(MCPConfigError) as caught:
+                MCPServerConfig.from_entry(load_global_mcp_servers()[0])
+            assert str(caught.value) == unset
+            refused = await get_builtin_tool("mcp_connect")._execute(
+                {"name": "sandbox"}, context=ctx
+            )
+            assert refused.error == unset
+            with caplog.at_level("DEBUG"):
+                await init_mcp(agent)
+            assert "sandbox" not in agent._mcp_manager.servers
+
+            rendered = "\n".join(
+                ColoredFormatter(use_color=False).format(r) for r in caplog.records
+            )
+            assert token not in rendered
+            assert "HTTP 401 Unauthorized" in rendered
+            assert unset in rendered
+            await manager.shutdown()

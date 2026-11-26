@@ -510,6 +510,8 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         if wire_extra:
             extra_params["extra_body"] = prepare_request_tools(wire_extra)[0]
         api_tools = prepare_request_tools({"tools": api_tools})[0]["tools"]
+        if api_tools:
+            extra_params["tools"] = api_tools
 
         client = self._client
         if recovery is not None:
@@ -521,7 +523,6 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                 instructions=instr_text,
                 # Keep parallel calls together with their matching outputs.
                 input=fix_tool_call_pairing(api_input),
-                tools=api_tools,
                 store=False,
                 stream=True,
                 prompt_cache_key=cache_key,

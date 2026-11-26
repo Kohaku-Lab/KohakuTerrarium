@@ -518,7 +518,12 @@ export default {
   "settings.mcp.saveFailed": "儲存 MCP 伺服器失敗",
   "settings.mcp.removeFailed": "移除失敗",
   "settings.mcp.transportStdio": "stdio（子程序）",
-  "settings.mcp.transportHttp": "HTTP/SSE（遠端）",
+  "settings.mcp.transportStreamableHttp": "Streamable HTTP（建議用於遠端）",
+  "settings.mcp.transportSse": "SSE（舊版）",
+  "settings.mcp.transportStdioHint": "以本機子程序執行伺服器（command + args）。",
+  "settings.mcp.transportStreamableHttpHint":
+    "用於 URL 上的遠端伺服器，例如 https://host/mcp。目前大多數伺服器使用此方式。",
+  "settings.mcp.transportSseHint": "僅用於提供 SSE 端點（例如 https://host/sse）的舊式伺服器。",
   "settings.account.loadFailed": "載入 Codex 使用量失敗",
   "settings.account.loginHint": "請執行 `kt login codex` 完成驗證。",
   "settings.account.unknownPlan": "未知方案",

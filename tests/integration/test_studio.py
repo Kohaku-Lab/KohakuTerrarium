@@ -62,6 +62,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.studio.identity.grok import subscription as grok_subscription
 from kohakuterrarium.studio.persistence import store as _persistence_store_mod
+from kohakuterrarium.studio.persistence.projects import normalize_path, project_id
 from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.studio.sessions.memory import search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
@@ -468,7 +469,12 @@ class TestStudioIntegration:
                 "tool", "web_search", {"fallback": "duckduckgo", "need_content": True}
             )
             patch_defaults("plugin", "budget", {"walltime_budget": {"hard": 300}})
-            session = await studio.sessions.start_creature(str(creature_dir))
+            project_root = (isolated_paths["tmp_path"] / "repo-x").resolve()
+            app_dir = project_root / "app"
+            app_dir.mkdir(parents=True)
+            session = await studio.sessions.start_creature(
+                str(creature_dir), pwd=str(app_dir)
+            )
             initialized = studio.sessions.find_creature(
                 session.session_id, "scout"
             ).agent
@@ -553,6 +559,14 @@ class TestStudioIntegration:
                 )
                 is False
             )
+
+            # --- persistence.projects: the running session's folder is a
+            # found project before anything is saved.
+            live_projects = studio.persistence.projects.list()
+            assert [
+                (p["path"], p["saved"], p["running_count"])
+                for p in live_projects["projects"]
+            ] == [(str(app_dir), False, 1)]
 
             # Stop the session — flushes + closes the .kohakutr file.
             await studio.sessions.stop(session_id)
@@ -875,6 +889,41 @@ class TestStudioIntegration:
             fork_stem = fork_path.name.split(".kohakutr")[0]
             both = studio.persistence.list(refresh=True)
             assert {saved_stem, fork_stem} <= {e["name"] for e in both}
+
+            # --- persistence.projects: group, save, filter, forget ------
+            projects_ns = studio.persistence.projects
+            app_id = project_id("", normalize_path(str(app_dir), "")[1])
+            found = projects_ns.list()
+            assert [
+                (p["id"], p["saved"], p["session_count"], p["running_count"])
+                for p in found["projects"]
+            ] == [(app_id, False, 2, 0)]
+            assert found["unassigned"]["session_count"] == 0
+            # Saving the parent folds the app sessions into it (deepest wins).
+            parent = projects_ns.add(str(project_root) + "/", name="Repo X")
+            assert (parent["path"], parent["session_count"]) == (str(project_root), 2)
+            assert [p["id"] for p in projects_ns.list()["projects"]] == [parent["id"]]
+            pinned = projects_ns.update(parent["id"], pinned=True)
+            assert (pinned["pinned"], pinned["name"]) == (True, "Repo X")
+            in_project = studio.persistence.list(project=parent["id"])
+            assert {e["name"] for e in in_project} == {saved_stem, fork_stem}
+            assert {e["project"]["name"] for e in in_project} == {"Repo X"}
+            assert studio.persistence.list(project="none") == []
+            projects_ns.update(parent["id"], hidden=True)
+            assert projects_ns.list()["projects"] == []
+            hidden = projects_ns.list(include_hidden=True)["projects"]
+            assert [(p["id"], p["hidden"]) for p in hidden] == [(parent["id"], True)]
+            # Forgetting removes the record only: the folder is found again.
+            assert projects_ns.forget(parent["id"])["status"] == "forgotten"
+            again = projects_ns.list()["projects"]
+            assert [(p["id"], p["saved"], p["session_count"]) for p in again] == [
+                (app_id, False, 2)
+            ]
+            assert {e["project"]["id"] for e in studio.persistence.list()} == {app_id}
+            with pytest.raises(NotFoundError):
+                projects_ns.forget(parent["id"])
+            with pytest.raises(InvalidRequestError):
+                projects_ns.add(str(project_root / "missing"))
 
             # --- sessions.search_memory: FTS over the saved session ----
             # The session is not live in this engine, so the search
@@ -1302,8 +1351,14 @@ class TestStudioIntegration:
             assert any(p["name"] == "sandbox" for p in plugins)
             assert any(p["name"] == "goal" and p["enabled"] for p in plugins)
             assert any(p["name"] == "drive_runtime" and p["enabled"] for p in plugins)
-            # The renderer-gated UI plugins are on by default; policy plugins are off.
-            on_by_default = {"goal", "drive_runtime", "ui.apps", "ui.declarative"}
+            # The UI plugins and repeat_guard are on by default; policy plugins are off.
+            on_by_default = {
+                "goal",
+                "drive_runtime",
+                "repeat_guard",
+                "ui.apps",
+                "ui.declarative",
+            }
             assert {p["name"] for p in plugins if p["enabled"]} == on_by_default
             assert all(
                 p["enabled"] is False for p in plugins if p["name"] not in on_by_default

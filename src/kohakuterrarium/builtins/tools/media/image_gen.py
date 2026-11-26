@@ -25,11 +25,15 @@ from kohakuterrarium.modules.tool.base import (
 )
 
 _GUIDANCE = (
-    "image_gen needs a minute or more per image. Generate directly, without asking "
-    "to confirm. Always edit existing images with image_gen, never with python or "
-    "bash. For an edit, list the target files in referenced_image_paths; use "
-    "num_last_images_to_include only for images that have no file. If you have not "
-    "seen a local image yet, read it first."
+    "For a new image call image_gen with only prompt. To edit, list the target "
+    "files in referenced_image_paths; use num_last_images_to_include only for "
+    "conversation images that have no file. If you have not seen a local image yet, "
+    "read it first. Each image takes a minute or more: generate directly, without "
+    "asking to confirm. Always edit images with image_gen, never with python or bash."
+)
+_NO_IMAGE_HINT = (
+    "To create a new image, call image_gen again with only prompt (omit "
+    "num_last_images_to_include); to edit a file, pass referenced_image_paths."
 )
 
 
@@ -87,13 +91,16 @@ class ImageGenTool(BaseTool):
                 "type": "array",
                 "items": {"type": "string"},
                 "maxItems": MAX_EDIT_IMAGES,
-                "description": "Local images to edit",
+                "description": "Edit only: local images to edit. Omit for a new image",
             },
             "num_last_images_to_include": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": MAX_EDIT_IMAGES,
-                "description": "Edit the most recent conversation images instead of files",
+                "description": (
+                    "Edit only: how many recent conversation images to edit, "
+                    "newest first. Omit for a new image"
+                ),
             },
         }
         if self.gif:
@@ -181,7 +188,9 @@ class ImageGenTool(BaseTool):
             )
             if conversation is None:
                 raise ImageInputError("the conversation is not available to this tool")
-            return recent_image_urls(conversation.get_messages(), last)
+            return recent_image_urls(
+                conversation.get_messages(), last, none_hint=_NO_IMAGE_HINT
+            )
         return []
 
 

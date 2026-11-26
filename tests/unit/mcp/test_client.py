@@ -11,8 +11,10 @@ import asyncio
 import sys
 import types
 
+import httpx
 import pytest
 
+from kohakuterrarium.errors import MCPConfigError, MCPConnectionError, MCPTimeoutError
 from kohakuterrarium.mcp.client import (
     DEFAULT_MCP_CONNECT_TIMEOUT,
     MCPClientManager,
@@ -20,6 +22,7 @@ from kohakuterrarium.mcp.client import (
     MCPServerInfo,
     normalize_mcp_transport,
 )
+from kohakuterrarium.utils.logging import ColoredFormatter
 
 # ---------------------------------------------------------------------------
 # Fake mcp SDK transport
@@ -137,18 +140,20 @@ def _install_fake_mcp(monkeypatch, *, session_cls=None, transport_ctx=None):
 
     sse_mod = types.ModuleType("mcp.client.sse")
 
-    def _sse_client(url, headers=None):
+    def _sse_client(url, headers=None, httpx_client_factory=None):
         transport_ctx.url = url
         transport_ctx.headers = headers
+        transport_ctx.client_factory = httpx_client_factory
         return transport_ctx
 
     sse_mod.sse_client = _sse_client
 
     http_mod = types.ModuleType("mcp.client.streamable_http")
 
-    def _streamablehttp_client(url, headers=None):
+    def _streamablehttp_client(url, headers=None, httpx_client_factory=None):
         transport_ctx.url = url
         transport_ctx.headers = headers
+        transport_ctx.client_factory = httpx_client_factory
         return transport_ctx
 
     http_mod.streamablehttp_client = _streamablehttp_client
@@ -193,6 +198,103 @@ class TestNormalizeMcpTransport:
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
+
+class TestFromEntry:
+    def test_registry_entry_is_expanded_and_extra_keys_ignored(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_TOKEN", "s3cret")
+        monkeypatch.setenv("KT_UT_HOST", "mcp.local")
+        monkeypatch.delenv("KT_UT_PORT", raising=False)
+        cfg = MCPServerConfig.from_entry(
+            {
+                "name": "sandbox",
+                "transport": "streamable_http",
+                "url": "http://${KT_UT_HOST}:${KT_UT_PORT:8000}/mcp",
+                "headers": {"Authorization": "Bearer ${KT_UT_TOKEN}"},
+                "connect_timeout": "15",
+                "description": "not a connection field",
+            }
+        )
+        assert cfg == MCPServerConfig(
+            name="sandbox",
+            transport="streamable_http",
+            url="http://mcp.local:8000/mcp",
+            headers={"Authorization": "Bearer s3cret"},
+            connect_timeout=15.0,
+        )
+
+    def test_stdio_fields_are_expanded(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_BIN", "/opt/srv")
+        monkeypatch.setenv("KT_UT_KEY", "k1")
+        cfg = MCPServerConfig.from_entry(
+            {
+                "name": "fs",
+                "command": "${KT_UT_BIN}/run",
+                "args": ["--key", "${KT_UT_KEY}"],
+                "env": {"API_KEY": "${KT_UT_KEY}"},
+            }
+        )
+        assert cfg.transport == "stdio"
+        assert cfg.command == "/opt/srv/run"
+        assert cfg.args == ["--key", "k1"]
+        assert cfg.env == {"API_KEY": "k1"}
+
+    def test_unset_variable_without_default_is_a_clear_error(self, monkeypatch):
+        monkeypatch.delenv("SANDBOX_TOKEN", raising=False)
+        with pytest.raises(MCPConfigError) as caught:
+            MCPServerConfig.from_entry(
+                {
+                    "name": "sandbox",
+                    "transport": "streamable_http",
+                    "url": "http://h/mcp",
+                    "headers": {"Authorization": "Bearer ${SANDBOX_TOKEN}"},
+                }
+            )
+        assert str(caught.value) == (
+            "environment variable SANDBOX_TOKEN is not set "
+            "(used in headers of server sandbox)"
+        )
+        assert isinstance(caught.value, ValueError)
+
+    def test_several_unset_variables_are_all_named(self, monkeypatch):
+        monkeypatch.delenv("KT_UT_A", raising=False)
+        monkeypatch.delenv("KT_UT_B", raising=False)
+        with pytest.raises(MCPConfigError) as caught:
+            MCPServerConfig.from_entry(
+                {"name": "x", "command": "c", "args": ["${KT_UT_A}", "${KT_UT_B}"]}
+            )
+        assert str(caught.value) == (
+            "environment variables KT_UT_A, KT_UT_B are not set "
+            "(used in args of server x)"
+        )
+
+    def test_without_expansion_markers_stay_literal(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_TOKEN", "s3cret")
+        cfg = MCPServerConfig.from_entry(
+            {"name": "x", "url": "http://h/?k=${KT_UT_TOKEN}", "transport": "sse"},
+            expand_env=False,
+        )
+        assert cfg.url == "http://h/?k=${KT_UT_TOKEN}"
+
+    def test_entry_is_not_mutated(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_TOKEN", "s3cret")
+        entry = {"name": "x", "url": "u", "headers": {"A": "${KT_UT_TOKEN}"}}
+        MCPServerConfig.from_entry(entry)
+        assert entry["headers"] == {"A": "${KT_UT_TOKEN}"}
+
+    def test_missing_and_null_fields_take_defaults(self):
+        cfg = MCPServerConfig.from_entry(
+            {"name": "x", "transport": None, "args": None, "headers": None}
+        )
+        assert cfg == MCPServerConfig(name="x")
+
+    def test_bad_shapes_are_rejected(self):
+        with pytest.raises(MCPConfigError, match="args of server x must be a list"):
+            MCPServerConfig.from_entry({"name": "x", "args": "--a"})
+        with pytest.raises(MCPConfigError, match="headers of server x must be"):
+            MCPServerConfig.from_entry({"name": "x", "headers": ["A: b"]})
+        with pytest.raises(MCPConfigError, match="connect_timeout of server x"):
+            MCPServerConfig.from_entry({"name": "x", "connect_timeout": "soon"})
 
 
 class TestServerDataclasses:
@@ -418,11 +520,12 @@ class TestConnectErrors:
         ctx = _FakeTransportContext(raise_on_enter=boom)
         _install_fake_mcp(monkeypatch, transport_ctx=ctx)
         mgr = MCPClientManager()
-        with pytest.raises(RuntimeError, match="transport exploded"):
+        with pytest.raises(MCPConnectionError) as caught:
             await mgr.connect(MCPServerConfig(name="s", command="c"))
+        assert caught.value.__cause__ is boom
         info = mgr.servers["s"]
         assert info.status == "error"
-        assert info.error == "transport exploded"
+        assert info.error == "MCP server s: RuntimeError: transport exploded"
 
     async def test_negative_timeout_rejected_before_connect(self, monkeypatch):
         _install_fake_mcp(monkeypatch)
@@ -451,10 +554,10 @@ class TestConnectErrors:
         )
         mgr = MCPClientManager()
         cfg = MCPServerConfig(name="slow", command="c", connect_timeout=0.01)
-        with pytest.raises(TimeoutError, match="slow: Timed out after"):
+        with pytest.raises(MCPTimeoutError, match="slow: timed out after 0.01s"):
             await mgr.connect(cfg)
         assert mgr.servers["slow"].status == "error"
-        assert "Timed out" in mgr.servers["slow"].error
+        assert mgr.servers["slow"].error == "MCP server slow: timed out after 0.01s"
 
     async def test_timeout_path_succeeds_when_fast(self, monkeypatch):
         session = _FakeClientSession("r", "w", tools=[_FakeToolDecl("t")])
@@ -481,6 +584,152 @@ class TestConnectErrors:
         # exactly one server record, in error state
         assert list(mgr.servers) == ["slow"]
         assert mgr.servers["slow"].status == "error"
+
+
+class _HangingSession(_FakeClientSession):
+    async def initialize(self):
+        await asyncio.sleep(30)
+
+
+class _PostingTransportContext(_FakeTransportContext):
+    """Fake HTTP transport that sends one handshake POST through the
+    manager-supplied ``httpx_client_factory`` client, like the SDK does."""
+
+    async def __aenter__(self):
+        self.client = self.client_factory(headers=self.headers)
+        self.post_task = asyncio.create_task(self._post())
+        return await super().__aenter__()
+
+    async def _post(self):
+        try:
+            await self.client.post(self.url, json={})
+        except Exception:
+            pass
+
+    async def __aexit__(self, *exc):
+        self.post_task.cancel()
+        await asyncio.gather(self.post_task, return_exceptions=True)
+        await self.client.aclose()
+        return await super().__aexit__(*exc)
+
+
+def _http_answer(monkeypatch, handler):
+    async def _send(self, request, **kwargs):
+        return handler(request)
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", _send)
+
+
+class TestFailFast:
+    async def test_error_status_aborts_long_before_the_timeout(
+        self, monkeypatch, caplog
+    ):
+        ctx = _PostingTransportContext()
+        _install_fake_mcp(
+            monkeypatch,
+            session_cls=lambda r, w: _HangingSession(r, w),
+            transport_ctx=ctx,
+        )
+        _http_answer(monkeypatch, lambda r: httpx.Response(401, request=r))
+        mgr = MCPClientManager()
+        cfg = MCPServerConfig(
+            name="sb",
+            transport="streamable_http",
+            url="http://h/mcp",
+            headers={"Authorization": "Bearer s3cret-t0ken"},
+            connect_timeout=10,
+        )
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(MCPConnectionError) as caught:
+                await mgr.connect(cfg)
+        assert loop.time() - started < 2
+        assert str(caught.value) == (
+            "MCP server sb: HTTP 401 Unauthorized from http://h/mcp; "
+            "check the headers/token"
+        )
+        assert caught.value.status == 401
+        assert mgr.servers["sb"].status == "error"
+        assert mgr.servers["sb"].error == str(caught.value)
+        assert "sb" not in mgr._sessions and "sb" not in mgr._connections
+        assert ctx.aexit_called, "the transport is unwound on its owner task"
+        rendered = "\n".join(
+            ColoredFormatter(use_color=False).format(r) for r in caplog.records
+        )
+        assert "s3cret-t0ken" not in rendered
+        assert "HTTP 401 Unauthorized" in rendered
+        assert "url=http://h/mcp" in rendered
+
+    async def test_fail_fast_without_a_connect_timeout(self, monkeypatch):
+        ctx = _PostingTransportContext()
+        _install_fake_mcp(
+            monkeypatch,
+            session_cls=lambda r, w: _HangingSession(r, w),
+            transport_ctx=ctx,
+        )
+        _http_answer(monkeypatch, lambda r: httpx.Response(404, request=r))
+        mgr = MCPClientManager()
+        cfg = MCPServerConfig(name="sb", transport="sse", url="http://h/sse")
+        with pytest.raises(MCPConnectionError, match="HTTP 404 Not Found"):
+            await asyncio.wait_for(mgr.connect(cfg), timeout=5)
+
+    async def test_timeout_reports_the_last_status(self, monkeypatch):
+        ctx = _PostingTransportContext()
+        _install_fake_mcp(
+            monkeypatch,
+            session_cls=lambda r, w: _HangingSession(r, w),
+            transport_ctx=ctx,
+        )
+        _http_answer(monkeypatch, lambda r: httpx.Response(202, request=r))
+        mgr = MCPClientManager()
+        cfg = MCPServerConfig(
+            name="sb",
+            transport="streamable_http",
+            url="http://h/mcp",
+            connect_timeout=0.3,
+        )
+        with pytest.raises(MCPTimeoutError) as caught:
+            await mgr.connect(cfg)
+        assert str(caught.value) == (
+            "MCP server sb: timed out after 0.3s; last HTTP response was "
+            "202 Accepted for POST http://h/mcp"
+        )
+
+    async def test_successful_connect_disarms_the_observer(self, monkeypatch):
+        ctx = _PostingTransportContext()
+        session = _FakeClientSession("r", "w", tools=[_FakeToolDecl("t")])
+        _install_fake_mcp(
+            monkeypatch, session_cls=lambda r, w: session, transport_ctx=ctx
+        )
+        _http_answer(monkeypatch, lambda r: httpx.Response(200, request=r))
+        mgr = MCPClientManager()
+        info = await mgr.connect(
+            MCPServerConfig(name="sb", transport="streamable_http", url="http://h/mcp")
+        )
+        assert info.status == "connected"
+        _http_answer(monkeypatch, lambda r: httpx.Response(500, request=r))
+        await ctx.client.post("http://h/mcp", json={})
+        assert mgr.servers["sb"].status == "connected"
+        await mgr.disconnect("sb")
+
+    async def test_caller_cancellation_tears_the_connection_down(self, monkeypatch):
+        ctx = _FakeTransportContext()
+        _install_fake_mcp(
+            monkeypatch,
+            session_cls=lambda r, w: _HangingSession(r, w),
+            transport_ctx=ctx,
+        )
+        mgr = MCPClientManager()
+        task = asyncio.create_task(
+            mgr.connect(MCPServerConfig(name="s", command="c", connect_timeout=10))
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert ctx.aexit_called
+        assert "s" not in mgr._connections
 
 
 # ---------------------------------------------------------------------------
@@ -729,9 +978,26 @@ class TestListing:
                 "transport": "stdio",
                 "status": "connected",
                 "error": "",
+                "instructions": "",
                 "tools": [{"name": "t", "description": "desc", "input_schema": {}}],
             }
         ]
+
+    async def test_list_servers_carries_server_instructions(self, monkeypatch):
+        class _Init:
+            instructions = "Use sandbox:<name>/<path> for files."
+
+        class _InstructedSession(_FakeClientSession):
+            _init_result = _Init()
+
+        _install_fake_mcp(
+            monkeypatch, session_cls=lambda r, w: _InstructedSession(r, w, tools=[])
+        )
+        mgr = MCPClientManager()
+        await mgr.connect(MCPServerConfig(name="sb", command="c"))
+        assert mgr.list_servers()[0]["instructions"] == (
+            "Use sandbox:<name>/<path> for files."
+        )
 
     def test_list_servers_empty_when_none_connected(self):
         assert MCPClientManager().list_servers() == []

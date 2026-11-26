@@ -108,6 +108,18 @@
     "reason": "mcp.client.stdio is loaded on the stdio-transport path"
   },
   {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "function": "_connect_impl",
+    "target": "mcp.client.sse",
+    "reason": "mcp.client.sse is loaded only on the SSE-transport path"
+  },
+  {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "function": "_connect_impl",
+    "target": "mcp.client.streamable_http",
+    "reason": "mcp.client.streamable_http is loaded only on the streamable-HTTP-transport path"
+  },
+  {
     "file": "src/kohakuterrarium/studio/attach/pty/router.py",
     "function": "pty_session",
     "target": "kohakuterrarium.studio.attach.pty",

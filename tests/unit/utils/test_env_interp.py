@@ -6,7 +6,7 @@ lookup is live (re-running after the environment changes picks up the
 new value — there is no import-time snapshot).
 """
 
-from kohakuterrarium.utils.env_interp import interpolate_env_vars
+from kohakuterrarium.utils.env_interp import interpolate_env_vars, unset_env_vars
 
 
 class TestScalarExpansion:
@@ -61,3 +61,28 @@ class TestLiveRefresh:
         assert interpolate_env_vars("${KT_X}") == "first"
         monkeypatch.setenv("KT_X", "second")
         assert interpolate_env_vars("${KT_X}") == "second"
+
+
+class TestUnsetEnvVars:
+    def test_reports_unset_names_without_default(self, monkeypatch):
+        monkeypatch.delenv("KT_GONE", raising=False)
+        monkeypatch.delenv("KT_ALSO_GONE", raising=False)
+        monkeypatch.setenv("KT_HERE", "1")
+        value = {
+            "Authorization": "Bearer ${KT_GONE}",
+            "nested": ["${KT_HERE}", "${KT_ALSO_GONE}", "${KT_GONE}"],
+        }
+        assert unset_env_vars(value) == ["KT_GONE", "KT_ALSO_GONE"]
+
+    def test_defaults_and_set_variables_are_not_reported(self, monkeypatch):
+        monkeypatch.delenv("KT_GONE", raising=False)
+        monkeypatch.setenv("KT_EMPTY", "")
+        assert unset_env_vars("${KT_GONE:fallback} ${KT_GONE:} ${KT_EMPTY}") == []
+
+    def test_non_strings_have_no_markers(self):
+        assert unset_env_vars(None) == []
+        assert unset_env_vars(3) == []
+
+    def test_interpolation_itself_is_unchanged(self, monkeypatch):
+        monkeypatch.delenv("KT_GONE", raising=False)
+        assert interpolate_env_vars("Bearer ${KT_GONE}") == "Bearer "
