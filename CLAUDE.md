@@ -829,6 +829,7 @@ CI is defined in `.github/workflows/ci.yml`. PRs are not reviewed until CI is gr
 
 - **Lint**: `ruff check src/ tests/` + `black --check src/ tests/` (Python 3.13)
 - **Tests**: `pytest tests/unit/` then `pytest tests/integration/`. CI runs the unit + integration tiers only, on Python 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows excluded because pythonnet has no wheel). The e2e tier is intentionally NOT run in CI; see `tests/README.md` (run it locally before shipping multi-node / Studio / serving changes). Python 3.10 / 3.11 still install via `requires-python = ">=3.10"` but are supported best-effort; CI does not validate them.
+- **Browser**: `test-browser` (Linux, Python 3.13) installs `.[dev,browser-use]` plus Chromium with its system libraries (`playwright install --with-deps chromium`) and runs `pytest tests/unit/browser/ tests/integration/test_browser.py` with `KT_TEST_REQUIRE_BROWSER=1`, so a skip for want of Chromium fails the job (the `test` matrix installs no Chromium, so those tests skip there)
 - **File-size guards**: `pytest tests/unit/test_file_sizes.py`
 - **Frontend**: `npm ci` + `npm run format:check` + `npm run build` in `src/kohakuterrarium-frontend/`, plus check that build output landed in `src/kohakuterrarium/web_dist/`
 - **Wheel build**: build wheel, install into clean venv, run `kt --help` and `kt app --help`
