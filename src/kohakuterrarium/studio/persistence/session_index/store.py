@@ -342,6 +342,19 @@ class SessionIndex:
     def count(self) -> int:
         return len(self._entries)
 
+    def location_counts(self) -> dict[tuple[str, str], tuple[int, str]]:
+        """Session count and latest ``last_active`` per ``(node_id, pwd)``.
+
+        One pass over the entry table; project grouping folds these pairs.
+        """
+        out: dict[tuple[str, str], tuple[int, str]] = {}
+        for entry in self._entry_rows():
+            key = (str(entry.get("node_id") or ""), str(entry.get("pwd") or ""))
+            last_active = str(entry.get("last_active") or "")
+            count, latest = out.get(key, (0, ""))
+            out[key] = (count + 1, max(latest, last_active))
+        return out
+
     def list(
         self,
         *,
@@ -353,10 +366,12 @@ class SessionIndex:
         order: str = "desc",
         limit: int = 20,
         offset: int = 0,
+        locations: set[tuple[str, str]] | None = None,
     ) -> SessionIndexPage:
         """Return a filtered, sorted, optionally searched page.
 
-        Filters use exact equality. Relevance sorting preserves TextVault's
+        Filters use exact equality; ``locations`` keeps only rows whose raw
+        ``(node_id, pwd)`` is in the set. Relevance sorting preserves TextVault's
         BM25 order and is meaningful only with search text. Limits remain
         unbounded above because programmatic callers request the complete index;
         HTTP callers enforce their own page sizes.
@@ -376,6 +391,7 @@ class SessionIndex:
                 order=order,
                 limit=limit,
                 offset=offset,
+                locations=locations,
             )
         return self._list_unsearched(
             status=status,
@@ -385,6 +401,7 @@ class SessionIndex:
             order=order,
             limit=limit,
             offset=offset,
+            locations=locations,
         )
 
     def _passes(
@@ -393,6 +410,7 @@ class SessionIndex:
         status: str | None,
         config_type: str | None,
         node_id: str | None,
+        locations: set[tuple[str, str]] | None = None,
     ) -> bool:
         if status is not None and e.get("status") != status:
             return False
@@ -400,6 +418,9 @@ class SessionIndex:
             return False
         if node_id is not None and e.get("node_id") != node_id:
             return False
+        if locations is not None:
+            where = (str(e.get("node_id") or ""), str(e.get("pwd") or ""))
+            return where in locations
         return True
 
     def _list_unsearched(
@@ -412,11 +433,12 @@ class SessionIndex:
         order: str,
         limit: int,
         offset: int,
+        locations: set[tuple[str, str]] | None = None,
     ) -> SessionIndexPage:
         rows = [
             entry
             for entry in self._entry_rows()
-            if entry and self._passes(entry, status, config_type, node_id)
+            if entry and self._passes(entry, status, config_type, node_id, locations)
         ]
         rows.sort(key=lambda e: (e.get(sort) or ""), reverse=(order == "desc"))
         total = len(rows)
@@ -434,6 +456,7 @@ class SessionIndex:
         order: str,
         limit: int,
         offset: int,
+        locations: set[tuple[str, str]] | None = None,
     ) -> SessionIndexPage:
         # Over-fetch before facet filtering. The requested page size prevents
         # full-index programmatic searches from truncating at the HTTP-oriented
@@ -453,7 +476,7 @@ class SessionIndex:
         for fname, score in hits:
             entry_dict = found.get(fname)
             if not entry_dict or not self._passes(
-                entry_dict, status, config_type, node_id
+                entry_dict, status, config_type, node_id, locations
             ):
                 continue
             entry_dict = dict(entry_dict)

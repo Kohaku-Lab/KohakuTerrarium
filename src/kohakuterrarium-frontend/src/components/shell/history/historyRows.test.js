@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   baseName,
+  groupByProject,
   historyRow,
   originNode,
   resumeNode,
@@ -112,5 +113,33 @@ describe("history rows", () => {
     expect(whenLabel(new Date(2026, 8, 1).toISOString(), t, now)).not.toContain("sessions.")
     expect(whenLabel("", t, now)).toBe("")
     expect(whenLabel("not a date", t, now)).toBe("")
+  })
+})
+
+describe("history rows and projects", () => {
+  it("carries the project the server put the session in, and none when it has none", () => {
+    const r = historyRow({ name: "s", pwd: "/w/app/sub", project: { id: "p1", name: "App" } })
+    expect(r.projectId).toBe("p1")
+    expect(r.projectName).toBe("App")
+    expect(r.pwdName).toBe("sub")
+    const loose = historyRow({ name: "t", pwd: "/tmp/x", project: null })
+    expect(loose.projectId).toBe("")
+    expect(loose.projectName).toBe("")
+  })
+
+  it("groups a page by project in first-seen order, rows in no project under an empty id", () => {
+    const rows = [
+      { key: "a", projectId: "p1", projectName: "App" },
+      { key: "b", projectId: "", projectName: "" },
+      { key: "c", projectId: "p2", projectName: "Lib" },
+      { key: "d", projectId: "p1", projectName: "App" },
+    ]
+    const groups = groupByProject(rows)
+    expect(groups.map((g) => [g.id, g.name, g.rows.map((r) => r.key)])).toEqual([
+      ["p1", "App", ["a", "d"]],
+      ["", "", ["b"]],
+      ["p2", "Lib", ["c"]],
+    ])
+    expect(groupByProject([])).toEqual([])
   })
 })

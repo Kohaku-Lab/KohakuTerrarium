@@ -210,6 +210,19 @@ describe("MarkdownRenderer streaming", () => {
     expect(writeText).toHaveBeenCalledWith(`${source}\n`)
   })
 
+  it("opens artifact links outside the app tab and keeps app routes in-app", () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: {
+        content: "[pose](/api/sessions/s/artifacts/exports/x/pose.jpg) [s](/sessions/abc)",
+        origin: "http://localhost",
+      },
+    })
+    const [artifact, route] = wrapper.findAll("a")
+    expect(artifact.attributes("target")).toBe("_blank")
+    expect(artifact.attributes("rel")).toBe("noopener noreferrer")
+    expect(route.attributes("target")).toBeUndefined()
+  })
+
   it("renders empty for empty content", () => {
     const wrapper = mount(MarkdownRenderer, { props: { content: "" } })
     expect(renderedHtml(wrapper)).not.toContain("<p>")

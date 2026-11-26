@@ -636,7 +636,13 @@ export default {
   "settings.mcp.saveFailed": "Failed to save MCP server",
   "settings.mcp.removeFailed": "Failed to remove",
   "settings.mcp.transportStdio": "stdio (subprocess)",
-  "settings.mcp.transportHttp": "HTTP/SSE (remote)",
+  "settings.mcp.transportStreamableHttp": "Streamable HTTP (recommended for remote)",
+  "settings.mcp.transportSse": "SSE (legacy)",
+  "settings.mcp.transportStdioHint": "Runs the server as a local subprocess (command + args).",
+  "settings.mcp.transportStreamableHttpHint":
+    "For a remote server at a URL such as https://host/mcp. Most current servers use this.",
+  "settings.mcp.transportSseHint":
+    "Only for older servers with an SSE endpoint such as https://host/sse.",
   "settings.account.loadFailed": "Failed to load Codex usage",
   "settings.account.loginHint": "Run `kt login codex` to authenticate.",
   "settings.account.unknownPlan": "Unknown plan",

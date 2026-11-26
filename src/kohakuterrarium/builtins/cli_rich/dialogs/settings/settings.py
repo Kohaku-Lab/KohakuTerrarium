@@ -48,6 +48,7 @@ from kohakuterrarium.llm.profiles.resolve import (
     save_backend,
     set_default_model,
 )
+from kohakuterrarium.mcp.transports import MCP_TRANSPORT_CHOICES, choice_for_transport
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,7 +64,7 @@ _BUILTIN_PROVIDERS = {
     "glm-coding",
 }
 _BACKEND_TYPES = ["openai", "codex"]
-_TRANSPORTS = ["stdio", "http", "streamable_http"]
+_TRANSPORTS = list(MCP_TRANSPORT_CHOICES)
 
 
 @dataclass
@@ -525,7 +526,7 @@ class SettingsOverlay:
                 FormField(
                     label="Transport",
                     key="transport",
-                    value=(row["transport"] if row else "stdio"),
+                    value=choice_for_transport(row["transport"] if row else None),
                     options=list(_TRANSPORTS),
                     hint="← → to cycle",
                 ),
@@ -539,7 +540,7 @@ class SettingsOverlay:
                     label="URL",
                     key="url",
                     value=(row.get("url", "") if row else ""),
-                    hint="endpoint for http / streamable_http",
+                    hint="endpoint for streamable_http / sse",
                 ),
                 FormField(
                     label="Timeout",

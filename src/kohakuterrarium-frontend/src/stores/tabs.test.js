@@ -352,3 +352,32 @@ describe("live surface metadata", () => {
     )
   })
 })
+
+describe("tabs store — History view state", () => {
+  it("re-applies a project filter when History is opened again for a project", () => {
+    const tabs = useTabsStore()
+    tabs.openTab({ kind: "saved-sessions", id: "saved-sessions", project: "p1" })
+    expect(tabs.byId["saved-sessions"].project).toBe("p1")
+    tabs.openTab({ kind: "saved-sessions", id: "saved-sessions", project: "p2" })
+    expect(tabs.byId["saved-sessions"].project).toBe("p2")
+    expect(tabs.byId["saved-sessions"].projectRequest).toBe(1)
+    tabs.openTab({ kind: "saved-sessions", id: "saved-sessions" })
+    expect(tabs.byId["saved-sessions"].project).toBe("p2")
+    expect(tabs.byId["saved-sessions"].projectRequest).toBe(1)
+  })
+
+  it("keeps the filter and grouping through a reload, and only for History", () => {
+    const tabs = useTabsStore()
+    tabs.openTab({ kind: "saved-sessions", id: "saved-sessions" })
+    tabs.openTab({ kind: "catalog", id: "catalog" })
+    tabs.setHistoryView("saved-sessions", { project: "none", groupByProject: true })
+    tabs.setHistoryView("catalog", { project: "p1" })
+    expect(tabs.byId.catalog.project).toBeUndefined()
+    const snapshot = JSON.parse(JSON.stringify(tabs.serializeToStorage()))
+    setActivePinia(createPinia())
+    const restored = useTabsStore()
+    restored.loadFromStorage(snapshot)
+    expect(restored.byId["saved-sessions"].project).toBe("none")
+    expect(restored.byId["saved-sessions"].groupByProject).toBe(true)
+  })
+})

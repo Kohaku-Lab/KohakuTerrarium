@@ -42,3 +42,29 @@ def interpolate_env_vars(value: Any) -> Any:
     if isinstance(value, list):
         return [interpolate_env_vars(v) for v in value]
     return value
+
+
+def unset_env_vars(value: Any) -> list[str]:
+    """Return the names ``value`` references as ``${VAR}`` that are not set.
+
+    Only markers without a default count; names are listed once, in order
+    of first use. Walks dicts and lists like :func:`interpolate_env_vars`.
+    """
+    found: list[str] = []
+    stack = [value]
+    while stack:
+        current = stack.pop(0)
+        if isinstance(current, str):
+            for match in ENV_VAR_PATTERN.finditer(current):
+                name = match.group(1)
+                if (
+                    match.group(2) is None
+                    and name not in os.environ
+                    and name not in found
+                ):
+                    found.append(name)
+        elif isinstance(current, dict):
+            stack[:0] = list(current.values())
+        elif isinstance(current, list):
+            stack[:0] = list(current)
+    return found

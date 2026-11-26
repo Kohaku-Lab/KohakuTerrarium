@@ -16,6 +16,7 @@ and `EventRecorder` capture all output and events for test assertions.
 | `agent.py`    | `TestAgentBuilder`: builder for creating test agents with injected fakes and builtin tools     |
 | `output.py`   | `OutputRecorder`: captures writes, streaming chunks, and activity notifications for assertions |
 | `events.py`   | `EventRecorder`, `RecordedEvent`: records events with timing and source information            |
+| `mcp_http.py` | `bearer_mcp_server`, `closed_loopback_port`: local token-protected streamable-HTTP MCP server   |
 
 ## Dependencies
 

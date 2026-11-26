@@ -3,12 +3,14 @@
 import pytest
 import yaml
 
+from kohakuterrarium.errors import MCPConfigError
 from kohakuterrarium.studio.identity.mcp.servers import (
     delete_server,
     find_server,
     load_agent_mcp_servers,
     load_servers,
     mcp_config_path,
+    TRANSPORT_LABEL,
     prompt_server_dict,
     save_servers,
     upsert_server,
@@ -109,7 +111,7 @@ class TestPromptServerDict:
         p = _make_prompt(
             {
                 "Name": "alpha",
-                "Transport": "stdio",
+                TRANSPORT_LABEL: "stdio",
                 "Command": "echo",
                 "Args JSON array": '["a","b"]',
                 "Env JSON object": '{"K":"V"}',
@@ -124,7 +126,7 @@ class TestPromptServerDict:
         assert out["connect_timeout"] == 5.5
 
     def test_headers_are_parsed_and_default_to_empty(self):
-        base = {"Name": "remote", "Transport": "streamable_http", "URL": "http://h/mcp"}
+        base = {"Name": "remote", TRANSPORT_LABEL: "streamable_http", "URL": "u"}
         assert prompt_server_dict(None, _make_prompt(base))["headers"] == {}
         with_headers = {**base, "Headers JSON object": '{"Authorization":"Bearer t"}'}
         out = prompt_server_dict(None, _make_prompt(with_headers))
@@ -133,6 +135,36 @@ class TestPromptServerDict:
         assert prompt_server_dict(existing, _make_prompt({}))["headers"] == {
             "X-Key": "k"
         }
+
+    def test_transport_prompt_lists_choices_and_stores_canonical_name(self):
+        labels = []
+
+        def p(label, default):
+            labels.append(label)
+            return {"Name": "remote", TRANSPORT_LABEL: "Streamable-HTTP"}.get(
+                label, default
+            )
+
+        out = prompt_server_dict(None, p)
+        assert TRANSPORT_LABEL == "Transport (stdio, streamable_http, sse)"
+        assert TRANSPORT_LABEL in labels
+        assert out["transport"] == "streamable_http"
+
+    def test_unknown_transport_is_rejected_before_other_prompts(self):
+        asked = []
+
+        def p(label, default):
+            asked.append(label)
+            return {"Name": "x", TRANSPORT_LABEL: "websocket"}.get(label, default)
+
+        with pytest.raises(MCPConfigError, match="choose one of: stdio"):
+            prompt_server_dict(None, p)
+        assert asked == ["Name", TRANSPORT_LABEL]
+
+    def test_legacy_http_entry_keeps_its_transport(self):
+        existing = {"name": "old", "transport": "http", "url": "http://h/sse"}
+        out = prompt_server_dict(existing, lambda label, default: default)
+        assert out["transport"] == "http"
 
     def test_invalid_headers_json(self):
         p = _make_prompt({"Name": "x", "Headers JSON object": "{not json"})

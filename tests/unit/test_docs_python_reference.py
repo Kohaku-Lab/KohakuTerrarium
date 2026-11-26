@@ -86,6 +86,11 @@ DOCUMENTED_SYMBOLS: list[tuple[str, str]] = [
     ("kohakuterrarium.errors", "NotFoundError"),
     ("kohakuterrarium.errors", "InvalidRequestError"),
     ("kohakuterrarium.errors", "ConflictError"),
+    ("kohakuterrarium.errors", "MCPError"),
+    ("kohakuterrarium.errors", "MCPConfigError"),
+    ("kohakuterrarium.errors", "MCPConnectionError"),
+    ("kohakuterrarium.errors", "MCPCommandNotFoundError"),
+    ("kohakuterrarium.errors", "MCPTimeoutError"),
     # -- Agent -----------------------------------------------------------
     ("kohakuterrarium", "Agent.build"),
     ("kohakuterrarium", "Agent.from_path"),

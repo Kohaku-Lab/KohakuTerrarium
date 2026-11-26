@@ -14,12 +14,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from PIL import Image
 from websockets import serve
 from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 
+from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.llm.codex import provider as cp
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.codex.provider import CODEX_BASE_URL, CodexOAuthProvider
@@ -523,6 +525,49 @@ class TestSessionIdHeaderGating:
         kw = p._client.responses.kwargs
         assert "extra_headers" in kw
         assert "session_id" in kw["extra_headers"]
+
+
+class TestHttpToolsField:
+    """The HTTP request body carries ``tools`` only when there are tools."""
+
+    async def _request_body(self, tools=None) -> dict:
+        bodies = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content))
+            completed = {
+                "type": "response.completed",
+                "response": {"id": "r1", "output": []},
+            }
+            sse = f"event: response.completed\ndata: {json.dumps(completed)}\n\n"
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, content=sse
+            )
+
+        p = CodexOAuthProvider(model="m", api_key="sk", base_url="https://h/v1")
+        await p.ensure_authenticated()
+        p._client = p._client.with_options(
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        )
+        try:
+            async for _ in p.chat([{"role": "user", "content": "hi"}], tools=tools):
+                pass
+        finally:
+            await p.close()
+        assert len(bodies) == 1
+        return bodies[0]
+
+    async def test_toolless_request_omits_tools_field(self):
+        body = await self._request_body()
+        assert "tools" not in body
+        assert body["input"]
+
+    async def test_request_with_tools_sends_tools_array(self):
+        body = await self._request_body(
+            tools=[ToolSchema(name="lookup", description="Find a thing.")]
+        )
+        assert [t["name"] for t in body["tools"]] == ["lookup"]
+        assert body["tools"][0]["type"] == "function"
 
 
 class TestReasoningReplay:

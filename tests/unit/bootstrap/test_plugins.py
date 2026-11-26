@@ -153,6 +153,36 @@ class TestInitPluginsBuiltinCatalog:
             assert builtin in names, builtin
             assert mgr.is_enabled(builtin) is False, builtin
 
+    def test_builtin_repeat_guard_is_discovered_enabled(self, monkeypatch):
+        """repeat_guard starts on by default, off for a host without catalog
+        defaults, and an explicit ``enabled: false`` entry turns it off."""
+        from kohakuterrarium.builtins.plugin_catalog import (
+            list_catalog_plugins,
+            lookup_plugin,
+        )
+
+        monkeypatch.setattr(plug_mod, "list_catalog_plugins", list_catalog_plugins)
+        monkeypatch.setattr(plug_mod, "lookup_plugin", lookup_plugin)
+        mgr = init_plugins([], loader=None)
+        assert mgr.is_enabled("repeat_guard") is True
+        assert "repeat_guard" in mgr.default_on_names()
+        assert mgr.get_plugin("repeat_guard").get_options() == {"repeat_failures": 3}
+
+        headless = init_plugins([], loader=None, catalog_defaults=False)
+        assert headless.is_enabled("repeat_guard") is False
+
+        opted_out = init_plugins(
+            [{"name": "repeat_guard", "enabled": False}], loader=None
+        )
+        assert opted_out.is_enabled("repeat_guard") is False
+
+        tuned = init_plugins(
+            [{"name": "repeat_guard", "options": {"repeat_failures": 5}}],
+            loader=None,
+        )
+        assert tuned.is_enabled("repeat_guard") is True
+        assert tuned.get_plugin("repeat_guard").get_options() == {"repeat_failures": 5}
+
 
 class TestPackageDiscovery:
     def test_no_packages_no_op(self, monkeypatch):

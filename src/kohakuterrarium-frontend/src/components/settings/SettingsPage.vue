@@ -101,9 +101,9 @@
                 <div>
                   <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.transport") }}</label>
                   <el-select v-model="mcpForm.transport" size="small" class="w-full">
-                    <el-option value="stdio" :label="t('settings.mcp.transportStdio')" />
-                    <el-option value="http" :label="t('settings.mcp.transportHttp')" />
+                    <el-option v-for="option in MCP_TRANSPORT_OPTIONS" :key="option.value" :value="option.value" :label="t(option.labelKey)" />
                   </el-select>
+                  <p class="text-[11px] text-warm-400 mt-1" data-test="mcp-add-transport-hint">{{ t(transportOption(mcpForm.transport).hintKey) }}</p>
                 </div>
                 <div v-if="mcpForm.transport === 'stdio'">
                   <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.command") }}</label>
@@ -113,9 +113,9 @@
                   <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.args") }}</label>
                   <el-input v-model="mcpForm.argsStr" size="small" placeholder="-y @modelcontextprotocol/server-filesystem ./" />
                 </div>
-                <div v-if="mcpForm.transport === 'http'" class="col-span-2">
+                <div v-if="mcpForm.transport !== 'stdio'" class="col-span-2" data-test="mcp-add-url">
                   <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.url") }}</label>
-                  <el-input v-model="mcpForm.url" size="small" placeholder="https://mcp.example.com/api" />
+                  <el-input v-model="mcpForm.url" size="small" placeholder="https://mcp.example.com/mcp" />
                 </div>
               </div>
               <div class="flex gap-2 mt-3">
@@ -215,6 +215,7 @@ import { useI18n } from "@/utils/i18n"
 
 const auth = useAuthStore()
 import { configAPI, settingsAPI } from "@/utils/api"
+import { MCP_TRANSPORT_OPTIONS, transportOption } from "@/utils/mcpTransports"
 
 const { t } = useI18n()
 const { isCompact } = useDensity()
@@ -569,12 +570,13 @@ async function loadMCP() {
 async function addMCPServer() {
   if (!mcpForm.name) return
   try {
+    const stdio = mcpForm.transport === "stdio"
     const payload = {
       name: mcpForm.name,
       transport: mcpForm.transport,
-      command: mcpForm.command,
-      args: mcpForm.argsStr ? mcpForm.argsStr.split(/\s+/) : [],
-      url: mcpForm.url,
+      command: stdio ? mcpForm.command : "",
+      args: stdio && mcpForm.argsStr ? mcpForm.argsStr.split(/\s+/).filter(Boolean) : [],
+      url: stdio ? "" : mcpForm.url,
     }
     await settingsAPI.addMCP(payload)
     ElMessage.success(t("settings.mcp.added", { name: mcpForm.name }))

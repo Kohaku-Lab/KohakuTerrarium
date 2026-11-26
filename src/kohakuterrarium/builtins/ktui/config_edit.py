@@ -29,6 +29,7 @@ from kohakuterrarium.llm.profiles.resolve import (
     save_profile,
 )
 from kohakuterrarium.llm.profiles.types import LLMBackend, LLMPreset
+from kohakuterrarium.mcp.transports import MCP_TRANSPORT_CHOICES, choice_for_transport
 from kohakuterrarium.studio.identity.llm.default import resolve_and_set_default
 from kohakuterrarium.studio.identity.llm.profiles import save_discovered_model
 from kohakuterrarium.studio.identity.mcp.servers import load_servers, save_servers
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 BACKEND_TYPES = ["openai", "codex", "anthropic", "gemini"]
-TRANSPORTS = ["stdio", "http", "streamable_http"]
+TRANSPORTS = list(MCP_TRANSPORT_CHOICES)
 EFFORTS = ["", "minimal", "low", "medium", "high", "xhigh"]
 
 
@@ -415,7 +416,7 @@ class ConfigEdit:
                     "label": "Transport",
                     "control": "select",
                     "options": TRANSPORTS,
-                    "value": server.get("transport", "stdio"),
+                    "value": choice_for_transport(server.get("transport")),
                 },
                 {
                     "name": "command",
@@ -427,7 +428,7 @@ class ConfigEdit:
                     "name": "url",
                     "label": "URL",
                     "value": server.get("url", ""),
-                    "hint": "http: the endpoint",
+                    "hint": "streamable_http / sse: the endpoint",
                 },
                 {
                     "name": "connect_timeout",

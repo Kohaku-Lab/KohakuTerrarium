@@ -371,6 +371,27 @@ Use search, session type, and last-active or creation-time sorting on the Sessio
 page. The Resume dialog searches the server index and pages through results, so
 older sessions are reachable beyond the initial recent page.
 
+## Projects
+
+A project is a working folder. The Sessions history page groups saved and
+running sessions by project, so the history of one repository is in one
+place:
+
+- Every distinct session folder (`pwd`) is a **found** project. Nothing is
+  stored for it. A session in a subfolder of a known project folder belongs
+  to that project; with nested projects the deepest one wins.
+- **Add folder**, rename, pin, or hide makes it a **saved** project. Saved
+  projects persist in `projects.json` in the config folder (per user,
+  `users/<id>/projects.json`, when multi-user auth is on).
+- **Forget** removes only the saved record. The sessions stay, and a folder
+  that still has sessions shows again as a found project.
+- Sessions with no folder (older sessions, terrariums whose creatures use
+  different folders) are listed as **unassigned**.
+
+A folder on a remote worker node is a different project from the same path
+on this host. See [HTTP API: Projects](../reference/http.md#projects) for the
+endpoints and the `project` filter of `GET /api/sessions`.
+
 ## HTTP history pagination
 
 History target endpoints return one bounded page, with a default and maximum
