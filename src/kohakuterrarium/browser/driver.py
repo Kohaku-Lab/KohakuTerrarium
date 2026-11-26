@@ -103,7 +103,13 @@ _PLACE_JS = """(el, [text, url]) => {
   if (proto === null) return "not_text";
   if (el.disabled || el.readOnly) return "not_editable";
   el.focus();
-  Object.getOwnPropertyDescriptor(proto, "value").set.call(el, text);
+  const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+  const before = el.value;
+  setter.call(el, text);
+  if (proto === view.HTMLInputElement.prototype && el.value !== text) {
+    setter.call(el, before);
+    return "rejected";
+  }
   el.dispatchEvent(new view.Event("input", {bubbles: true}));
   el.dispatchEvent(new view.Event("change", {bubbles: true}));
   return "ok";
@@ -112,6 +118,7 @@ _PLACE_FAILURES = {
     "moved": "the element was replaced or its document changed during the call",
     "not_text": "the element is not a text field",
     "not_editable": "the text field is disabled or read-only",
+    "rejected": "the field did not accept the value (wrong format for its type)",
 }
 _SCROLL_HEIGHT_JS = (
     "() => Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,"

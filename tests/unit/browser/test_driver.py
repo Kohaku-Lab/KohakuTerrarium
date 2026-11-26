@@ -447,6 +447,10 @@ def site():
         "<!doctype html><title>Editable</title>"
         '<div id=bio contenteditable role=textbox aria-label="Bio"></div>',
     )
+    server.html(
+        "/fields-number",
+        "<!doctype html><title>Number</title><label>PIN <input type=number></label>",
+    )
     server.html("/tallbox", TALL_BOX)
     server.file(
         "/report.csv",
@@ -741,6 +745,14 @@ async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
         page.evaluate("document.getElementById('bio').innerText", timeout=5), "bio"
     )
     assert shown == CHECKED
+    pin = ref_of(
+        (await live.navigate(site.url("/fields-number"))).text, "spinbutton", "PIN"
+    )
+    await page.type_checked(pin, "4821", lambda u: True, slowly=False, timeout=5)
+    assert await field_values(page) == "4821"
+    with pytest.raises(DriverError, match="did not accept"):
+        await page.type_checked(pin, CHECKED, lambda u: True, slowly=False, timeout=5)
+    assert await field_values(page) == "4821", "a refused value replaced the old one"
     save = ref_of((await live.navigate(site.url("/form"))).text, "button", "Save")
     with pytest.raises(DriverError, match="not a text field"):
         await page.type_checked(save, CHECKED, lambda u: True, slowly=False, timeout=5)
