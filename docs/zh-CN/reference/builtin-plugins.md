@@ -89,7 +89,9 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
   `write_policy` 对象，组件可以跨呼叫持有。选项变更立即作用在持有的对象
   上，`enabled: false` 或 `backend: off` 会让它全部允许。透过插件管理器
   停用插件只会停止把对象交给新的工具呼叫：已持有的对象仍按最后的选项
-  回答，重新启用后交出的是同一组对象。
+  回答，重新启用后交出的是同一组对象。使用方可以依
+  `kohakuterrarium.modules.sandbox` 的 `NetworkPolicy` 与 `WritePolicy`
+  接口标注类型。
 - **哪些工具呼叫看得到**：工具呼叫拿到的是建立其工具 context 的插件管理器
   的服务。context-fork 子 agent 的呼叫拿到父 agent 的对象，并且也会经过
   父 agent 的 sandbox 检查。一般子 agent 的工具 context 由父 agent 建立，
