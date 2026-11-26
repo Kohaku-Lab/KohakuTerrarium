@@ -488,11 +488,12 @@ class SandboxNetworkPolicy:
     """Live network rules of a sandbox plugin, published as ``network_policy``.
 
     For components that open connections outside the tool hooks, such as a
-    filtering proxy. Every access reads the plugin's current options, so a
-    held instance follows ``set_options`` / ``refresh_options``.
-    ``check(host, port)`` returns ``None`` to allow or a short reason to
-    refuse; in audit mode it logs the violation and allows. ``mode`` is the
-    network level in force. ``requires_os_confinement`` is true while
+    filtering proxy or a ``network_access`` tool. The plugin publishes this one
+    instance for its life and every access reads its current options, so a
+    held instance follows ``set_options``; a plugin-manager disable leaves it
+    on the last options. ``check(host, port)`` returns ``None`` to allow or a
+    short reason to refuse; in audit mode it logs the violation and allows.
+    ``mode`` is the network level in force. ``requires_os_confinement`` is true while
     ``os_enforce=require`` is enforced: a process launched outside
     ``run_subprocess_exec`` would escape the kernel confinement it demands.
     """
@@ -519,7 +520,9 @@ class SandboxWritePolicy:
     saving a download. ``check(path)`` gives the decision a write tool's path
     argument gets, from the current options: ``None`` to allow or a short
     reason to refuse (audit mode logs and allows). A relative path resolves
-    against the agent's current working directory.
+    against the host agent's current working directory, or the directory the
+    plugin was loaded with when the host has no agent. Held like
+    ``network_policy``: one instance for the plugin's life.
     """
 
     def __init__(self, plugin: SandboxPlugin) -> None:

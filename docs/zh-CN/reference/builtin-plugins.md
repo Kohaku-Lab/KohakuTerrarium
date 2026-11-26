@@ -83,8 +83,19 @@ KohakuTerrarium 附带以下运行时插件。它们在框架里没有任何特�
   之外写入文件的组件（例如浏览器保存下载）使用。`check(path)` 回传
   `None` 表示允许，否则回传简短的拒绝原因（例如 `fs_write=deny`），
   判断与写入工具的路径参数完全相同：`fs_write`、工作区边界、`fs_deny`
-  与 `fs_write_allow`。相对路径以 agent 当下的工作目录解析。audit 模式
-  下记录后允许；每次呼叫都跟随插件当下的选项。
+  与 `fs_write_allow`。相对路径以 agent 当下的工作目录解析（切换工作
+  目录后跟着变）；在没有 agent 的宿主（例如 MCP 工具服务器）里，以插件
+  载入时的目录解析。audit 模式下记录后允许；每次呼叫都跟随插件当下的选项。
+- **持有服务**：插件在整个生命周期内发布同一组 `network_policy` 与
+  `write_policy` 对象，组件可以跨呼叫持有。选项变更立即作用在持有的对象
+  上，`enabled: false` 或 `backend: off` 会让它全部允许。透过插件管理器
+  停用插件只会停止把对象交给新的工具呼叫：已持有的对象仍按最后的选项
+  回答，重新启用后交出的是同一组对象。
+- **哪些工具呼叫看得到**：工具呼叫拿到的是建立其工具 context 的插件管理器
+  的服务。context-fork 子 agent 的呼叫拿到父 agent 的对象，并且也会经过
+  父 agent 的 sandbox 检查。一般子 agent 的工具 context 由父 agent 建立，
+  所以它的呼叫带着父 agent 的服务，而它的 hook 只经过它自己的插件；设定
+  在子 agent 本身的 sandbox 会管制这些 hook，但不会把服务发布给它的工具。
 - **子行程闸门**：插件透过 `runtime_services()` 发布
   `subprocess_runner` 服务。需要起子行程的工具（`bash` 等）从
   `ToolContext.runtime_services` 取用。Runner 会先检查 syscall 等级

@@ -83,8 +83,19 @@ KohakuTerrarium 附帶下列執行期外掛。它們在框架裡沒有任何特�
   之外寫入檔案的元件（例如瀏覽器儲存下載）使用。`check(path)` 回傳
   `None` 表示允許，否則回傳簡短的拒絕原因（例如 `fs_write=deny`），
   判斷與寫入工具的路徑參數完全相同：`fs_write`、工作區邊界、`fs_deny`
-  與 `fs_write_allow`。相對路徑以 agent 當下的工作目錄解析。audit 模式
-  下記錄後允許；每次呼叫都跟隨外掛當下的選項。
+  與 `fs_write_allow`。相對路徑以 agent 當下的工作目錄解析（切換工作
+  目錄後跟著變）；在沒有 agent 的宿主（例如 MCP 工具伺服器）裡，以外掛
+  載入時的目錄解析。audit 模式下記錄後允許；每次呼叫都跟隨外掛當下的選項。
+- **持有服務**：外掛在整個生命週期內發布同一組 `network_policy` 與
+  `write_policy` 物件，元件可以跨呼叫持有。選項變更立即作用在持有的物件
+  上，`enabled: false` 或 `backend: off` 會讓它全部允許。透過外掛管理器
+  停用外掛只會停止把物件交給新的工具呼叫：已持有的物件仍按最後的選項
+  回答，重新啟用後交出的是同一組物件。
+- **哪些工具呼叫看得到**：工具呼叫拿到的是建立其工具 context 的外掛管理器
+  的服務。context-fork 子 agent 的呼叫拿到父 agent 的物件，並且也會經過
+  父 agent 的 sandbox 檢查。一般子 agent 的工具 context 由父 agent 建立，
+  所以它的呼叫帶著父 agent 的服務，而它的 hook 只經過它自己的外掛；設定
+  在子 agent 本身的 sandbox 會管制這些 hook，但不會把服務發布給它的工具。
 - **子行程閘門**：外掛透過 `runtime_services()` 發布
   `subprocess_runner` 服務。需要起子行程的工具（`bash` 等）從
   `ToolContext.runtime_services` 取用。Runner 會先檢查 syscall 等級
