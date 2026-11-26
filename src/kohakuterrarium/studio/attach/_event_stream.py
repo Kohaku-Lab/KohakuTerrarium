@@ -10,7 +10,11 @@ from kohakuterrarium.core.conversation.continuation import (
     encode_branch_view,
     selected_branch_view,
 )
-from kohakuterrarium.core.token_ledger import context_window, token_snapshot
+from kohakuterrarium.core.token_ledger import (
+    context_window,
+    model_context_window,
+    token_snapshot,
+)
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 
@@ -76,6 +80,7 @@ def session_info_frame(creature: Any) -> dict[str, Any]:
         "config_name": getattr(creature, "config_name", ""),
         "config_ref": getattr(creature, "config_ref", None),
         "max_context": max_context,
+        "context_window": model_context_window(agent),
         "compact_threshold": compact_at,
         "token_usage": tokens["token_usage"],
         "context_tokens": tokens["context_tokens"],
@@ -427,6 +432,7 @@ _STREAM_METADATA_KEYS = (
     "model",
     "agent_name",
     "max_context",
+    "context_window",
     "compact_threshold",
     "error_type",
     "error",

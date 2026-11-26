@@ -91,25 +91,35 @@ class TestBackendChoice:
 
     @posix_paths
     def test_seatbelt_argv_carries_the_profile(self, tmp_path):
-        argv = confine.confine_argv(
+        command = confine.confine_command(
             ["/bin/true"], confine.SEATBELT, WORKSPACE, tmp_path
         )
+        argv = command.argv
         assert argv[:2] == [seatbelt.SANDBOX_EXEC, "-p"]
         assert f'(subpath "{os.path.realpath(tmp_path)}")' in argv[2]
         assert argv[3:] == ["/bin/true"]
+        assert command.pass_fds == ()
+        assert command.backend == confine.SEATBELT
 
     @posix_paths
-    def test_landlock_argv_carries_the_grants(self, tmp_path):
-        argv = confine.confine_argv(
+    def test_landlock_argv_hands_the_grants_over_an_fd(self, tmp_path):
+        command = confine.confine_command(
             ["/bin/true"], confine.LANDLOCK, WORKSPACE, tmp_path
         )
-        assert argv[:4] == [sys.executable, "-I", "-S", str(landlock.LAUNCHER)]
-        assert os.path.realpath(tmp_path) in json.loads(argv[4])
-        assert argv[5:] == ["--", "/bin/true"]
+        try:
+            argv = command.argv
+            (fd,) = command.pass_fds
+            assert argv[:4] == [sys.executable, "-I", "-S", str(landlock.LAUNCHER)]
+            assert argv[4:] == ["--grants-fd", str(fd), "--", "/bin/true"]
+            grants = json.loads(os.pread(fd, 1 << 20, 0))
+            assert os.path.realpath(tmp_path) in grants
+            assert command.grant_count == len(grants)
+        finally:
+            command.close()
 
     def test_unknown_backend_is_an_error(self, tmp_path):
         with pytest.raises(ValueError, match="unknown confinement backend"):
-            confine.confine_argv(["/bin/true"], "jail", WORKSPACE, tmp_path)
+            confine.confine_command(["/bin/true"], "jail", WORKSPACE, tmp_path)
 
 
 class TestEnforceModes:

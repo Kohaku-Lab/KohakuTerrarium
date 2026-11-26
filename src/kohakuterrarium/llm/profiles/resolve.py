@@ -59,6 +59,7 @@ from kohakuterrarium.llm.presets.catalog import (
     resolve_deprecated,
 )
 from kohakuterrarium.llm.profiles.types import LLMBackend, LLMPreset, LLMProfile
+from kohakuterrarium.llm.profiles.validation import check_preset
 from kohakuterrarium.llm.profiles.variations import (
     _SHORTHAND_SELECTION_KEY,
 )
@@ -157,6 +158,7 @@ def _resolve_preset(
         extra_body=deepcopy(resolved_preset.extra_body),
         retry_policy=deepcopy(resolved_preset.retry_policy),
         selected_variations=normalized,
+        context_window=preset.context_window,
         backend_provider_name=provider.provider_name if provider else "",
         backend_native_tools=(
             list(provider.provider_native_tools)
@@ -307,10 +309,17 @@ def _write_profile(profile: LLMProfile | LLMPreset) -> None:
             variation_groups=(
                 deepcopy(existing_preset.variation_groups) if existing_preset else {}
             ),
+            context_window=(
+                existing_preset.context_window
+                if existing_preset
+                else profile.context_window
+            ),
         )
+        preset.inherit_context_fold(existing_preset)
 
     if not preset.provider:
         raise ValueError("Preset provider is required")
+    check_preset(preset)
 
     data = _load_yaml()
     backends = load_backends(include_remote=False)
@@ -662,6 +671,7 @@ def list_all() -> list[dict[str, Any]]:
             "available": _available(profile.provider),
             "source": source,
             "max_context": profile.max_context,
+            "context_window": profile.context_window,
             "max_output": profile.max_output,
             "temperature": profile.temperature,
             "reasoning_effort": profile.reasoning_effort or "",

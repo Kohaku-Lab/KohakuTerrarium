@@ -242,7 +242,22 @@ class CatalogProvider(EchoProvider):
     @classmethod
     async def discover_models(cls, backend):
         assert backend.name == "echo"
-        return [DiscoveredModel("team-model-2026-11-01", max_context=16000)]
+        return [
+            DiscoveredModel("team-model-2026-11-01", max_context=16000),
+            DiscoveredModel(
+                "team-model-3",
+                max_context=32000,
+                preset={
+                    "reasoning_effort": "deep",
+                    "variation_groups": {
+                        "effort": {"deep": {"extra_body.effort": "deep"}}
+                    },
+                },
+            ),
+            DiscoveredModel(
+                "team-model-4", preset={"variation_groups": {"x": {"y": {"model": 1}}}}
+            ),
+        ]
 """,
         presets=[
             {
@@ -252,6 +267,13 @@ class CatalogProvider(EchoProvider):
                 "max_context": 64000,
                 "max_output": 4000,
             },
+            {
+                "provider": "echo",
+                "name": "team-model-2",
+                "model": "team-model-2",
+                "max_context": 48000,
+                "reasoning_effort": "quick",
+            },
             {"provider": "qwen", "name": "other", "model": "other", "max_output": 9000},
         ],
     )
@@ -259,12 +281,26 @@ class CatalogProvider(EchoProvider):
     assert module not in sys.modules
     models = await discover_models("echo")
     assert module in sys.modules
-    snapshot, other = suggested_presets(
+    snapshot, suggested, invalid, other = suggested_presets(
         "echo", [*models, DiscoveredModel("other-20261101")]
     )
     assert snapshot["model"] == models[0].id
     assert snapshot["max_context"] == 16000 and snapshot["max_output"] == 4000
     assert "max_output" not in other
+    # A package's suggested fields win over the inherited sibling's.
+    assert suggested["reasoning_effort"] == "deep"
+    assert suggested["variation_groups"] == {
+        "effort": {"deep": {"extra_body.effort": "deep"}}
+    }
+    assert (suggested["max_context"], suggested["context_window"]) == (48000, 32000)
+    # An invalid suggestion is dropped; the draft inferred from team-model-2 remains.
+    assert invalid == {
+        "provider": "echo",
+        "name": "team-model-4",
+        "model": "team-model-4",
+        "max_context": 48000,
+        "reasoning_effort": "quick",
+    }
 
 
 @pytest.mark.parametrize(
@@ -476,6 +512,11 @@ async def test_openrouter_catalog_respects_account_and_output_modality():
                         "top_provider": {"max_completion_tokens": 1000},
                     },
                     {
+                        "id": "org/thinker",
+                        "architecture": {"output_modalities": ["text"]},
+                        "supported_parameters": ["tools", "reasoning"],
+                    },
+                    {
                         "id": "org/image",
                         "architecture": {"output_modalities": ["image"]},
                     },
@@ -489,7 +530,13 @@ async def test_openrouter_catalog_respects_account_and_output_modality():
             "openrouter", transport=httpx.MockTransport(respond)
         )
         assert models == [
-            DiscoveredModel("org/new", "New", 12345, 1000, output_modalities=("text",))
+            DiscoveredModel("org/new", "New", 12345, 1000, output_modalities=("text",)),
+            DiscoveredModel(
+                "org/thinker",
+                "org/thinker",
+                output_modalities=("text",),
+                reasoning_levels=("low", "medium", "high"),
+            ),
         ]
     assert requests == [
         ("/api/v1/models", None),

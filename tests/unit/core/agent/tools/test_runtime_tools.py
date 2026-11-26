@@ -162,6 +162,20 @@ class TestEmitTokenUsage:
         assert a._turn_usage_accum["prompt_tokens"] == 10
         assert a._turn_usage_accum["completion_tokens"] == 5
 
+    def test_reasoning_tokens_accumulate_only_when_reported(self):
+        a = _make_mixin()
+        plain = {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
+        a._emit_token_usage(types.SimpleNamespace(_last_usage=plain))
+        assert "reasoning_tokens" not in a._turn_usage_accum
+        first = {**plain, "reasoning_tokens": 30}
+        second = {**plain, "reasoning_tokens": 12}
+        a._emit_token_usage(types.SimpleNamespace(_last_usage=first))
+        a._emit_token_usage(types.SimpleNamespace(_last_usage=second))
+        assert a._turn_usage_accum["reasoning_tokens"] == 42
+        assert a._turn_usage_accum["completion_tokens"] == 6
+        frame = a.output_router.activity_calls[-1][2]
+        assert frame["reasoning_tokens"] == 12
+
     def test_emits_cache_stats(self):
         a = _make_mixin()
         ctrl = types.SimpleNamespace(

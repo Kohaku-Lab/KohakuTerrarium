@@ -11,14 +11,29 @@ import { MORE_ITEMS, conversationOptions } from "../sessionModel"
 /** The model a creature runs, live from the chat store first. */
 export function modelOfCreature(instance, chat, name) {
   if (!name) return ""
+  const live = liveInfoOf(instance, chat, name)
+  const c = (instance?.creatures || []).find((x) => x.name === name)
+  return live?.llmName || live?.model || c?.llm_name || c?.model || ""
+}
+
+/** {maxContext, contextWindow} of a creature's model, live from the chat store first; 0 / null when unknown. */
+export function contextOfCreature(instance, chat, name) {
+  if (!name) return { maxContext: 0, contextWindow: null }
+  const live = liveInfoOf(instance, chat, name)
+  const c = (instance?.creatures || []).find((x) => x.name === name)
+  return {
+    maxContext: live?.maxContext || c?.max_context || 0,
+    contextWindow: live?.contextWindow || c?.context_window || null,
+  }
+}
+
+function liveInfoOf(instance, chat, name) {
   const key = (
     conversationOptions(instance, chat?._rootSourceName).find(
       (o) => o.kind === "creature" && o.name === name,
     ) || {}
   ).key
-  const live = (key && chat?.modelByTab?.[key]) || chat?.modelByTab?.[name]
-  const c = (instance?.creatures || []).find((x) => x.name === name)
-  return live?.llmName || live?.model || c?.llm_name || c?.model || ""
+  return (key && chat?.modelByTab?.[key]) || chat?.modelByTab?.[name]
 }
 
 /**

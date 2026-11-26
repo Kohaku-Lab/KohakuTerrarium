@@ -126,6 +126,13 @@ def reset_context_tokens(agent: Any) -> None:
         ledger_for(agent).reset_context()
 
 
+def model_context_window(agent: Any) -> int | None:
+    """The preset's known window size for ``agent``'s chat model, or ``None``."""
+    llm = getattr(agent, "llm", None)
+    value = getattr(llm, "_profile_context_window", None)
+    return value if type(value) is int and value > 0 else None
+
+
 def context_window(agent: Any) -> tuple[int, int]:
     """Return ``(max_context, compact_threshold)`` for ``agent``.
 

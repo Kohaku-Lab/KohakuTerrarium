@@ -2825,6 +2825,7 @@ describe("chat store — per-creature model info", () => {
       model: "gpt-5",
       llm_name: "openai/gpt-5",
       max_context: 200000,
+      context_window: 1000000,
       compact_threshold: 160000,
     })
 
@@ -2841,6 +2842,11 @@ describe("chat store — per-creature model info", () => {
     expect(chat.modelDisplay).toBe("openai/gpt-5")
     expect(chat.activeModelInfo.compactThreshold).toBe(160000)
     expect(chat.activeModelInfo.maxContext).toBe(200000)
+    expect(chat.activeModelInfo.contextWindow).toBe(1000000)
+    // An unknown window (null) replaces a stale known one.
+    chat._handleActivity("bob", { activity_type: "session_info", context_window: null })
+    expect(chat.modelByTab.bob.contextWindow).toBe(null)
+    expect(chat.modelByTab.bob.maxContext).toBe(200000)
   })
 
   it("keeps config identity with the active creature tab", () => {
@@ -2929,6 +2935,7 @@ describe("chat store — per-creature model info", () => {
             llm_name: "openai/gpt-5",
             model: "gpt-5",
             max_context: 100000,
+            context_window: 400000,
             compact_threshold: 80000,
           },
           { name: "bob", llm_name: "anthropic/claude-fable-5", model: "claude-fable-5" },
@@ -2937,6 +2944,8 @@ describe("chat store — per-creature model info", () => {
 
       expect(chat.modelByTab.coordinator.llmName).toBe("openai/gpt-5")
       expect(chat.modelByTab.coordinator.compactThreshold).toBe(80000)
+      expect(chat.modelByTab.coordinator.contextWindow).toBe(400000)
+      expect(chat.modelByTab.bob.contextWindow).toBe(null)
       expect(chat.modelByTab.bob.llmName).toBe("anthropic/claude-fable-5")
       // The ``root`` alias mirrors the privileged creature's entry.
       expect(chat.modelByTab.root.llmName).toBe("openai/gpt-5")

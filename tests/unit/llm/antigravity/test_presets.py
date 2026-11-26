@@ -10,26 +10,27 @@ LEVELS = ["low", "medium", "high"]
 
 
 @pytest.mark.parametrize(
-    "model,context,output,efforts,contexts",
+    "model,context,output,efforts,window",
     [
-        ("gemini-4-hydrogen", 256000, 262144, [*LEVELS, "xhigh"], ["256k", "1048k"]),
-        ("gemini-pro-orchestrator-g1-pro", 256000, 65536, [], ["256k", "1048k"]),
-        ("gemini-4-argon", 256000, 65536, LEVELS, ["256k", "512k", "900k"]),
-        ("gemini-3.8-flash", 256000, 65536, LEVELS, ["256k", "1048k"]),
-        ("claude-opus-5-5", 256000, 128000, LEVELS, ["256k", "840k"]),
-        ("claude-sonnet-5-5", 256000, 128000, LEVELS, ["256k", "840k"]),
-        ("gpt-oss-120b", 80000, 32768, [], ["80k", "131k"]),
+        ("gemini-4-hydrogen", 256000, 262144, [*LEVELS, "xhigh"], 1048576),
+        ("gemini-pro-orchestrator-g1-pro", 256000, 65536, [], 1048576),
+        ("gemini-4-argon", 256000, 65536, LEVELS, 900000),
+        ("gemini-3.8-flash", 256000, 65536, LEVELS, 1048576),
+        ("claude-opus-5-5", 256000, 128000, LEVELS, 840000),
+        ("claude-sonnet-5-5", 256000, 128000, LEVELS, 840000),
+        ("gpt-oss-120b", 80000, 32768, [], 131072),
     ],
 )
-def test_current_agy_limits_and_variations(model, context, output, efforts, contexts):
+def test_current_agy_limits_and_variations(model, context, output, efforts, window):
     preset = get_all_presets()[("google-antigravity", model)]
     assert (preset["max_context"], preset["max_output"]) == (context, output)
     assert preset["reasoning_effort"] == (
         "high" if model == "gemini-pro-orchestrator-g1-pro" else "medium"
     )
-    groups = preset["variation_groups"]
+    groups = preset.get("variation_groups", {})
     assert list(groups.get("reasoning", {})) == efforts
-    assert list(groups["context"]) == contexts
+    assert "context" not in groups
+    assert preset["context_window"] == window
     for effort in efforts:
         profile = get_profile(f"google-antigravity/{model}@reasoning={effort}")
         assert profile.reasoning_effort == effort
@@ -219,8 +220,6 @@ def test_smaller_explicit_output_is_preserved():
         "gemini-pro-orchestrator-g1-pro@reasoning=medium",
         "gemini-4-hydrogen@reasoning=max",
         "gemini-4-argon@reasoning=minimal",
-        "gemini-4-argon@context=1048k",
-        "gemini-3.8-flash@context=900k",
         "gpt-oss-120b@reasoning=medium",
         "claude-sonnet-5-5@reasoning=max",
     ],
@@ -233,14 +232,15 @@ def test_catalog_rejects_unsupported_variations(selector):
 @pytest.mark.parametrize(
     "selector,context,effort",
     [
-        ("gemini-4-hydrogen@context=1048k,reasoning=xhigh", 1048576, "xhigh"),
-        ("gemini-pro-orchestrator-g1-pro@context=1048k", 1048576, "high"),
+        ("gemini-4-hydrogen@context=1048576,reasoning=xhigh", 1048576, "xhigh"),
+        ("gemini-pro-orchestrator-g1-pro@context=1048576", 1048576, "high"),
         ("gemini-4-argon", 256000, "medium"),
         ("gemini-4-argon@context=512k", 512000, "medium"),
         ("gemini-4-argon@context=900k,reasoning=low", 900000, "low"),
-        ("gemini-3.8-flash@context=1048k", 1048576, "medium"),
+        ("gemini-3.8-flash@context=1048k", 1048000, "medium"),
+        ("gemini-3.8-flash@context=900k", 900000, "medium"),
         ("claude-opus-5-5@reasoning=high,context=840k", 840000, "high"),
-        ("gpt-oss-120b@context=131k", 131072, "medium"),
+        ("gpt-oss-120b@context=131072", 131072, "medium"),
     ],
 )
 def test_context_window_selects_profile_budget(selector, context, effort):

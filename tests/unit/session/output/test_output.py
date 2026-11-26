@@ -1265,9 +1265,32 @@ class TestWaveBHandlers:
                 e for e in store.get_events("alice") if e["type"] == "turn_token_usage"
             ]
             assert len(evts) == 1
+            assert "reasoning_tokens" not in evts[0]
             rollup = store.get_turn_rollup("alice", 1)
             assert rollup["tokens_in"] == 5
             assert rollup["tokens_out"] == 6
+        finally:
+            store.close()
+
+    async def test_token_events_keep_reported_reasoning_tokens(self, tmp_path):
+        store, out = _make(tmp_path)
+        usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 6,
+            "cached_tokens": 1,
+            "total_tokens": 11,
+            "reasoning_tokens": 4,
+        }
+        try:
+            out.on_activity_with_metadata("token_usage", "", usage)
+            out.on_activity_with_metadata(
+                "turn_token_usage", "", {"turn_index": 1, **usage}
+            )
+            await out.drain()
+            store.flush()
+            by_type = {e["type"]: e for e in store.get_events("alice")}
+            assert by_type["token_usage"]["reasoning_tokens"] == 4
+            assert by_type["turn_token_usage"]["reasoning_tokens"] == 4
         finally:
             store.close()
 

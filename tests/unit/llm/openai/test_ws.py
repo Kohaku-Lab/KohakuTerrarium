@@ -1,9 +1,12 @@
 """Unit tests for ``llm/openai/ws.py`` and OpenAIProvider websocket mode."""
 
 import asyncio
+import inspect
 import json
 
 import pytest
+from openai.resources.responses import AsyncResponses
+from openai.types.responses import ResponseUsage
 from websockets import serve
 
 from kohakuterrarium.llm.base import ToolSchema
@@ -55,10 +58,14 @@ class FakeResponses:
     def __init__(self):
         self.connection = FakeWSConnection()
         self.connect_exc: Exception | None = None
+        self.connect_kwargs = None
+        self.connect_calls = 0
 
     def connect(self, **kwargs):
+        self.connect_calls += 1
         if self.connect_exc is not None:
             raise self.connect_exc
+        self.connect_kwargs = kwargs
         return FakeWSManager(self.connection)
 
 
@@ -197,6 +204,7 @@ class TestBuildWsRequest:
                 "name": "t",
                 "description": "d",
                 "parameters": {"type": "object"},
+                "strict": False,
             }
         ]
         # ``enabled`` is OpenRouter-unified, not a Responses API field.
@@ -383,6 +391,101 @@ class TestProviderWebsocketMode:
         assert kwargs["model"] == "gpt-x"
         # The framework knob never reaches the HTTP body either.
         assert "websocket_mode" not in kwargs.get("extra_body", {})
+
+    async def test_ws_usage_carries_reasoning_tokens(self):
+        provider = make_provider(extra_body={"websocket_mode": True})
+        usage = ResponseUsage.model_validate(
+            {
+                "input_tokens": 1200,
+                "input_tokens_details": {
+                    "cached_tokens": 1024,
+                    "cache_write_tokens": 0,
+                },
+                "output_tokens": 310,
+                "output_tokens_details": {"reasoning_tokens": 256},
+                "total_tokens": 1510,
+            }
+        )
+        provider._client.responses.connection.scripts = [
+            [
+                Ev(
+                    type="response.completed",
+                    response=Ev(id="r1", output=[], usage=usage),
+                )
+            ]
+        ]
+
+        await self._drive(provider)
+
+        assert provider._last_usage == {
+            "prompt_tokens": 1200,
+            "completion_tokens": 310,
+            "total_tokens": 1510,
+            "cached_tokens": 1024,
+            "reasoning_tokens": 256,
+        }
+
+    async def test_ws_usage_omits_reasoning_tokens_when_not_reported(self):
+        provider = make_provider(extra_body={"websocket_mode": True})
+        provider._client.responses.connection.scripts = [[completed()]]
+
+        await self._drive(provider)
+
+        assert provider._last_usage == {
+            "prompt_tokens": 7,
+            "completion_tokens": 2,
+            "total_tokens": 9,
+            "cached_tokens": 1,
+        }
+
+    async def test_ws_function_tools_are_sent_non_strict(self):
+        provider = make_provider(extra_body={"websocket_mode": True})
+        provider._client.responses.connection.scripts = [[completed()]]
+        tool = ToolSchema(
+            name="lookup",
+            description="Find a thing.",
+            parameters={
+                "type": "object",
+                "properties": {"q": {"type": "string"}, "limit": {"type": "integer"}},
+                "required": ["q"],
+            },
+        )
+
+        async for _ in provider._raw_stream_chat(MESSAGES, tools=[tool]):
+            pass
+
+        sent = provider._client.responses.connection.sent[0]
+        assert [t["strict"] for t in sent["tools"]] == [False]
+        assert sent["tools"][0]["parameters"] == tool.parameters
+
+    async def test_connect_kwargs_match_the_installed_sdk_signature(self):
+        provider = make_provider(extra_body={"websocket_mode": True})
+        provider._client.responses.connection.scripts = [[completed()]]
+
+        await self._drive(provider)
+
+        kwargs = provider._client.responses.connect_kwargs
+        assert kwargs["max_retries"] == 0
+        inspect.signature(AsyncResponses.connect).bind(None, **kwargs)
+
+    async def test_sdk_signature_mismatch_warns_once_and_moves_to_http(self, caplog):
+        provider = make_provider(extra_body={"websocket_mode": True})
+        provider._client.responses.connect_exc = TypeError(
+            "AsyncResponses.connect() got an unexpected keyword argument 'max_retries'"
+        )
+
+        await self._drive(provider)
+        await self._drive(provider)
+
+        assert provider._client.chat.completions.kwargs is not None
+        assert provider._ws_session.disabled
+        mismatch = [
+            r
+            for r in caplog.records
+            if r.levelname == "WARNING" and "openai>=2.32.0" in r.getMessage()
+        ]
+        assert len(mismatch) == 1
+        assert provider._client.responses.connect_calls == 1
 
     @pytest.mark.parametrize("started", [False, True])
     async def test_uncertain_replay_is_bounded_before_or_after_metadata(self, started):

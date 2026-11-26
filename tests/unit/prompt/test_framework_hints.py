@@ -17,6 +17,7 @@ from kohakuterrarium.prompt.framework_hints import (
     HINT_UNTRUSTED_CONTENT,
     call_discipline,
     canonical_keys,
+    execution_model,
     get_framework_hint,
     is_default_hint,
     merge_overrides,
@@ -113,3 +114,47 @@ class TestTemplatePlaceholders:
         block = get_framework_hint(HINT_EXECUTION_MODEL)
         assert "context-isolated" in block
         assert "continue the previous task" in block
+
+
+class TestExecutionModelParts:
+    def test_all_parts_render_the_canonical_default(self):
+        for fmt in ("native", "bracket"):
+            full = execution_model(fmt, subagents=True, background_tools=True)
+            assert full == get_framework_hint(HINT_EXECUTION_MODEL).format(
+                call_discipline=call_discipline(fmt)
+            )
+
+    def test_no_subject_keeps_only_results_and_discipline(self):
+        out = execution_model("native", subagents=False, background_tools=False)
+        assert out == (
+            "## Execution model\n\n"
+            "Tool results are delivered after your response ends; you are invoked "
+            "again with them.\n\n" + call_discipline("native")
+        )
+
+    def test_subagent_parts_follow_subagents(self):
+        with_sub = execution_model("native", subagents=True, background_tools=False)
+        without = execution_model("native", subagents=False, background_tools=True)
+        for part in ("Sub-agents run in the background", "context-isolated"):
+            assert part in with_sub and part not in without
+
+    def test_background_tool_parts_follow_background_tools(self):
+        with_bg = execution_model("native", subagents=False, background_tools=True)
+        without = execution_model("native", subagents=True, background_tools=False)
+        for part in ("Tools that accept `run_in_background`", "daemon"):
+            assert part in with_bg and part not in without
+
+    def test_background_work_paragraph_follows_either_subject(self):
+        para = "Starting background work returns no result"
+        assert para in execution_model("xml", subagents=True, background_tools=False)
+        assert para in execution_model("xml", subagents=False, background_tools=True)
+        assert para not in execution_model(
+            "xml", subagents=False, background_tools=False
+        )
+
+    def test_tool_sentence_stands_alone_without_subagents(self):
+        # "the same way" refers back to the sub-agent sentence.
+        solo = execution_model("native", subagents=False, background_tools=True)
+        both = execution_model("native", subagents=True, background_tools=True)
+        assert "the same way" not in solo and "start in the background" in solo
+        assert "the same way" in both

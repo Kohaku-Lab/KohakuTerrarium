@@ -2432,6 +2432,82 @@ class TestCoreIntegration:
             assert b_agent.is_running is False
         assert budget_creature.is_running is False
 
+        # --- A fourth creature: compaction abandoned by a bounded stop ---
+        # The summarizer swallows the stop's cancellation and finishes after
+        # the deadline sealed the conversation: nothing may splice or persist.
+        sealed_creature, _ = make_creature(
+            script=[
+                ScriptEntry(f"sealed answer {word}", match=word)
+                for word in ("one", "two", "three", "four", "five")
+            ],
+            compact={
+                "max_tokens": 100,
+                "threshold": 0.5,
+                "target": 0.2,
+                "keep_recent_turns": 1,
+                "cooldown_seconds": 0.0,
+            },
+            creature_id="sealed_compact",
+        )
+        s_agent = sealed_creature.agent
+        sealed_dir = s_agent.config.agent_path / "sealed-runs"
+        async with Terrarium(session_dir=sealed_dir) as engine_s:
+            await engine_s.add_creature(sealed_creature)
+            for word in ("one", "two", "three", "four"):
+                await _drain_chat(sealed_creature, f"turn {word}")
+            s_manager = s_agent.compact_manager
+            s_store = s_agent.session_store
+            s_conversation = s_agent.controller.conversation
+            entered, release = asyncio.Event(), asyncio.Event()
+
+            async def stubborn_summarize(text):
+                entered.set()
+                while not release.is_set():
+                    try:
+                        await release.wait()
+                    except asyncio.CancelledError:
+                        continue
+                return "ABANDONED_SUMMARY"
+
+            s_manager._summarize = stubborn_summarize
+            await s_store.run(lambda: None)
+            persisted_before = s_store.load_conversation(s_agent.config.name)
+            history_before = s_conversation.snapshot_messages()
+            assert persisted_before
+            s_agent.controller._last_usage = {"prompt_tokens": 5000}
+            s_agent._maybe_trigger_compact(s_agent.controller)
+            stubborn_task = s_manager._compact_task
+            assert stubborn_task is not None
+            await asyncio.wait_for(entered.wait(), 5)
+            with pytest.raises(ShutdownIncompleteError) as sealed_info:
+                await s_agent.stop(grace=0.3)
+            assert sealed_info.value.report.abandoned
+            assert s_conversation.sealed
+            assert s_agent.output_router.revoked
+            release.set()
+            await asyncio.wait_for(
+                asyncio.gather(stubborn_task, return_exceptions=True), 5
+            )
+            await wait_until(
+                lambda: not s_agent._shutdown_state.live_abandoned(), timeout=5
+            )
+            await s_store.run(lambda: None)
+            assert s_conversation.snapshot_messages() == history_before
+            assert s_store.load_conversation(s_agent.config.name) == persisted_before
+            assert "ABANDONED_SUMMARY" not in str(
+                s_store.load_conversation(s_agent.config.name)
+            )
+            assert not any(
+                event["type"] == "compact_complete"
+                for event in s_store.get_events(s_agent.config.name)
+            )
+            assert s_manager._compact_count == 0
+            assert not s_manager.is_compacting
+            assert s_manager._compact_task is None
+            with pytest.raises(ShutdownIncompleteError) as settled:
+                await s_agent.stop()
+            assert settled.value.report.terminated
+
     async def test_interrupt_mid_turn(self, make_creature, tmp_path, monkeypatch):
         """A turn dispatches a blocking DIRECT tool; ``interrupt()`` is
         called while the controller is waiting on it; the processing

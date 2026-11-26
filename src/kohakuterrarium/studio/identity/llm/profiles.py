@@ -37,6 +37,7 @@ def list_profiles_payload() -> list[dict[str, Any]]:
             "base_url": p.base_url or "",
             "api_key_env": p.api_key_env or "",
             "max_context": p.max_context,
+            "context_window": p.context_window,
             "max_output": p.max_output,
             "temperature": p.temperature,
             "reasoning_effort": p.reasoning_effort or "",
@@ -84,14 +85,24 @@ def save_profile_record(
     service_tier: str = "",
     extra_body: dict[str, Any] | None = None,
     variation_groups: dict[str, dict[str, dict[str, Any]]] | None = None,
+    context_window: int | None = None,
+    provider_native_tools: list[str] | None = None,
+    context_aliases: dict[str, int] | None = None,
     *,
     create_only: bool = False,
 ) -> LLMPreset:
-    """Validate and persist a preset, raising ``ValueError`` for bad input."""
+    """Validate and persist a preset, raising ``ValueError`` for bad input.
+
+    An omitted ``context_window`` keeps the one the stored or built-in preset has;
+    so do its context aliases and a legacy ``context`` group it was folded from.
+    """
     if not name or not model or not provider:
         raise ValueError("Name, model, and provider are required")
     if provider not in load_backends():
         raise ValueError(f"Provider not found: {provider}")
+    stored = _get_preset_definition(name, provider)
+    if context_window is None:
+        context_window = stored.context_window if stored else None
     preset = LLMPreset(
         name=name,
         model=model,
@@ -103,7 +114,11 @@ def save_profile_record(
         service_tier=service_tier or "",
         extra_body=extra_body or {},
         variation_groups=variation_groups or {},
+        context_window=context_window,
+        provider_native_tools=provider_native_tools,
+        context_aliases=dict(context_aliases or {}),
     )
+    preset.inherit_context_fold(stored)
     if create_only:
         return create_preset(preset)[0]
     save_profile(preset)

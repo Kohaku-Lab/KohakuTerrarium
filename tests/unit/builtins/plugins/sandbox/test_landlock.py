@@ -1,5 +1,6 @@
 """Landlock write grants and the launcher that applies them (Linux)."""
 
+import errno
 import json
 import os
 import subprocess
@@ -8,9 +9,13 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.builtins.plugins.sandbox import confine
 from kohakuterrarium.builtins.plugins.sandbox import landlock
 from kohakuterrarium.builtins.plugins.sandbox import landlock_exec
+from kohakuterrarium.builtins.plugins.sandbox import plugin as plugin_mod
 from kohakuterrarium.builtins.plugins.sandbox import roots
+from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
+from kohakuterrarium.modules.plugin.base import PluginBlockError
 from kohakuterrarium.modules.sandbox.presets import WORKSPACE
 
 posix_paths = pytest.mark.skipif(
@@ -38,6 +43,39 @@ def tree(tmp_path, monkeypatch):
 
 def _profile(**overrides):
     return WORKSPACE.with_overrides(**{"fs_deny": (), **overrides})
+
+
+def _is_open(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
+
+
+def _grants_file(data: bytes) -> int:
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, data)
+    os.close(write_fd)
+    return read_fd
+
+
+# Linux caps one argv element at MAX_ARG_STRLEN (32 pages, 128 KiB).
+MAX_ARG_STRLEN = 128 * 1024
+
+
+@pytest.fixture
+def crowded(tmp_path, monkeypatch):
+    """A workspace whose denied entry sits beside 5000 long-named siblings."""
+    monkeypatch.setattr(roots, "temp_roots", lambda: [])
+    monkeypatch.setattr(roots, "CACHE_ROOTS", ())
+    workspace = Path(os.path.realpath(tmp_path)) / "workspace"
+    workspace.mkdir()
+    for i in range(5000):
+        (workspace / f"sibling_with_a_long_name_{i:05d}").touch()
+    denied = workspace / "zz" / "secret"
+    denied.mkdir(parents=True)
+    return workspace, denied
 
 
 @posix_paths
@@ -97,17 +135,52 @@ class TestWriteGrants:
         assert str(workspace) in landlock.write_grants(profile, workspace)
 
     def test_confine_argv_runs_the_launcher_by_path(self):
-        argv = landlock.confine_argv(["ls", "-l"], ["/w"])
+        argv = landlock.confine_argv(["ls", "-l"], 7)
         assert argv == [
             sys.executable,
             "-I",
             "-S",
             str(landlock.LAUNCHER),
-            json.dumps(["/w"]),
+            "--grants-fd",
+            "7",
             "--",
             "ls",
             "-l",
         ]
+
+
+@posix_paths
+class TestGrantsHandOff:
+    def test_grants_round_trip_through_the_launcher_reader(self):
+        fd = landlock.grants_fd(["/w", "/dev"])
+        assert landlock_exec.read_grants(fd) == ["/w", "/dev"]
+        assert not _is_open(fd)
+
+    def test_the_grants_fd_is_not_inherited_by_default(self):
+        fd = landlock.grants_fd(["/w"])
+        try:
+            assert not os.get_inheritable(fd)
+        finally:
+            os.close(fd)
+
+    def test_thousands_of_siblings_keep_argv_small(self, crowded):
+        workspace, denied = crowded
+        profile = _profile(fs_deny=(str(denied),))
+        expected = landlock.write_grants(profile, workspace)
+        assert len(json.dumps(expected)) > MAX_ARG_STRLEN
+        command = confine.confine_command(
+            ["/bin/true"], confine.LANDLOCK, profile, workspace
+        )
+        try:
+            assert max(len(arg) for arg in command.argv) < 4096
+            assert sum(len(arg) + 1 for arg in command.argv) < 8192
+            assert command.grant_count == len(expected) > 5000
+            (fd,) = command.pass_fds
+            assert command.argv[4:7] == ["--grants-fd", str(fd), "--"]
+            assert landlock_exec.read_grants(os.dup(fd)) == expected
+        finally:
+            command.close()
+        assert not _is_open(fd)
 
 
 class TestLauncher:
@@ -118,19 +191,45 @@ class TestLauncher:
         assert landlock_exec.handled_writes(3) & landlock_exec.TRUNCATE
 
     def test_usage_error_without_separator(self, capsys):
-        assert landlock_exec.main(["[]", "true"]) == 2
+        assert landlock_exec.main(["--grants-fd", "3", "true"]) == 2
+
+    def test_usage_error_for_grants_on_the_command_line(self, capsys):
+        assert landlock_exec.main(["[]", "--", "true"]) == 2
+        assert "--grants-fd" in capsys.readouterr().err
 
     def test_fails_closed_when_the_policy_cannot_be_applied(self, monkeypatch, capsys):
         execs: list[list[str]] = []
         monkeypatch.setattr(landlock_exec, "landlock_abi", lambda: 0)
         monkeypatch.setattr(landlock_exec.os, "execvp", lambda f, a: execs.append(a))
-        assert landlock_exec.main(["[]", "--", "true"]) == 126
+        fd = _grants_file(b"[]")
+        assert landlock_exec.main(["--grants-fd", str(fd), "--", "true"]) == 126
         assert execs == []
         assert "cannot apply Landlock policy" in capsys.readouterr().err
 
-    def test_rejects_a_malformed_grant_list(self, monkeypatch):
-        monkeypatch.setattr(landlock_exec, "landlock_abi", lambda: 1)
-        assert landlock_exec.main(["not json", "--", "true"]) == 126
+    @pytest.mark.parametrize("data", [b"not json", b'{"/w": 1}', b'["/w", 3]'])
+    def test_rejects_a_malformed_grant_list(self, monkeypatch, data):
+        applied: list[list[str]] = []
+        monkeypatch.setattr(landlock_exec, "restrict_writes", applied.append)
+        fd = _grants_file(data)
+        assert landlock_exec.main(["--grants-fd", str(fd), "--", "true"]) == 126
+        assert applied == []
+
+    @pytest.mark.parametrize("fd", ["x", "-1", "999999"])
+    def test_rejects_an_unusable_grants_fd(self, monkeypatch, fd):
+        monkeypatch.setattr(landlock_exec, "restrict_writes", lambda paths: None)
+        assert landlock_exec.main(["--grants-fd", fd, "--", "true"]) == 126
+
+    def test_closes_the_grants_fd_before_exec(self, monkeypatch):
+        applied: list[list[str]] = []
+        execs: list[tuple[list[str], bool]] = []
+        fd = _grants_file(json.dumps(["/w"]).encode())
+        monkeypatch.setattr(landlock_exec, "restrict_writes", applied.append)
+        monkeypatch.setattr(
+            landlock_exec.os, "execvp", lambda f, a: execs.append((a, _is_open(fd)))
+        )
+        landlock_exec.main(["--grants-fd", str(fd), "--", "ls", "-l"])
+        assert applied == [["/w"]]
+        assert execs == [(["ls", "-l"], False)]
 
     @pytest.mark.skipif(
         sys.platform.startswith("linux"), reason="non-Linux hosts report no ABI"
@@ -150,8 +249,36 @@ def test_ci_linux_runners_exercise_landlock():
 @needs_landlock
 class TestKernel:
     def _run(self, grants: list[str], script: str) -> subprocess.CompletedProcess:
-        argv = landlock.confine_argv(["/bin/sh", "-c", script], grants)
-        return subprocess.run(argv, capture_output=True, timeout=30)
+        return self._spawn(grants, ["/bin/sh", "-c", script])
+
+    @staticmethod
+    def _spawn(grants: list[str], command: list[str]) -> subprocess.CompletedProcess:
+        fd = landlock.grants_fd(grants)
+        try:
+            argv = landlock.confine_argv(command, fd)
+            return subprocess.run(argv, capture_output=True, timeout=30, pass_fds=(fd,))
+        finally:
+            os.close(fd)
+
+    def test_the_command_does_not_inherit_the_grants_fd(self, tree):
+        workspace, _ = tree
+        result = self._run([str(workspace)], "ls -l /proc/self/fd/")
+        assert result.returncode == 0, result.stderr
+        assert b"kt-landlock-grants" not in result.stdout
+
+    def test_thousands_of_siblings_around_a_denied_path(self, crowded):
+        workspace, denied = crowded
+        profile = _profile(fs_deny=(str(denied),))
+        grants = landlock.write_grants(profile, workspace)
+        result = self._run(
+            grants,
+            f"echo a > '{workspace}/sibling_with_a_long_name_00042' "
+            f"&& echo b > '{denied}/b'",
+        )
+        assert result.returncode != 0
+        assert b"Permission denied" in result.stderr
+        assert (workspace / "sibling_with_a_long_name_00042").read_text() == "a\n"
+        assert not (denied / "b").exists()
 
     def test_writes_land_only_in_granted_directories(self, tree):
         workspace, home = tree
@@ -204,6 +331,72 @@ class TestKernel:
 
     def test_missing_command_reports_127(self, tree):
         workspace, _ = tree
-        argv = landlock.confine_argv(["/nonexistent/kt-cmd"], [str(workspace)])
-        result = subprocess.run(argv, capture_output=True, timeout=30)
+        result = self._spawn([str(workspace)], ["/nonexistent/kt-cmd"])
         assert result.returncode == 127
+
+
+@posix_paths
+class TestSpawnSite:
+    """The sandbox plugin spawning a Landlock-confined command."""
+
+    async def test_a_crowded_deny_path_still_spawns(self, crowded, monkeypatch):
+        workspace, denied = crowded
+        monkeypatch.setattr(plugin_mod, "confinement_backend", lambda: "landlock")
+        result = await SandboxPlugin(fs_deny=[str(denied)]).run_subprocess_exec(
+            ["/bin/true"], cwd=workspace, timeout=60
+        )
+        if landlock.landlock_available():
+            assert result["returncode"] == 0, result["stderr"]
+        else:
+            # The launcher read every grant, then found no Landlock to apply.
+            assert result["returncode"] == 126
+            assert b"Landlock is not available" in result["stderr"]
+
+    async def test_a_spawn_oserror_is_a_sandbox_error(self, crowded, monkeypatch):
+        workspace, denied = crowded
+        handed: list[tuple[int, ...]] = []
+
+        async def refuse(argv, **kwargs):
+            handed.append(kwargs["pass_fds"])
+            raise OSError(errno.E2BIG, "Argument list too long", argv[0])
+
+        monkeypatch.setattr(plugin_mod, "confinement_backend", lambda: "landlock")
+        monkeypatch.setattr(plugin_mod, "_run_plain_subprocess", refuse)
+        sandbox = SandboxPlugin(fs_deny=[str(denied)])
+        expected = landlock.write_grants(sandbox._profile, workspace)
+        with pytest.raises(PluginBlockError) as caught:
+            await sandbox.run_subprocess_exec(["/bin/true"], cwd=workspace)
+        message = str(caught.value)
+        assert message.startswith("SandboxError[spawn]: ")
+        assert "landlock" in message
+        assert f"{len(expected)} write grants" in message
+        assert "Argument list too long" in message
+        assert isinstance(caught.value.__cause__, OSError)
+        (fds,) = handed
+        assert fds and not any(_is_open(fd) for fd in fds)
+
+    async def test_the_grants_fd_is_closed_after_the_command_runs(
+        self, crowded, monkeypatch
+    ):
+        workspace, denied = crowded
+        handed: list[tuple[int, ...]] = []
+
+        async def run(argv, **kwargs):
+            handed.append(kwargs["pass_fds"])
+            assert all(_is_open(fd) for fd in kwargs["pass_fds"])
+            return {"returncode": 0, "stdout": b"", "stderr": b"", "timed_out": False}
+
+        monkeypatch.setattr(plugin_mod, "confinement_backend", lambda: "landlock")
+        monkeypatch.setattr(plugin_mod, "_run_plain_subprocess", run)
+        await SandboxPlugin(fs_deny=[str(denied)]).run_subprocess_exec(
+            ["/bin/true"], cwd=workspace
+        )
+        (fds,) = handed
+        assert len(fds) == 1 and not _is_open(fds[0])
+
+    async def test_an_unconfined_spawn_error_is_left_alone(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(plugin_mod, "confinement_backend", lambda: "landlock")
+        with pytest.raises(FileNotFoundError):
+            await SandboxPlugin(os_enforce="off").run_subprocess_exec(
+                ["/nonexistent/kt-cmd"], cwd=tmp_path
+            )

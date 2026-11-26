@@ -91,6 +91,25 @@ const currentModel = computed(() => {
   return live?.llmName || live?.model || chat.sessionInfo.llmName || chat.sessionInfo.model || inst?.llm_name || inst?.model || ""
 })
 
+// Effective context length and known model window of the creature the pill tracks.
+function liveModelInfo() {
+  const inst = instance.value
+  const target = selectedTarget.value
+  if (inst?.type === "terrarium") {
+    if (!target) return {}
+    const creature = creatureForTarget(inst, target)
+    const live = chat.modelByTab[target] || (creature?.name && chat.modelByTab[creature.name]) || {}
+    return { maxContext: live.maxContext || creature?.max_context || 0, contextWindow: live.contextWindow || creature?.context_window || null }
+  }
+  const live = (target && chat.modelByTab[target]) || {}
+  return {
+    maxContext: live.maxContext || chat.sessionInfo.maxContext || inst?.max_context || 0,
+    contextWindow: live.contextWindow || chat.sessionInfo.contextWindow || inst?.context_window || null,
+  }
+}
+const currentMaxContext = computed(() => liveModelInfo().maxContext || 0)
+const currentContextWindow = computed(() => liveModelInfo().contextWindow || null)
+
 function selectTarget(target) {
   if (chat.tabs.includes(target)) chat.setActiveTab(target)
   else chat.openTab(target)
@@ -146,6 +165,8 @@ provideModelSwitcherContext({
   targetOptions,
   selectedTarget,
   currentModel,
+  currentMaxContext,
+  currentContextWindow,
   selectTarget,
   switchModel,
   inventory,

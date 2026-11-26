@@ -1,10 +1,14 @@
 """Unit tests for :mod:`kohakuterrarium.api.routes.identity.{mcp,llm}`."""
 
+from datetime import datetime
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.identity import llm as llm_mod
 from kohakuterrarium.api.routes.identity import mcp as mcp_mod
+from kohakuterrarium.llm import catalog_cache, discovery
+from kohakuterrarium.llm.discovery import DiscoveredModel
 from kohakuterrarium.llm.profiles import resolve as profiles
 
 from tests.unit._fakes.package_backend import (
@@ -328,6 +332,44 @@ class TestLlmDefaultModelRoutes:
         # reports is the built-in fallback, not a persisted choice.
         assert profiles._load_yaml().get("default_model", "") == ""
 
+    def test_legacy_context_group_is_not_shown_and_survives_an_editor_save(self):
+        groups = {
+            "context": {
+                "200k": {"max_context": 200000},
+                "long": {"max_context": 1000000},
+            },
+            "reasoning": {"high": {"reasoning_effort": "high"}},
+        }
+        legacy = {"model": "m", "max_context": 200000, "variation_groups": groups}
+        profiles._save_yaml({"version": 3, "presets": {"openai": {"cc": legacy}}})
+        client = self._client()
+
+        def shown(path, key):
+            rows = client.get(path).json()
+            rows = rows["profiles"] if path == "/profiles" else rows
+            return next(r for r in rows if (r["provider"], r["name"]) == key)
+
+        for path in ("/profiles", "/models"):
+            row = shown(path, ("openai", "cc"))
+            assert row["variation_groups"] == {"reasoning": groups["reasoning"]}
+            assert row["context_window"] == 1000000
+
+        # The editor posts back what it was shown, with one field changed.
+        row = shown("/profiles", ("openai", "cc"))
+        body = {k: row[k] for k in ("name", "model", "provider", "max_context")}
+        body |= {"variation_groups": row["variation_groups"], "max_output": 4096}
+        assert client.post("/profiles", json=body).is_success
+        stored = profiles._load_yaml()["presets"]["openai"]["cc"]
+        assert stored["variation_groups"] == groups
+        assert stored["max_output"] == 4096
+        assert profiles.get_profile("cc@context=long", "openai").max_context == 10**6
+
+        # A discovery draft carries its aliases through the same route.
+        draft = {"name": "d", "model": "m", "provider": "openai"}
+        draft["context_aliases"] = {"long": 700000}
+        assert client.post("/profiles", json=draft).is_success
+        assert profiles.get_profile("d@long", "openai").max_context == 700000
+
     def test_get_all_models(self, monkeypatch):
         monkeypatch.setattr(
             llm_mod, "list_all_models_combined", lambda: {"models": ["a", "b"]}
@@ -336,3 +378,75 @@ class TestLlmDefaultModelRoutes:
         resp = client.get("/models")
         assert resp.status_code == 200
         assert resp.json() == {"models": ["a", "b"]}
+
+
+class TestDiscoveryRows:
+    def test_rows_carry_drafts_existing_presets_and_windows(self, monkeypatch):
+        levels = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+        reads = []
+
+        async def catalog(name, *, transport=None):
+            assert name == "codex"
+            reads.append(name)
+            return [
+                DiscoveredModel(
+                    "gpt-6.1-sol", max_context=500000, reasoning_levels=levels
+                ),
+                DiscoveredModel(
+                    "gpt-6.7-sol", max_context=500000, reasoning_levels=levels
+                ),
+            ]
+
+        monkeypatch.setattr(discovery, "discover_models", catalog)
+        monkeypatch.setattr(catalog_cache, "_cache", catalog_cache.DiscoveryCache())
+        client = TestClient(_app(llm_mod.router))
+        first = client.post("/backends/codex/models").json()
+        datetime.fromisoformat(first["fetched_at"])
+        known, new = first["models"]
+        cached = client.post("/backends/codex/models").json()
+        assert cached["fetched_at"] == first["fetched_at"] and reads == ["codex"]
+        refreshed = client.post("/backends/codex/models?refresh=true").json()
+        assert reads == ["codex", "codex"]
+        assert refreshed["fetched_at"] >= first["fetched_at"]
+        assert refreshed["models"] == first["models"]
+        assert known["has_preset"] is True
+        assert known["reasoning_levels"] == list(levels)
+        assert known["context_window"] == 500000
+        assert known["preset"]["name"] == "gpt-6.1-sol"
+        assert new["has_preset"] is False
+        assert new["context_window"] == 500000
+        draft = new["preset"]
+        assert list(draft["variation_groups"]) == ["reasoning", "speed"]
+        assert list(draft["variation_groups"]["reasoning"]) == list(levels)
+        assert draft["max_context"] == 500000
+        assert draft["context_window"] == 500000
+
+        # The draft posts back unchanged through the editor route.
+        assert client.post("/profiles", json=draft).is_success
+        saved = profiles.get_profile("gpt-6.7-sol@context=700k", "codex")
+        assert (saved.max_context, saved.context_window) == (700000, 500000)
+        assert saved.reasoning_effort == draft["reasoning_effort"]
+        listed = {
+            (p["provider"], p["name"]): p
+            for p in client.get("/profiles").json()["profiles"]
+        }
+        assert listed[("codex", "gpt-6.7-sol")]["context_window"] == 500000
+        # Rows are rebuilt per request, so a cached catalog sees the new preset.
+        rows = client.post("/backends/codex/models").json()["models"]
+        assert reads == ["codex", "codex"]
+        assert [row["has_preset"] for row in rows] == [True, True]
+
+    def test_bad_variation_groups_are_rejected(self):
+        client = TestClient(_app(llm_mod.router))
+        resp = client.post(
+            "/profiles",
+            json={
+                "name": "bad",
+                "model": "m",
+                "provider": "openai",
+                "variation_groups": {"g": {"o": {"model": "x"}}},
+            },
+        )
+        assert resp.status_code == 400
+        assert "Unsupported variation patch target" in resp.json()["detail"]

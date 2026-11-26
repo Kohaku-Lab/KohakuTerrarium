@@ -250,6 +250,7 @@ function _mapSession(data) {
     model: c.model || "",
     llm_name: c.llm_name || "",
     max_context: c.max_context || 0,
+    context_window: c.context_window || null,
     compact_threshold: c.compact_threshold || 0,
     // Backend running usage; absent from older servers.
     token_usage: c.token_usage || null,
@@ -298,6 +299,7 @@ function _mapSession(data) {
     // status-dashboard pbar (gated on ``maxContext > 0``) renders
     // for solo creatures and root-flagged terrariums alike.
     max_context: primary.max_context || 0,
+    context_window: primary.context_window || null,
     compact_threshold: primary.compact_threshold || 0,
     // Session-level home site for lab-host UI surfaces.
     home_node: sessionHome,

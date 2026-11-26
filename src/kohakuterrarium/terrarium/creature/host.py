@@ -29,7 +29,11 @@ from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.core.events import TriggerEvent
-from kohakuterrarium.core.token_ledger import context_window, token_snapshot
+from kohakuterrarium.core.token_ledger import (
+    context_window,
+    model_context_window,
+    token_snapshot,
+)
 from kohakuterrarium.core.turn import AgentEventStream, TurnResult
 from kohakuterrarium.llm.profiles.resolve import _login_provider_for
 from kohakuterrarium.packages.walk import package_snapshot
@@ -630,6 +634,7 @@ class Creature:
             "provider": provider,
             "session_id": session_id,
             "max_context": max_context,
+            "context_window": model_context_window(agent),
             "compact_threshold": compact_threshold,
             "token_usage": tokens["token_usage"],
             "context_tokens": tokens["context_tokens"],

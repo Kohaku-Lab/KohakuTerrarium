@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { conversationRows, creatureOfTab, modelOfCreature, phoneTools } from "./phoneModel"
+import {
+  contextOfCreature,
+  conversationRows,
+  creatureOfTab,
+  modelOfCreature,
+  phoneTools,
+} from "./phoneModel"
 
 const INSTANCE = {
   creatures: [
@@ -104,5 +110,29 @@ describe("phone tools", () => {
     ])
     expect(ids()).not.toContain("graph:0")
     expect(phoneTools().find((t) => t.id === "terminal").target).toBe("side")
+  })
+})
+
+describe("contextOfCreature", () => {
+  it("reads the live length and window first, then the creature snapshot", () => {
+    const instance = {
+      creatures: [
+        { name: "lead", is_privileged: true, max_context: 200000, context_window: 400000 },
+        { name: "worker", max_context: 128000 },
+      ],
+    }
+    const chat = {
+      _rootSourceName: "lead",
+      modelByTab: { root: { maxContext: 500000, contextWindow: 1000000 } },
+    }
+    expect(contextOfCreature(instance, chat, "lead")).toEqual({
+      maxContext: 500000,
+      contextWindow: 1000000,
+    })
+    expect(contextOfCreature(instance, chat, "worker")).toEqual({
+      maxContext: 128000,
+      contextWindow: null,
+    })
+    expect(contextOfCreature(instance, chat, "")).toEqual({ maxContext: 0, contextWindow: null })
   })
 })

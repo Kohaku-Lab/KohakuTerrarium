@@ -218,6 +218,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         # each LLM round's usage; ``_finalize_processing`` flushes a
         # single ``turn_token_usage`` event when the turn ends.
         if isinstance(getattr(self, "_turn_usage_accum", None), dict):
+            self._turn_usage_accum.pop("reasoning_tokens", None)
             for k in self._turn_usage_accum:
                 self._turn_usage_accum[k] = 0
 
@@ -729,6 +730,15 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         # Emit usage before processing_end so readers can bind it to this turn.
         accum = getattr(self, "_turn_usage_accum", None)
         if isinstance(accum, dict) and any(accum.values()):
+            turn_usage = {
+                "turn_index": self._turn_index,
+                "prompt_tokens": accum.get("prompt_tokens", 0),
+                "completion_tokens": accum.get("completion_tokens", 0),
+                "cached_tokens": accum.get("cached_tokens", 0),
+                "total_tokens": accum.get("total_tokens", 0),
+            }
+            if "reasoning_tokens" in accum:
+                turn_usage["reasoning_tokens"] = accum["reasoning_tokens"]
             self.output_router.notify_activity(
                 "turn_token_usage",
                 (
@@ -736,13 +746,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                     f"{accum.get('prompt_tokens', 0)} in, "
                     f"{accum.get('completion_tokens', 0)} out"
                 ),
-                metadata={
-                    "turn_index": self._turn_index,
-                    "prompt_tokens": accum.get("prompt_tokens", 0),
-                    "completion_tokens": accum.get("completion_tokens", 0),
-                    "cached_tokens": accum.get("cached_tokens", 0),
-                    "total_tokens": accum.get("total_tokens", 0),
-                },
+                metadata=turn_usage,
             )
 
         await self.output_router.emit(OutputEvent(type="processing_end"))

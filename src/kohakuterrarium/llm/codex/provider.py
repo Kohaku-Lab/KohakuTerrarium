@@ -52,7 +52,7 @@ from kohakuterrarium.llm.responses.ws_recovery import (
     fresh_recovery,
     server_rejected,
 )
-from kohakuterrarium.llm.responses.tools import prepare_request_tools
+from kohakuterrarium.llm.responses.tools import function_tool, prepare_request_tools
 from kohakuterrarium.modules.tool.request_replay import tool_request_replay
 from kohakuterrarium.utils.logging import get_logger
 
@@ -415,15 +415,7 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         # Function tools precede provider-native tools in the outbound list.
         api_tools: list[dict[str, Any]] | None = None
         if tools:
-            api_tools = [
-                {
-                    "type": "function",
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters,
-                }
-                for t in tools
-            ]
+            api_tools = [function_tool(t) for t in tools]
 
         if provider_native_tools:
             for native in provider_native_tools:

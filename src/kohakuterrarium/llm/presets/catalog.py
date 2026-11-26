@@ -18,6 +18,7 @@ from kohakuterrarium.llm.presets.aliases import (
     resolve_deprecated,
 )
 from kohakuterrarium.llm.presets.groups import (
+    CODEX_CONTEXT_WINDOW,
     _ANTHROPIC_EFFORT_47_GROUP,
     _CODEX_REASONING_GROUP,
     _CODEX_SPEED_GROUP,
@@ -26,7 +27,6 @@ from kohakuterrarium.llm.presets.groups import (
     _GLM_EFFORT_GROUP,
     _GPT56_MODE_GROUP,
     _GPT56_REASONING_GROUP,
-    _GPT5X_CONTEXT_GROUP,
     _GROK_EFFORT_GROUP,
     _MIMO_THINKING_GROUP,
     _MISTRAL_REASONING_GROUP,
@@ -34,7 +34,6 @@ from kohakuterrarium.llm.presets.groups import (
     _OPENAI_REASONING_GROUP,
     _OPENAI_SPEED_GROUP,
     _OR_REASONING_GROUP,
-    _OR_CONTEXT_GROUP,
     _OR_REASONING_GROUP_56,
     _OR_REASONING_GROUP_GROK_47,
     _OR_REASONING_GROUP_LHM,
@@ -93,10 +92,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1000000,
         "max_output": 128000,
         "reasoning_effort": "medium",
-        "variation_groups": {
-            "context": _GPT5X_CONTEXT_GROUP,
-            "reasoning": _GPT56_REASONING_GROUP,
-        },
+        "context_window": CODEX_CONTEXT_WINDOW,
+        "variation_groups": {"reasoning": _GPT56_REASONING_GROUP},
     },
     "gpt-5.6-sol": {
         "provider": "codex",
@@ -104,9 +101,9 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 400000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "context_window": CODEX_CONTEXT_WINDOW,
         "extra_body": {"websocket_mode": True},
         "variation_groups": {
-            "context": _GPT5X_CONTEXT_GROUP,
             "reasoning": _GPT56_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
         },
@@ -117,9 +114,9 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 400000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "context_window": CODEX_CONTEXT_WINDOW,
         "extra_body": {"websocket_mode": True},
         "variation_groups": {
-            "context": _GPT5X_CONTEXT_GROUP,
             "reasoning": _GPT56_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
         },
@@ -130,9 +127,9 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 400000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "context_window": CODEX_CONTEXT_WINDOW,
         "extra_body": {"websocket_mode": True},
         "variation_groups": {
-            "context": _GPT5X_CONTEXT_GROUP,
             "reasoning": _GPT56_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
         },
@@ -1115,19 +1112,23 @@ PRESETS: dict[str, dict[str, Any]] = {
 }
 
 
-def _add_context_presets(presets: dict[str, dict[str, Any]]) -> None:
-    """Offer local context budgets on every large-window OpenRouter preset."""
+# Largest local budget the OpenRouter presets used to offer as a variation.
+_OR_LARGE_WINDOW = 1_000_000
+
+
+def _add_context_windows(presets: dict[str, dict[str, Any]]) -> None:
+    """Record the full window of every large-window OpenRouter preset."""
     for data in presets.values():
         if (
             data.get("provider") == "openrouter"
             and data.get("max_context", 0) >= 500000
         ):
-            data.setdefault("variation_groups", {}).setdefault(
-                "context", _OR_CONTEXT_GROUP
+            data.setdefault(
+                "context_window", max(_OR_LARGE_WINDOW, data["max_context"])
             )
 
 
-_add_context_presets(PRESETS)
+_add_context_windows(PRESETS)
 
 # Aliases stay separate from the canonical provider/name view.
 _all_presets_cache: dict[tuple[str, str], dict[str, Any]] | None = None

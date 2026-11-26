@@ -21,31 +21,76 @@ HINT_GROUP_MODEL = "framework.group_model"
 HINT_GROUP_GROWTH = "framework.group_growth"
 
 
-# One execution-model block for every tool format. The single
-# format-dependent sentence arrives through ``{call_discipline}``.
-_DEFAULT_EXECUTION_MODEL = """
-## Execution model
+# Execution-model parts. ``execution_model`` keeps each part only while its
+# subject (sub-agents, background-capable tools) is visible.
+_EXEC_RESULTS = (
+    "Tool results are delivered after your response ends; you are invoked again "
+    "with them."
+)
 
-Tool results are delivered after your response ends; you are invoked again with
-them. Sub-agents run in the background by default — pass `run_in_background=false`
-to wait for one. Tools that accept `run_in_background` start the same way.
+_EXEC_SUBAGENT_DISPATCH = (
+    "Sub-agents run in the background by default — pass `run_in_background=false` "
+    "to wait for one."
+)
 
+_EXEC_TOOL_BACKGROUND_AFTER_SUBAGENTS = (
+    "Tools that accept `run_in_background` start the same way."
+)
+
+_EXEC_TOOL_BACKGROUND = (
+    "Tools that accept `run_in_background` start in the background when it is true."
+)
+
+_EXEC_BACKGROUND_WORK = """
 Starting background work returns no result and gives you no extra turn. You are
 invoked again when it finishes or fails. Before ending your response, start every
 independent background task you already know you need. Do not poll, sleep, restart,
 or duplicate background work; if you need a result before your next step, wait for
 it instead of backgrounding it.
+"""
 
+_EXEC_LONG_RUNNING = """
 A server, watcher, or daemon may never finish. To work with one, use a startup
 action that completes while the process keeps running.
+"""
 
+_EXEC_SUBAGENT_ISOLATION = """
 Sub-agent calls are context-isolated. Each call is a fresh invocation that cannot
 see your conversation or any previous call. Give a complete, self-contained task:
 the goal, the current state, what is already done, what remains, and the paths,
 errors, or findings it needs. Never write "continue the previous task".
-
-{call_discipline}
 """
+
+
+def _compose_execution_model(
+    discipline: str, *, subagents: bool, background_tools: bool
+) -> str:
+    """Join the execution-model parts whose subject exists into one block."""
+    lead = [_EXEC_RESULTS]
+    if subagents:
+        lead.append(_EXEC_SUBAGENT_DISPATCH)
+    if background_tools:
+        lead.append(
+            _EXEC_TOOL_BACKGROUND_AFTER_SUBAGENTS
+            if subagents
+            else _EXEC_TOOL_BACKGROUND
+        )
+    paragraphs = [" ".join(lead)]
+    if subagents or background_tools:
+        paragraphs.append(_EXEC_BACKGROUND_WORK.strip())
+    if background_tools:
+        paragraphs.append(_EXEC_LONG_RUNNING.strip())
+    if subagents:
+        paragraphs.append(_EXEC_SUBAGENT_ISOLATION.strip())
+    paragraphs.append(discipline)
+    return "## Execution model\n\n" + "\n\n".join(paragraphs)
+
+
+# The canonical block with every part present; the format-dependent closing
+# sentence arrives through ``{call_discipline}``.
+_DEFAULT_EXECUTION_MODEL = _compose_execution_model(
+    "{call_discipline}", subagents=True, background_tools=True
+)
 
 _CALL_DISCIPLINE_NATIVE = "Call only the tools available to you."
 
@@ -146,6 +191,22 @@ _DEFAULTS: dict[str, str] = {
 def call_discipline(tool_format: str) -> str:
     """Return the format-specific closing line of the execution-model block."""
     return _CALL_DISCIPLINE_NATIVE if tool_format == "native" else _CALL_DISCIPLINE_TEXT
+
+
+def execution_model(
+    tool_format: str, *, subagents: bool, background_tools: bool
+) -> str:
+    """Render the default execution-model block for what the creature can call.
+
+    ``subagents`` / ``background_tools`` say whether a visible sub-agent or a
+    visible tool declaring ``supports_background`` exists; the parts about an
+    absent subject are left out.
+    """
+    return _compose_execution_model(
+        call_discipline(tool_format),
+        subagents=subagents,
+        background_tools=background_tools,
+    )
 
 
 def canonical_keys() -> tuple[str, ...]:

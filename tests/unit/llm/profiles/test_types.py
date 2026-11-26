@@ -5,6 +5,8 @@ a couple of legacy-shape migrations. Each assert pins the exact resulting
 field values.
 """
 
+import pytest
+
 from kohakuterrarium.llm.profiles.types import LLMBackend, LLMPreset, LLMProfile
 
 # ---------------------------------------------------------------------------
@@ -248,3 +250,139 @@ class TestLLMProfile:
             "p", {"model": "m", "backend_native_tools": ["a", None, 3]}
         )
         assert profile.backend_native_tools == ["a", "3"]
+
+
+class TestContextWindowSerde:
+    def test_preset_round_trips_context_window(self):
+        preset = LLMPreset(name="p", model="m", context_window=1_000_000)
+        data = preset.to_dict()
+        assert data["context_window"] == 1_000_000
+        assert LLMPreset.from_dict("p", data).context_window == 1_000_000
+
+    def test_unknown_context_window_is_omitted_and_reads_as_none(self):
+        data = LLMPreset(name="p", model="m").to_dict()
+        assert "context_window" not in data
+        assert LLMPreset.from_dict("p", data).context_window is None
+
+    @pytest.mark.parametrize("raw", [0, -3, "1m", True, 1.5])
+    def test_malformed_stored_context_window_reads_as_none(self, raw):
+        assert LLMPreset.from_dict("p", {"context_window": raw}).context_window is None
+
+    def test_profile_round_trips_context_window(self):
+        profile = LLMProfile(name="p", model="m", context_window=500_000)
+        assert profile.to_dict()["context_window"] == 500_000
+        assert LLMProfile.from_dict("p", profile.to_dict()).context_window == 500_000
+        assert "context_window" not in LLMProfile(name="p", model="m").to_dict()
+
+
+_CC_CONTEXT = {
+    "200k": {"max_context": 200000},
+    "400k": {"max_context": 400000},
+    "700k": {"max_context": 700000},
+    "1m": {"max_context": 1000000},
+}
+_REASONING = {"high": {"reasoning_effort": "high"}}
+
+
+def _legacy_data(**extra):
+    return {
+        "model": "claude-x",
+        "max_context": 200000,
+        "variation_groups": {"context": _CC_CONTEXT, "reasoning": _REASONING},
+        **extra,
+    }
+
+
+class TestLegacyContextFold:
+    """A ``context`` group that only sets ``max_context`` reads as numeric context."""
+
+    def test_from_dict_folds_the_group_and_derives_the_window(self):
+        preset = LLMPreset.from_dict("cc", _legacy_data())
+        assert preset.variation_groups == {"reasoning": _REASONING}
+        assert preset.context_window == 1000000
+        assert preset.context_aliases == {}
+        assert "context" not in preset.to_dict()["variation_groups"]
+
+    def test_direct_construction_folds_too(self):
+        preset = LLMPreset(
+            name="cc", model="m", variation_groups={"context": _CC_CONTEXT}
+        )
+        assert preset.variation_groups == {}
+        assert preset.context_window == 1000000
+
+    def test_a_set_window_is_not_replaced(self):
+        preset = LLMPreset.from_dict("cc", _legacy_data(context_window=1048576))
+        assert preset.context_window == 1048576
+
+    def test_mixed_context_group_stays_a_named_group(self):
+        groups = {"context": {"1m": {"max_context": 1000000, "max_output": 1}}}
+        preset = LLMPreset.from_dict("cc", {"model": "m", "variation_groups": groups})
+        assert preset.variation_groups == groups
+        assert preset.context_window is None
+        assert preset.to_stored_dict()["variation_groups"] == groups
+
+    def test_aliases_serialise_only_when_present_and_round_trip(self):
+        groups = {"context": {"long": {"max_context": 900000}}}
+        preset = LLMPreset.from_dict("cc", {"model": "m", "variation_groups": groups})
+        assert preset.context_aliases == {"long": 900000}
+        data = preset.to_dict()
+        assert data["context_aliases"] == {"long": 900000}
+        assert "variation_groups" not in data
+        assert LLMPreset.from_dict("cc", data) == preset
+        assert "context_aliases" not in LLMPreset(name="p", model="m").to_dict()
+
+    @pytest.mark.parametrize(
+        "raw", [{"x": 0}, {"x": "1m"}, {"x": True}, {"": 5}, ["x"], "x"]
+    )
+    def test_malformed_stored_aliases_are_dropped(self, raw):
+        preset = LLMPreset.from_dict("p", {"model": "m", "context_aliases": raw})
+        assert preset.context_aliases == {}
+
+    def test_unchanged_preset_is_stored_as_it_was_read(self):
+        preset = LLMPreset.from_dict("cc", _legacy_data())
+        stored = preset.to_stored_dict()
+        assert stored["variation_groups"] == {
+            "context": _CC_CONTEXT,
+            "reasoning": _REASONING,
+        }
+        assert "context_window" not in stored
+        assert "context_aliases" not in stored
+        assert LLMPreset.from_dict("cc", stored) == preset
+
+    def test_an_edit_outside_the_fold_keeps_the_stored_group(self):
+        preset = LLMPreset.from_dict("cc", _legacy_data())
+        preset.max_output = 1234
+        stored = preset.to_stored_dict()
+        assert stored["max_output"] == 1234
+        assert "context" in stored["variation_groups"]
+
+    def test_an_edit_to_the_groups_stores_the_folded_form(self):
+        groups = {"context": {"long": {"max_context": 900000}}, "r": _REASONING}
+        preset = LLMPreset.from_dict("cc", {"model": "m", "variation_groups": groups})
+        preset.variation_groups = {}
+        stored = preset.to_stored_dict()
+        assert "variation_groups" not in stored
+        # The alias survives a save of the folded form.
+        assert stored["context_aliases"] == {"long": 900000}
+        assert stored["context_window"] == 900000
+        assert LLMPreset.from_dict("cc", stored).context_aliases == {"long": 900000}
+
+    def test_an_edited_window_is_stored_next_to_the_group(self):
+        preset = LLMPreset.from_dict("cc", _legacy_data())
+        preset.context_window = 2000000
+        stored = preset.to_stored_dict()
+        assert "context" in stored["variation_groups"]
+        assert stored["context_window"] == 2000000
+
+    def test_inherit_context_fold_carries_aliases_and_stored_form(self):
+        groups = {"context": {"long": {"max_context": 900000}}}
+        stored = LLMPreset.from_dict("cc", {"model": "m", "variation_groups": groups})
+        edited = LLMPreset(name="cc", model="m", max_output=99, context_window=900000)
+        edited.inherit_context_fold(stored)
+        assert edited.context_aliases == {"long": 900000}
+        assert edited.to_stored_dict()["variation_groups"] == groups
+        # A missing previous preset changes nothing.
+        fresh = LLMPreset(name="cc", model="m")
+        fresh.inherit_context_fold(None)
+        assert fresh.context_aliases == {}
+        assert fresh.to_stored_dict() == fresh.to_dict()

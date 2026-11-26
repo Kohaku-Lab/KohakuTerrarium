@@ -10,7 +10,8 @@ import asyncio
 import json
 from contextlib import aclosing
 from copy import deepcopy
-from typing import Any, AsyncIterator, Callable
+from importlib import metadata
+from typing import Any, AsyncIterator, Callable, NoReturn
 
 from kohakuterrarium.llm.recovery.errors import RetryPolicy
 from kohakuterrarium.llm.responses.ws_recovery import (
@@ -25,6 +26,9 @@ logger = get_logger(__name__)
 
 # Consecutive WS turns abandoned for HTTP before WS is disabled for a conversation.
 DEFAULT_FALLBACK_AFTER = 3
+
+# Oldest openai SDK whose ``responses.connect`` takes the keywords passed here.
+MIN_OPENAI_FOR_WS = "2.32.0"
 
 
 def event_bytes(event: dict[str, Any]) -> int:
@@ -68,6 +72,8 @@ class ResponsesWSSession:
         self.max_message_bytes = max_message_bytes
         self._fallback_after = fallback_after
         self._fallbacks = 0
+        # The SDK rejected the connect call's signature; WS cannot work here.
+        self._sdk_incompatible = False
         self._manager: Any = None
         self._connection: Any = None
         self._lock = asyncio.Lock()
@@ -86,13 +92,13 @@ class ResponsesWSSession:
 
     @property
     def disabled(self) -> bool:
-        """Whether repeated transport failures moved this conversation to HTTP."""
-        return 0 < self._fallback_after <= self._fallbacks
+        """Whether an SDK mismatch or repeated failures moved this chat to HTTP."""
+        return self._sdk_incompatible or 0 < self._fallback_after <= self._fallbacks
 
     def note_http_fallback(self) -> None:
         """Count a WS turn abandoned for HTTP; enough in a row disable WS here."""
         self._fallbacks += 1
-        if self.disabled:
+        if self.disabled and not self._sdk_incompatible:
             logger.warning(
                 "Responses WS disabled for this conversation; using HTTP",
                 consecutive_failures=self._fallbacks,
@@ -205,6 +211,8 @@ class ResponsesWSSession:
                 )
                 await self.close()
                 connection = await self._ensure_connection()
+        except ResponsesWSError:
+            raise
         except Exception as exc:
             raise ResponsesWSError(
                 str(exc), mid_stream=False, transport=True, submitted=False
@@ -355,11 +363,34 @@ class ResponsesWSSession:
             ):
                 await self.close()
         if self._connection is None:
-            self._manager = self._connect_factory()
+            try:
+                self._manager = self._connect_factory()
+            except TypeError as exc:
+                self._reject_sdk(exc)
             self._connection = await self._manager.enter()
             self._connection_tools = None
             self.invalidate()
         return self._connection
+
+    def _reject_sdk(self, exc: TypeError) -> NoReturn:
+        """Disable WS after the SDK refused the connect call, and say why once."""
+        self._sdk_incompatible = True
+        try:
+            installed = metadata.version("openai")
+        except metadata.PackageNotFoundError:
+            installed = "unknown"
+        logger.warning(
+            f"Responses WebSocket mode needs openai>={MIN_OPENAI_FOR_WS}; "
+            "using HTTP for this conversation",
+            installed_openai=installed,
+            error=str(exc),
+        )
+        raise ResponsesWSError(
+            f"openai SDK {installed} cannot open a Responses WebSocket: {exc}",
+            mid_stream=False,
+            submitted=False,
+            code="sdk_incompatible",
+        ) from exc
 
     def _compute_delta(
         self, items: list[dict[str, Any]]

@@ -130,6 +130,21 @@ describe("ChatComposer", () => {
     expect(css).toMatch(/\.kt-chat-composer__shell textarea\s*\{[^}]*font-family:\s*inherit/)
   })
 
+  it("keeps the placeholder on one clipped line so the textarea never scrolls sideways", () => {
+    const css = readFileSync("src/public/chat/chat-composer.css", "utf8")
+    const rule = (selector) =>
+      css.match(new RegExp(`${selector.replace(/[.:]/g, "\\$&")}\\s*\\{([^}]*)\\}`))?.[1] || ""
+    expect(rule(".kt-chat-composer__shell textarea")).toMatch(/overflow-x:\s*hidden/)
+    for (const selector of [
+      ".kt-chat-composer__shell textarea:placeholder-shown",
+      ".kt-chat-composer__shell textarea::placeholder",
+    ]) {
+      expect(rule(selector), selector).toMatch(/white-space:\s*nowrap/)
+      expect(rule(selector), selector).toMatch(/text-overflow:\s*ellipsis/)
+      expect(rule(selector), selector).toMatch(/overflow:\s*hidden/)
+    }
+  })
+
   it("has hidden file/image inputs, adds/removes chips, and reports validation errors", async () => {
     const wrapper = mountComposer()
     const inputs = wrapper.findAll('input[type="file"]')

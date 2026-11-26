@@ -70,24 +70,21 @@ DEPRECATED = {
 
 
 def _preset(name: str, spec: ModelSpec) -> dict:
-    """Build the KT preset, exposing each multi-option agy selector as a group."""
-    groups = {
-        "reasoning": {effort: {"reasoning_effort": effort} for effort in spec.efforts},
-        "context": {
-            f"{tokens // 1000}k": {"max_context": tokens}
-            for tokens in spec.context_windows
-        },
-    }
+    """Build the KT preset; ``@context=<n>`` picks any budget up to the window."""
     preset = {
         "model": name,
         "max_context": spec.max_context,
+        "context_window": max(spec.context_windows),
         "max_output": spec.max_output,
         "provider_native_tools": [],
         "reasoning_effort": spec.default_effort,
     }
-    offered = {group: options for group, options in groups.items() if len(options) > 1}
-    if offered:
-        preset["variation_groups"] = offered
+    if len(spec.efforts) > 1:
+        preset["variation_groups"] = {
+            "reasoning": {
+                effort: {"reasoning_effort": effort} for effort in spec.efforts
+            }
+        }
     return preset
 
 

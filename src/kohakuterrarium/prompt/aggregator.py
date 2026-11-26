@@ -29,7 +29,7 @@ from kohakuterrarium.prompt.framework_hints import (
     HINT_EXECUTION_MODEL,
     HINT_OUTPUT_MODEL,
     HINT_UNTRUSTED_CONTENT,
-    call_discipline,
+    execution_model,
     get_framework_hint,
     is_default_hint,
 )
@@ -143,17 +143,42 @@ def _build_call_syntax(
     ).strip()
 
 
+def _has_background_tool(registry: Registry, tool_names: list[str]) -> bool:
+    """Whether any named tool gets the ``run_in_background`` argument in its schema."""
+    for name in tool_names:
+        tool = registry.get_tool(name)
+        if getattr(tool, "supports_background", False) and not getattr(
+            tool, "is_provider_native", False
+        ):
+            return True
+    return False
+
+
 def _build_execution_model(
+    registry: Registry | None,
     tool_format: str,
     overrides: dict[str, str] | None = None,
+    visibility: ToolVisibility | None = None,
 ) -> str:
-    """Render the single execution-model block for any tool format."""
+    """Render the execution-model block from the parts whose subject is visible.
+
+    The block exists only while a tool or sub-agent is visible. A custom
+    override replaces the whole block verbatim under that same gate.
+    """
+    tool_names = visible_tool_names(registry, visibility)
+    subagent_names = visible_subagent_names(registry, visibility)
+    if not tool_names and not subagent_names:
+        return ""
     template = get_framework_hint(HINT_EXECUTION_MODEL, overrides)
     if not template:
         return ""
     if not is_default_hint(HINT_EXECUTION_MODEL, template):
         return template.strip()
-    return template.format(call_discipline=call_discipline(tool_format)).strip()
+    return execution_model(
+        tool_format,
+        subagents=bool(subagent_names),
+        background_tools=_has_background_tool(registry, tool_names),
+    ).strip()
 
 
 def _build_untrusted_content(overrides: dict[str, str] | None = None) -> str:
@@ -183,9 +208,11 @@ def aggregate_system_prompt(
 
     Sections are gated: ``## Presenting your answer`` exists only when a plugin
     contributes a part, the inventory is skipped when the provider already
-    carries it natively, the call-syntax block only exists for text formats, and
-    inline tool usage appears only for tools resolved to ``full``. Graph
-    sections are owned by the terrarium layer and are not emitted here.
+    carries it natively, the call-syntax block only exists for text formats,
+    inline tool usage appears only for tools resolved to ``full``, and the
+    execution model keeps only the parts about visible sub-agents and
+    background-capable tools. Graph sections are owned by the terrarium layer
+    and are not emitted here.
     ``visibility`` is the model-visible catalog; every section naming tools
     or sub-agents honours it.
     """
@@ -272,7 +299,10 @@ def aggregate_system_prompt(
                 parts.append(output_hints)
 
         execution = _build_execution_model(
-            tool_format, overrides=framework_hint_overrides
+            registry,
+            tool_format,
+            overrides=framework_hint_overrides,
+            visibility=visibility,
         )
         if execution:
             parts.append(execution)

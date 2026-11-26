@@ -267,6 +267,8 @@ describe("instances store", () => {
           creature_id: "alice_xyz",
           model: "m",
           llm_name: "p/m",
+          max_context: 500000,
+          context_window: 400000,
           running: true,
           listen_channels: [],
           send_channels: [],
@@ -280,6 +282,9 @@ describe("instances store", () => {
     expect(result.type).toBe("creature")
     expect(result.creatures.length).toBe(1)
     expect(result.creatures[0].name).toBe("alice")
+    expect(result.creatures[0].context_window).toBe(400000)
+    expect(result.max_context).toBe(500000)
+    expect(result.context_window).toBe(400000)
   })
 })
 

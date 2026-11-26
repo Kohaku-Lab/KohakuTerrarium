@@ -298,6 +298,7 @@ class TestSessionIntegration:
                     "completion_tokens": 45,
                     "total_tokens": 165,
                     "cached_tokens": 30,
+                    "reasoning_tokens": 18,
                 },
             )
             router.notify_activity(
@@ -309,6 +310,7 @@ class TestSessionIntegration:
                     "completion_tokens": 20,
                     "cached_tokens": 10,
                     "total_tokens": 100,
+                    "reasoning_tokens": 7,
                     "cost_usd": 0.0021,
                 },
             )
@@ -559,11 +561,13 @@ class TestSessionIntegration:
         token_evt = next(e for e in events if e["type"] == "token_usage")
         assert token_evt["prompt_tokens"] == 120
         assert token_evt["cached_tokens"] == 30
+        assert token_evt["reasoning_tokens"] == 18
         # The turn_token_usage payload carries the metadata's turn_index
         # in its body; the event's own ``turn_index`` field is stamped
         # by SessionOutput from the agent's live turn counter.
         turn_tok_evt = next(e for e in events if e["type"] == "turn_token_usage")
         assert turn_tok_evt["prompt_tokens"] == 80
+        assert turn_tok_evt["reasoning_tokens"] == 7
         sa_call = next(e for e in events if e["type"] == "subagent_call")
         assert sa_call["task"] == "dig into auth"
         sa_result = next(e for e in events if e["type"] == "subagent_result")

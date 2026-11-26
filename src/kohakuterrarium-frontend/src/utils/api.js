@@ -46,6 +46,7 @@ import axios from "axios"
 
 import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
+import { invalidateProviderModels } from "@/utils/providerModels"
 import { wsUrl } from "@/utils/wsUrl"
 
 function encodeTarget(target) {
@@ -1190,19 +1191,34 @@ export const settingsAPI = {
   async saveKey(provider, key, node = "_host") {
     const cfg = _nodeQuery(node) || {}
     const { data } = await api.post("/settings/keys", { provider, key }, cfg)
+    invalidateProviderModels(provider)
     return data
   },
   async removeKey(provider, node = "_host") {
     const { data } = await api.delete(`/settings/keys/${provider}`, _nodeQuery(node))
+    invalidateProviderModels(provider)
     return data
   },
   async getBackends() {
     const { data } = await api.get("/settings/backends")
     return data
   },
-  async discoverModels(name) {
-    const { data } = await api.post(`/settings/backends/${encodeURIComponent(name)}/models`)
+  async discoverModels(name, { refresh = false } = {}) {
+    const url = `/settings/backends/${encodeURIComponent(name)}/models`
+    const { data } = await api.post(
+      url,
+      undefined,
+      refresh ? { params: { refresh: true } } : undefined,
+    )
     return data
+  },
+  /** Cache scope for discovered catalogs: the host these calls reach. */
+  discoveryScope() {
+    try {
+      return useHostsStore().activeHostId || ""
+    } catch (_err) {
+      return ""
+    }
   },
   async getBackendTypes() {
     const { data } = await api.get("/settings/backend-types")
@@ -1210,10 +1226,12 @@ export const settingsAPI = {
   },
   async saveBackend(backend) {
     const { data } = await api.post("/settings/backends", backend)
+    invalidateProviderModels(backend?.name)
     return data
   },
   async deleteBackend(name) {
     const { data } = await api.delete(`/settings/backends/${name}`)
+    invalidateProviderModels(name)
     return data
   },
   async getNativeTools() {
@@ -1346,6 +1364,7 @@ export const settingsAPI = {
   async codexLogin(node = "_host") {
     const cfg = { timeout: 300000, ..._nodeQuery(node) }
     const { data } = await api.post("/settings/codex-login", {}, cfg)
+    invalidateProviderModels()
     return data
   },
   async getUIPrefs() {

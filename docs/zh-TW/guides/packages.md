@@ -81,7 +81,7 @@ prompts:
     path: prompts/git-safety.md
 
 framework_hints:
-  framework.execution_model.dynamic: |
+  framework.execution_model: |
     Use background work aggressively, but never duplicate it.
 
 llm_presets:
@@ -186,6 +186,14 @@ class MyProvider(BaseLLMProvider):
   KohakuTerrarium 不會為它索取、儲存或檢查 API 金鑰，`kt login <name>`
   只會印出提示。
 - 探索階段只讀取 manifest；模組在第一次建立該後端的 profile 時才匯入。
+- 在後端項目裡寫 `model_discovery: true`，並在類別上提供非同步類別方法
+  `discover_models(cls, backend) -> list[DiscoveredModel]`
+  (`kohakuterrarium.llm.discovery.DiscoveredModel`)，設定頁和 CLI 就能列出該後端的模型。
+  `DiscoveredModel` 可以帶 `preset=`，也就是建議的 preset 欄位字典：`variation_groups`、
+  `reasoning_effort`、`service_tier`、`max_context`、`max_output`、`context_window`、
+  `temperature`、`extra_body`、`provider_native_tools`。使用者從目錄儲存模型時，這些欄位
+  優先於 KT 推斷的值 (同一後端上最接近的同系列 preset，或回報的推理檔位)。它們和使用者
+  preset 經過同樣的檢查；無效的建議會被丟棄並記錄警告，改用推斷出的草稿。其他鍵會被忽略。
 - 與內建後端類型同名的項目會被忽略。兩個套件宣告同一個名稱會報錯。
 
 ## 安裝模式

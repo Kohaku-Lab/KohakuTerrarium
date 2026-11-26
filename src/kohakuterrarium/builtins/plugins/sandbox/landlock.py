@@ -4,15 +4,20 @@ Turns a :class:`SandboxProfile`'s write axis into the list of paths a
 Landlock ruleset grants, and wraps a command with the ``landlock_exec``
 launcher that applies it. Landlock only grants, so an ``fs_deny`` path inside
 a writable root is carved out by granting the root's other entries instead.
+The launcher reads the grants from an inherited file descriptor.
 """
 
 import functools
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
-from kohakuterrarium.builtins.plugins.sandbox.landlock_exec import landlock_abi
+from kohakuterrarium.builtins.plugins.sandbox.landlock_exec import (
+    GRANTS_FD_FLAG,
+    landlock_abi,
+)
 from kohakuterrarium.builtins.plugins.sandbox.roots import (
     denied_paths,
     expand,
@@ -78,6 +83,36 @@ def write_grants(
     return list(dict.fromkeys(grants))
 
 
-def confine_argv(argv: list[str], grants: list[str]) -> list[str]:
-    """``argv`` run through the Landlock launcher with ``grants`` writable."""
-    return [sys.executable, "-I", "-S", str(LAUNCHER), json.dumps(grants), "--", *argv]
+def grants_fd(grants: list[str]) -> int:
+    """A non-inheritable descriptor holding ``grants`` as JSON, for the launcher.
+
+    The caller passes it to the child with ``pass_fds`` and closes its own copy.
+    """
+    if hasattr(os, "memfd_create"):
+        fd = os.memfd_create("kt-landlock-grants", os.MFD_CLOEXEC)
+    else:
+        with tempfile.TemporaryFile() as stream:
+            fd = os.dup(stream.fileno())
+    try:
+        data = memoryview(json.dumps(grants).encode("utf-8"))
+        while data:
+            data = data[os.write(fd, data) :]
+        os.lseek(fd, 0, os.SEEK_SET)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def confine_argv(argv: list[str], grants: int) -> list[str]:
+    """``argv`` run through the Landlock launcher, reading grants from fd ``grants``."""
+    return [
+        sys.executable,
+        "-I",
+        "-S",
+        str(LAUNCHER),
+        GRANTS_FD_FLAG,
+        str(grants),
+        "--",
+        *argv,
+    ]

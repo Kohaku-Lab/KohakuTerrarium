@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import inspect
 import io
 import json
 import os
@@ -16,6 +17,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from openai.resources.responses import AsyncResponses
+from openai.types.responses import ResponseUsage
 from PIL import Image
 from websockets import serve
 from websockets.exceptions import ConnectionClosedError
@@ -527,47 +530,120 @@ class TestSessionIdHeaderGating:
         assert "session_id" in kw["extra_headers"]
 
 
+async def _http_turn(tools=None, usage=None) -> tuple[dict, dict]:
+    """Run one Codex HTTP turn through the real SDK; return (request body, usage)."""
+    bodies = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        response = {"id": "r1", "output": []}
+        if usage is not None:
+            response["usage"] = usage
+        completed = {"type": "response.completed", "response": response}
+        sse = f"event: response.completed\ndata: {json.dumps(completed)}\n\n"
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=sse
+        )
+
+    p = CodexOAuthProvider(model="m", api_key="sk", base_url="https://h/v1")
+    await p.ensure_authenticated()
+    p._client = p._client.with_options(
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    )
+    try:
+        async for _ in p.chat([{"role": "user", "content": "hi"}], tools=tools):
+            pass
+    finally:
+        await p.close()
+    assert len(bodies) == 1
+    return bodies[0], p.last_usage
+
+
+_BOOK_ROOM = ToolSchema(
+    name="book_room",
+    description="Book a hotel room.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "city": {"type": "string"},
+            "nights": {"type": "integer", "description": "Optional; default 1"},
+        },
+        "required": ["city"],
+    },
+)
+
+
 class TestHttpToolsField:
     """The HTTP request body carries ``tools`` only when there are tools."""
 
-    async def _request_body(self, tools=None) -> dict:
-        bodies = []
-
-        def respond(request: httpx.Request) -> httpx.Response:
-            bodies.append(json.loads(request.content))
-            completed = {
-                "type": "response.completed",
-                "response": {"id": "r1", "output": []},
-            }
-            sse = f"event: response.completed\ndata: {json.dumps(completed)}\n\n"
-            return httpx.Response(
-                200, headers={"content-type": "text/event-stream"}, content=sse
-            )
-
-        p = CodexOAuthProvider(model="m", api_key="sk", base_url="https://h/v1")
-        await p.ensure_authenticated()
-        p._client = p._client.with_options(
-            http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))
-        )
-        try:
-            async for _ in p.chat([{"role": "user", "content": "hi"}], tools=tools):
-                pass
-        finally:
-            await p.close()
-        assert len(bodies) == 1
-        return bodies[0]
-
     async def test_toolless_request_omits_tools_field(self):
-        body = await self._request_body()
+        body, _ = await _http_turn()
         assert "tools" not in body
         assert body["input"]
 
     async def test_request_with_tools_sends_tools_array(self):
-        body = await self._request_body(
+        body, _ = await _http_turn(
             tools=[ToolSchema(name="lookup", description="Find a thing.")]
         )
         assert [t["name"] for t in body["tools"]] == ["lookup"]
         assert body["tools"][0]["type"] == "function"
+
+    async def test_function_tools_are_sent_non_strict(self):
+        body, _ = await _http_turn(tools=[_BOOK_ROOM])
+        assert body["tools"] == [
+            {
+                "type": "function",
+                "name": "book_room",
+                "description": "Book a hotel room.",
+                "parameters": _BOOK_ROOM.parameters,
+                "strict": False,
+            }
+        ]
+
+
+class TestHttpUsage:
+    """``response.completed`` usage becomes the provider's token-usage dict."""
+
+    async def test_reasoning_tokens_are_copied_from_output_details(self):
+        _, usage = await _http_turn(
+            usage={
+                "input_tokens": 95,
+                "input_tokens_details": {"cached_tokens": 64},
+                "output_tokens": 40,
+                "output_tokens_details": {"reasoning_tokens": 21},
+                "total_tokens": 135,
+            }
+        )
+        assert usage == {
+            "prompt_tokens": 95,
+            "completion_tokens": 40,
+            "total_tokens": 135,
+            "cached_tokens": 64,
+            "reasoning_tokens": 21,
+        }
+
+    async def test_reported_zero_reasoning_tokens_is_kept(self):
+        _, usage = await _http_turn(
+            usage={
+                "input_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 2,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 7,
+            }
+        )
+        assert usage["reasoning_tokens"] == 0
+
+    async def test_reasoning_tokens_absent_when_not_reported(self):
+        _, usage = await _http_turn(
+            usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+        )
+        assert usage == {
+            "prompt_tokens": 5,
+            "completion_tokens": 2,
+            "total_tokens": 7,
+            "cached_tokens": 0,
+        }
 
 
 class TestReasoningReplay:
@@ -814,9 +890,11 @@ class _FakeWSResponses:
         self.connection = _FakeWSConnection()
         self.connect_kwargs = None
         self.connect_exc: Exception | None = None
+        self.connect_calls = 0
         self.kwargs = None
 
     def connect(self, **kwargs):
+        self.connect_calls += 1
         if self.connect_exc is not None:
             raise self.connect_exc
         self.connect_kwargs = kwargs
@@ -841,8 +919,8 @@ class _FakeWSClient:
         return self
 
 
-def _ws_completed(resp_id="r1"):
-    usage = _Ev(
+def _ws_completed(resp_id="r1", usage=None):
+    usage = usage or _Ev(
         input_tokens=10,
         output_tokens=5,
         total_tokens=15,
@@ -960,6 +1038,7 @@ class TestWebsocketMode:
         assert [tc.name for tc in p.last_tool_calls] == ["t"]
         assert p._last_usage["prompt_tokens"] == 10
         assert p._last_usage["cached_tokens"] == 3
+        assert "reasoning_tokens" not in p._last_usage
         # The HTTP path must not have run.
         assert p._client.responses.kwargs is None
         sent = p._client.responses.connection.sent[0]
@@ -989,6 +1068,78 @@ class TestWebsocketMode:
         kw = p._client.responses.kwargs
         assert kw is not None
         assert kw["model"] == "m"
+
+    async def test_ws_usage_carries_reasoning_tokens(self):
+        p = self._provider()
+        usage = ResponseUsage.model_validate(
+            {
+                "input_tokens": 95,
+                "input_tokens_details": {"cached_tokens": 64, "cache_write_tokens": 0},
+                "output_tokens": 40,
+                "output_tokens_details": {"reasoning_tokens": 21},
+                "total_tokens": 135,
+            }
+        )
+        p._client.responses.connection.scripts = [[_ws_completed(usage=usage)]]
+
+        await self._drive(p)
+
+        assert p._last_usage == {
+            "prompt_tokens": 95,
+            "completion_tokens": 40,
+            "total_tokens": 135,
+            "cached_tokens": 64,
+            "reasoning_tokens": 21,
+        }
+
+    async def test_ws_function_tools_are_sent_non_strict(self):
+        p = self._provider()
+        p._client.responses.connection.scripts = [[_ws_completed()]]
+
+        async for _ in p._raw_stream_chat(
+            [{"role": "user", "content": "hi"}], tools=[_BOOK_ROOM]
+        ):
+            pass
+
+        sent = p._client.responses.connection.sent[0]
+        assert sent["tools"] == [
+            {
+                "type": "function",
+                "name": "book_room",
+                "description": "Book a hotel room.",
+                "parameters": _BOOK_ROOM.parameters,
+                "strict": False,
+            }
+        ]
+
+    async def test_connect_kwargs_match_the_installed_sdk_signature(self):
+        p = self._provider()
+        p._client.responses.connection.scripts = [[_ws_completed()]]
+
+        await self._drive(p)
+
+        kwargs = p._client.responses.connect_kwargs
+        assert kwargs["max_retries"] == 0
+        inspect.signature(AsyncResponses.connect).bind(None, **kwargs)
+
+    async def test_sdk_signature_mismatch_warns_once_and_moves_to_http(self, caplog):
+        p = self._provider()
+        p._client.responses.connect_exc = TypeError(
+            "AsyncResponses.connect() got an unexpected keyword argument 'max_retries'"
+        )
+
+        await self._drive(p)
+        await self._drive(p)
+
+        assert p._client.responses.kwargs is not None
+        assert p._ws_session.disabled
+        mismatch = [
+            r
+            for r in caplog.records
+            if r.levelname == "WARNING" and "openai>=2.32.0" in r.getMessage()
+        ]
+        assert len(mismatch) == 1
+        assert p._client.responses.connect_calls == 1
 
     @pytest.mark.parametrize("started", [False, True])
     async def test_uncertain_replay_is_bounded_before_or_after_metadata(self, started):

@@ -13,6 +13,8 @@ from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
 from kohakuterrarium.llm.codex.format import fix_tool_call_pairing, to_responses_input
 from kohakuterrarium.llm.openai.sanitize import strip_kt_extras, strip_surrogates
 from kohakuterrarium.llm.responses.reasoning import ResponsesReasoningCollector
+from kohakuterrarium.llm.responses.tools import function_tool
+from kohakuterrarium.llm.responses.usage import responses_usage
 from kohakuterrarium.llm.responses.ws import ResponsesWSSession
 from kohakuterrarium.llm.responses.ws_recovery import WSRecovery
 from kohakuterrarium.llm.responses.ws_options import FRAMEWORK_KNOBS
@@ -53,15 +55,7 @@ def build_ws_request(
     if instructions:
         event["instructions"] = instructions
     if tools:
-        event["tools"] = [
-            {
-                "type": "function",
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.parameters,
-            }
-            for t in tools
-        ]
+        event["tools"] = [function_tool(t) for t in tools]
     temperature = kwargs.get("temperature", provider.config.temperature)
     if temperature is not None:
         event["temperature"] = temperature
@@ -175,14 +169,7 @@ async def stream_ws_turn(
             elif etype == "response.completed":
                 usage = getattr(getattr(event, "response", None), "usage", None)
                 if usage:
-                    details = getattr(usage, "input_tokens_details", None)
-                    cached = getattr(details, "cached_tokens", 0) or 0 if details else 0
-                    provider._last_usage = {
-                        "prompt_tokens": getattr(usage, "input_tokens", 0),
-                        "completion_tokens": getattr(usage, "output_tokens", 0),
-                        "total_tokens": getattr(usage, "total_tokens", 0),
-                        "cached_tokens": cached,
-                    }
+                    provider._last_usage = responses_usage(usage)
     provider._last_tool_calls = collected
     provider._last_assistant_extra_fields = reasoning.fields()
     record_ws_assistant_echo(

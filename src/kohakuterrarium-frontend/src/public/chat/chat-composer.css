@@ -43,7 +43,21 @@
   min-height: 2em;
   max-height: 128px;
   resize: none;
+  overflow-x: hidden;
   overflow-y: auto;
+}
+
+/* An empty input shows its placeholder on one line, cut with an ellipsis. */
+.kt-chat-composer__shell textarea:placeholder-shown {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kt-chat-composer__shell textarea::placeholder {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .kt-chat-composer__shell button,

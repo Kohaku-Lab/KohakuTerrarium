@@ -11,6 +11,7 @@ import time
 import uuid
 from typing import Any
 
+from kohakuterrarium.llm.catalog_cache import invalidate_discovery
 from kohakuterrarium.llm.codex.auth import CodexTokens, oauth_login, refresh_tokens
 from kohakuterrarium.llm.codex.rate_limits import get_cached as _get_cached_usage
 from kohakuterrarium.studio.identity.codex.account import (
@@ -33,6 +34,7 @@ async def login_async(on_device_code=None, open_browser: bool = True) -> dict[st
     disable ``open_browser``; the CLI keeps browser opening enabled by default.
     """
     tokens = await oauth_login(on_device_code=on_device_code, open_browser=open_browser)
+    invalidate_discovery()
     return {"status": "ok", "expires_at": tokens.expires_at}
 
 
