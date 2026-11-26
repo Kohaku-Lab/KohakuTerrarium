@@ -41,6 +41,7 @@ INSTALL_HINT = (
     "and then run: playwright install chromium"
 )
 CLEANUP_TIMEOUT_S = 10.0
+ABANDON_TIMEOUT_S = 60.0
 PROCESS_READ_TIMEOUT_S = 5.0
 REASON_CHARS = 200
 DETAIL_MAX_CHARS = 10_000
@@ -619,6 +620,7 @@ class PlaywrightBrowser:
         self._closed_cleanly = False
         self._exited = False
         self._killing: Awaitable[None] | None = None
+        self._starting: asyncio.Future | None = None
 
     def attach(self, sink: EventSink) -> None:
         """Start delivering events to ``sink`` and wrap the pages already open."""
@@ -751,12 +753,26 @@ class PlaywrightBrowser:
         self._closing = True
         await self._playwright.stop()
 
+    async def start(self) -> None:
+        """Start Playwright's driver; a start cut short is finished by ``abandon``."""
+        self._starting = asyncio.ensure_future(self._manager.start())
+        self._playwright = await asyncio.shield(self._starting)
+
     async def abandon(self) -> None:
         """Undo a launch that failed or was cancelled part-way; never raises.
 
-        Closes what Playwright opened and stops its driver, then kills what is
-        not known to have exited by then.
+        Lets a cut-short driver start finish (bounded), closes what Playwright
+        opened and stops its driver, then kills what is not known to have
+        exited by then.
         """
+        starting = self._starting
+        if self._playwright is None and starting is not None:
+            try:
+                self._playwright = await asyncio.wait_for(
+                    asyncio.shield(starting), CLEANUP_TIMEOUT_S
+                )
+            except Exception as exc:
+                logger.debug("The driver did not start", error=type(exc).__name__)
         if self._playwright is None:
             _kill_driver(self._manager)
             return
@@ -777,13 +793,14 @@ class PlaywrightBrowser:
         if self._killing is None:
             self._closing = True
             driver = BrowserProcesses(_driver_pids(self._manager))
+            unheld = not driver.held()
             self._killing = in_thread(
-                functools.partial(_end_processes, self._held, driver, self._manager)
+                functools.partial(_end_processes, self._held, driver)
             )
-            if isinstance(self._killing, asyncio.Future):
-                self._killing.add_done_callback(
-                    lambda _: _close_driver_transport(self._manager)
-                )
+            if unheld and isinstance(self._killing, asyncio.Future):
+                self._killing.add_done_callback(lambda _: _kill_driver(self._manager))
+            elif unheld:
+                _kill_driver(self._manager)
         killing = self._killing
         if isinstance(killing, asyncio.Future):
             return asyncio.shield(killing)
@@ -855,25 +872,11 @@ def _driver_pids(manager: Any) -> list[int]:
     return [pid] if isinstance(pid, int) else []
 
 
-def _end_processes(
-    held: BrowserProcesses, driver: BrowserProcesses, manager: Any
-) -> None:
-    """Kill the browser's held processes, then the driver's tree and process; blocks."""
+def _end_processes(held: BrowserProcesses, driver: BrowserProcesses) -> None:
+    """Kill the browser's held processes, then the driver's tree; blocks."""
     held.kill()
     driver.kill()
     driver.release()
-    _kill_driver(manager)
-
-
-def _close_driver_transport(manager: Any) -> None:
-    """Close the killed driver's ``asyncio`` transport, which Playwright no longer will."""
-    transport = getattr(_driver_process(manager), "_transport", None)
-    if transport is None or transport.is_closing():
-        return
-    try:
-        transport.close()
-    except Exception as exc:
-        logger.debug("Closing the driver transport failed", error=type(exc).__name__)
 
 
 def _kill_driver(manager: Any) -> None:
@@ -894,7 +897,7 @@ class PlaywrightDriver:
         api = load_playwright()
         handle = PlaywrightBrowser(api, api.async_playwright())
         try:
-            handle._playwright = await handle._manager.start()
+            await handle.start()
             sink.launch_started(handle)
             browser, context = await self._open(api, handle._playwright, plan)
             handle._browser, handle._context = browser, context
@@ -908,7 +911,7 @@ class PlaywrightDriver:
                 await handle.record_processes(PROCESS_READ_TIMEOUT_S)
             return handle
         except BaseException:
-            await handle.abandon()
+            await _outlast(handle.abandon(), ABANDON_TIMEOUT_S)
             raise
 
     async def _open(
@@ -949,6 +952,30 @@ def _launch_failure(failures: list[tuple[Candidate, str]]) -> Exception:
             f"no usable Chromium was found (tried {tried}); run: playwright install chromium"
         )
     return BrowserLaunchError(f"the browser failed to start (tried {tried})")
+
+
+_outlasting: set[asyncio.Future] = set()
+
+
+async def _outlast(operation: Awaitable[None], bound: float) -> None:
+    """Run ``operation`` to its end, up to ``bound`` s, whatever cancels the caller.
+
+    A cancellation that arrived meanwhile is raised once ``operation`` ended
+    or the bound passed; past the bound ``operation`` runs on, unwaited.
+    """
+    task = asyncio.ensure_future(operation)
+    _outlasting.add(task)
+    task.add_done_callback(_outlasting.discard)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + bound
+    cancelled = False
+    while not task.done() and loop.time() < deadline:
+        try:
+            await asyncio.wait({task}, timeout=deadline - loop.time())
+        except asyncio.CancelledError:
+            cancelled = True
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 async def _quietly(operation: Awaitable[Any]) -> None:

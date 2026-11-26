@@ -5,9 +5,13 @@ Events of a page a structured read owns go to the read, never to the tabs.
 
 from typing import TYPE_CHECKING
 
-from kohakuterrarium.browser.profiles import Exiting, ProfileClaim
-from kohakuterrarium.browser.protocol import DialogDriver, DownloadDriver, PageDriver
-from kohakuterrarium.browser.session.types import LAUNCHING, LOST_CRASH, READY
+from kohakuterrarium.browser.protocol import (
+    DialogDriver,
+    DownloadDriver,
+    LaunchedProcesses,
+    PageDriver,
+)
+from kohakuterrarium.browser.session.types import LAUNCHING, LOST_CRASH, READY, Stack
 
 if TYPE_CHECKING:
     from kohakuterrarium.browser.session.assembly import BrowserSession
@@ -16,27 +20,27 @@ if TYPE_CHECKING:
 class LaunchSink:
     """Forwards driver events to the session while its launch is the current one.
 
-    ``claim``, the launch's hold on a persistent profile, is handed the
-    launch's processes whether or not the launch is still current.
+    The launch's processes go to ``stack`` and its profile claim whether or
+    not the launch is still current.
     """
 
     def __init__(
-        self,
-        session: "BrowserSession",
-        generation: int,
-        claim: ProfileClaim | None = None,
+        self, session: "BrowserSession", generation: int, stack: Stack | None = None
     ) -> None:
         self._session = session
         self._generation = generation
-        self._claim = claim
+        self._stack = stack
 
     def _live(self) -> bool:
         s = self._session
         return s._generation == self._generation and s._state in (LAUNCHING, READY)
 
-    def launch_started(self, processes: Exiting) -> None:
-        if self._claim is not None:
-            self._claim.held_by(processes)
+    def launch_started(self, processes: LaunchedProcesses) -> None:
+        stack = self._stack
+        if stack is not None:
+            stack.started = processes
+            if stack.claim is not None:
+                stack.claim.held_by(processes)
 
     def page_opened(self, page: PageDriver) -> None:
         if self._live() and not self._session._read_claims(page):

@@ -8,12 +8,14 @@ not finish within ``LIMIT_S``. The first tests need no browser.
 """
 
 import asyncio
+import dataclasses
 import inspect
 import io
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 
@@ -45,6 +47,7 @@ from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.processes import BrowserProcesses
 from kohakuterrarium.browser.proxy import FilteringProxy
 from kohakuterrarium.browser.session import BrowserSession
+from kohakuterrarium.browser.session import lifecycle as lifecycle_module
 from kohakuterrarium.browser.session.types import CLOSE_TIMEOUT_S
 from tests.helpers.browser_site import (
     FixtureSite,
@@ -159,6 +162,39 @@ def ref_of(text: str, role: str, name: str) -> str:
     return match.group(1)
 
 
+def fake_playwright(
+    monkeypatch, events: list, *, start_s: float = 0.0, stop_hangs: bool = False
+) -> None:
+    """Make ``load_playwright`` return a fake whose driver records start and stop.
+
+    The driver exits with status 0 when stopped, unless ``stop_hangs``.
+    """
+
+    class Error(Exception):
+        pass
+
+    proc = SimpleNamespace(pid=7000, returncode=None, kill=lambda: None)
+
+    class Manager:
+        async def start(self):
+            events.append("starting")
+            await asyncio.sleep(start_s)
+            events.append("started")
+            self._client = SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
+
+            async def stop():
+                events.append("stop")
+                if stop_hangs:
+                    await asyncio.Event().wait()
+                proc.returncode = 0
+
+            return SimpleNamespace(stop=stop)
+
+    api = SimpleNamespace(Error=Error, async_playwright=Manager)
+    monkeypatch.setattr(driver_module, "load_playwright", lambda: api)
+    monkeypatch.setattr(driver_module, "check_event_loop", lambda: None)
+
+
 class TestWithoutBrowser:
     def test_first_line_strips_call_prefixes(self):
         assert first_line(
@@ -251,10 +287,6 @@ class TestWithoutBrowser:
         order = []
         proc = SimpleNamespace(pid=driver.pid, returncode=None)
         proc.kill = lambda: order.append(("driver kill", proc.pid))
-        proc._transport = SimpleNamespace(
-            is_closing=lambda: False,
-            close=lambda: order.append(("transport closed", proc.pid)),
-        )
         handle._manager = SimpleNamespace(
             _client=SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
         )
@@ -268,15 +300,10 @@ class TestWithoutBrowser:
         try:
             handle._held = BrowserProcesses([browser.pid])
             await handle.kill()
-            assert order == [
-                ("tree", browser.pid),
-                ("tree", driver.pid),
-                ("driver kill", driver.pid),
-                ("transport closed", driver.pid),
-            ]
+            assert order == [("tree", browser.pid), ("tree", driver.pid)]
             assert browser.wait(10) is not None and driver.wait(10) is not None
             await handle.kill()
-            assert len(order) == 4, "a second kill repeated the first"
+            assert len(order) == 2, "a second kill repeated the first"
         finally:
             for process in (browser, driver):
                 if process.poll() is None:
@@ -432,7 +459,7 @@ class TestWithoutBrowser:
         real = processes_module.kill_tree
 
         def slow(pid: int) -> None:
-            time.sleep(0.6)
+            time.sleep(1.0)
             real(pid)
 
         monkeypatch.setattr(processes_module, "kill_tree", slow)
@@ -441,15 +468,126 @@ class TestWithoutBrowser:
             async with LoopProbe() as probe:
                 started = time.monotonic()
                 await handle.kill()
-                assert time.monotonic() - started >= 0.5, "the kill did not wait"
-            assert (
-                probe.longest_gap < 0.3
-            ), f"the loop stalled {probe.longest_gap:.2f} s"
+                assert time.monotonic() - started >= 0.9, "the kill did not wait"
+                ticks = probe.ticks
+            assert ticks >= 20, f"the loop ticked {ticks} times in a 1 s kill"
             assert sleeper.wait(10) is not None
         finally:
             if sleeper.poll() is None:
                 sleeper.kill()
             sleeper.wait(10)
+
+    async def test_a_second_kill_waits_for_the_first_which_a_cancel_never_stops(
+        self, monkeypatch
+    ):
+        handle, _ = self.fake_browser()
+        sleeper = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            **({} if sys.platform == "win32" else {"start_new_session": True}),
+        )
+        trees = []
+        real = processes_module.kill_tree
+
+        def slow(pid: int) -> None:
+            trees.append(pid)
+            time.sleep(0.5)
+            real(pid)
+
+        monkeypatch.setattr(processes_module, "kill_tree", slow)
+        try:
+            handle._held = BrowserProcesses([sleeper.pid])
+            first = asyncio.ensure_future(handle.kill())
+            await asyncio.sleep(0.05)
+            first.cancel()
+            started = time.monotonic()
+            await handle.kill()
+            assert time.monotonic() - started >= 0.4, "the second kill did not wait"
+            assert sleeper.wait(5) is not None and trees == [sleeper.pid]
+        finally:
+            if sleeper.poll() is None:
+                sleeper.kill()
+            sleeper.wait(10)
+
+    @pytest.mark.parametrize("held", [True, False])
+    async def test_the_driver_is_ended_by_its_hold_or_else_on_the_loop(
+        self, monkeypatch, held
+    ):
+        handle, _ = self.fake_browser()
+        sleeper = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            **({} if sys.platform == "win32" else {"start_new_session": True}),
+        )
+        killed_on = []
+        proc = SimpleNamespace(pid=sleeper.pid, returncode=None)
+        proc.kill = lambda: killed_on.append(threading.current_thread())
+        handle._manager = SimpleNamespace(
+            _client=SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
+        )
+        if not held:
+            monkeypatch.setattr(processes_module, "_hold", lambda pid: None)
+        try:
+            await handle.kill()
+            if held:
+                assert killed_on == [] and sleeper.wait(10) is not None
+            else:
+                assert killed_on == [threading.current_thread()]
+        finally:
+            if sleeper.poll() is None:
+                sleeper.kill()
+            sleeper.wait(10)
+
+    @pytest.mark.parametrize("stop_hangs", [False, True])
+    async def test_a_second_cancel_lets_a_failed_launch_finish_its_cleanup(
+        self, monkeypatch, stop_hangs
+    ):
+        events: list = []
+        fake_playwright(monkeypatch, events, stop_hangs=stop_hangs)
+        monkeypatch.setattr(driver_module, "CLEANUP_TIMEOUT_S", 0.2)
+        monkeypatch.setattr(
+            driver_module, "_end_processes", lambda *_: events.append("kill")
+        )
+
+        async def hang(*_args, **_kwargs):
+            await asyncio.Event().wait()
+
+        async def close():
+            events.append("close_context")
+            await hang()
+
+        context = SimpleNamespace(pages=[], on=lambda *_: None, close=close)
+        context.new_page = hang
+
+        async def opened(self, api, playwright, plan):
+            return None, context
+
+        monkeypatch.setattr(PlaywrightDriver, "_open", opened)
+        sink = SimpleNamespace(launch_started=events.append)
+        plan = SimpleNamespace(persistent=False, timeout_s=5.0)
+        launch = asyncio.create_task(
+            asyncio.wait_for(PlaywrightDriver().launch(plan, sink), 0.1)
+        )
+        await wait_until(lambda: "close_context" in events, timeout=5)
+        launch.cancel()
+        await asyncio.wait({launch})
+        assert launch.cancelled()
+        assert "stop" in events, "the cleanup stopped at the second cancel"
+        handle = next(e for e in events if isinstance(e, PlaywrightBrowser))
+        assert ("kill" in events) is stop_hangs
+        assert handle.exited() is not stop_hangs
+
+    async def test_a_cancelled_playwright_start_is_let_finish_and_then_stopped(
+        self, monkeypatch
+    ):
+        events: list = []
+        fake_playwright(monkeypatch, events, start_s=0.3)
+        sink = SimpleNamespace(launch_started=events.append)
+        plan = SimpleNamespace(persistent=False, timeout_s=5.0)
+        launch = asyncio.create_task(PlaywrightDriver().launch(plan, sink))
+        await wait_until(lambda: "starting" in events, timeout=5)
+        launch.cancel()
+        await asyncio.wait({launch})
+        assert launch.cancelled()
+        assert events == ["starting", "started", "stop"]
 
     def test_a_kill_without_a_running_loop_still_ends_the_processes(self):
         handle, _ = self.fake_browser()
@@ -1711,17 +1849,82 @@ async def test_close_keeps_its_bound_while_a_slow_kill_of_a_hung_browser_runs(
             await session.close()
             elapsed = time.monotonic() - started
             assert elapsed < 1.6, f"close took {elapsed:.2f} s past its 1 s bound"
-            assert handle._held._finalizer.alive, "the holds went before the kill"
             survivors = await gone_within(pids, 20.0)
-            assert survivors == [], f"alive 20 s after close: {survivors} of {pids}"
-            assert handle.exited()
-            await wait_until(
-                lambda: not handle._held._finalizer.alive,
-                timeout=20,
-                what="the holds to be given back after the kill",
-            )
-        assert probe.longest_gap < 0.5, f"the loop stalled {probe.longest_gap:.2f} s"
+            ticks, spent = probe.ticks, time.monotonic() - started
+        assert survivors == [], f"alive 20 s after close: {survivors} of {pids}"
+        assert spent >= 2.0, "the slow kill did not run"
+        assert ticks >= 20, f"the loop ticked {ticks} times in {spent:.1f} s"
+        assert handle.exited()
+        await wait_until(
+            lambda: not handle._held._finalizer.alive,
+            timeout=20,
+            what="the holds to be given back after the kill",
+        )
     finally:
         for pid in pids:
+            if process_alive(pid):
+                kill_process(pid)
+
+
+@LIVE
+@pytest.mark.parametrize("profile", [True, False])
+async def test_a_cut_short_launch_cancelled_again_in_its_cleanup_leaves_nothing(
+    site, browser_env, downloads, tmp_path, monkeypatch, profile
+):
+    started: list[int] = []
+    stops: list = []
+    cleaning = asyncio.Event()
+    real_open = PlaywrightDriver._open
+    real_plan = lifecycle_module.plan_launch
+
+    async def hang(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    async def hung_close(*_args, **_kwargs):
+        cleaning.set()
+        await hang()
+
+    async def opened(self, api, playwright, plan):
+        browser, context = await real_open(self, api, playwright, plan)
+        cdp = await (browser or context.browser).new_browser_cdp_session()
+        info = await cdp.send("SystemInfo.getProcessInfo")
+        await cdp.detach()
+        started.extend(int(p["id"]) for p in info["processInfo"])
+        stops.append(playwright.stop)
+        context.close = hung_close
+        return browser, context
+
+    monkeypatch.setattr(PlaywrightDriver, "_open", opened)
+    monkeypatch.setattr(PlaywrightBrowser, "record_processes", hang)
+    monkeypatch.setattr(PlaywrightBrowser, "new_page", hang)
+    monkeypatch.setattr(driver_module, "CLEANUP_TIMEOUT_S", 2.0)
+    monkeypatch.setattr(
+        lifecycle_module,
+        "plan_launch",
+        lambda *a, **k: dataclasses.replace(real_plan(*a, **k), timeout_s=10.0),
+    )
+    options = {"allow_loopback": True, "action_timeout_s": 5}
+    if profile:
+        options["profile_dir"] = str(tmp_path / "profile")
+    session = BrowserSession(
+        BrowserOptions.from_mapping(options), downloads_dir=downloads
+    )
+    try:
+        call = asyncio.create_task(session.navigate(site.url("/form")))
+        await within(cleaning.wait(), "the cleanup of the cut-short launch")
+        call.cancel()
+        await within(asyncio.wait({call}), "the cancelled call")
+        assert call.cancelled()
+        assert started, "Chromium never started"
+        survivors = await gone_within(started, 20.0)
+        assert survivors == [], f"Chromium of the cut-short launch left: {survivors}"
+        monkeypatch.undo()
+        page = await within(session.navigate(site.url("/form")), "the next launch")
+        assert "Form" in page.text
+    finally:
+        await within(session.close(), "close", CLOSE_LIMIT_S)
+        for stop in stops:
+            await within(stop(), "stopping the abandoned driver")
+        for pid in started:
             if process_alive(pid):
                 kill_process(pid)

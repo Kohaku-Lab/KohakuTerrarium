@@ -66,23 +66,20 @@ def wait_until_sync(
 
 
 class LoopProbe:
-    """A task that ticks every ``interval`` seconds; ``longest_gap`` is its worst stall.
+    """A task that ticks every ``interval`` seconds; ``ticks`` counts the ticks so far.
 
-    A blocked event loop shows as a gap far above ``interval``.
+    A blocked event loop shows as few ticks over a span many ``interval`` long.
     """
 
     def __init__(self, interval: float = 0.01) -> None:
         self.interval = interval
-        self.longest_gap = 0.0
+        self.ticks = 0
         self._task: asyncio.Task | None = None
 
     async def _tick(self) -> None:
-        last = time.monotonic()
         while True:
             await asyncio.sleep(self.interval)
-            now = time.monotonic()
-            self.longest_gap = max(self.longest_gap, now - last)
-            last = now
+            self.ticks += 1
 
     async def __aenter__(self) -> "LoopProbe":
         self._task = asyncio.create_task(self._tick())

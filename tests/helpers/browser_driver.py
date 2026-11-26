@@ -417,6 +417,7 @@ class ScriptedBrowser:
         self.killed = False
         self.survives_kill = driver.survives_kill
         self.kill_delay = 0.0
+        self._killing: asyncio.Future | None = None
         self.unresponsive = False
         self.probes = 0
         self.stages: list[str] = []
@@ -525,14 +526,22 @@ class ScriptedBrowser:
         self.alive = False
 
     def kill(self) -> Awaitable[None]:
-        """Start the kill now; the process ends once ``kill_delay`` has passed."""
-        self.killed = True
-        self.connected = False
-        self._release(DriverDisconnectedError("the browser closed unexpectedly"))
-        if not self.kill_delay:
-            self._killed()
-            return in_thread(lambda: None)
-        return self._slow_kill(in_thread(lambda: time.sleep(self.kill_delay)))
+        """Start the kill now; the process ends once ``kill_delay`` has passed.
+
+        A later call waits for the first kill, as the Playwright driver's does.
+        """
+        if self._killing is None:
+            self.killed = True
+            self.connected = False
+            self._release(DriverDisconnectedError("the browser closed unexpectedly"))
+            if self.kill_delay:
+                blocking = in_thread(lambda: time.sleep(self.kill_delay))
+                self._killing = asyncio.ensure_future(self._slow_kill(blocking))
+            else:
+                self._killed()
+                self._killing = asyncio.get_running_loop().create_future()
+                self._killing.set_result(None)
+        return asyncio.shield(self._killing)
 
     async def _slow_kill(self, blocking: Awaitable[None]) -> None:
         await blocking
@@ -556,7 +565,9 @@ class ScriptedDriver:
     the launch then kills); ``fail_before_start`` makes them raise before
     starting any; ``block`` (an ``asyncio.Event``) holds a launch half-way
     until set, with a browser process already alive; ``survives_kill`` is
-    given to each new browser.
+    given to each new browser. ``cleanup_hang`` (an ``asyncio.Event``) holds
+    a failed launch's cleanup, before its kill, until set, as a hung close
+    would; ``cleaning`` tells that a cleanup began.
     """
 
     def __init__(self, setup=None) -> None:
@@ -567,6 +578,8 @@ class ScriptedDriver:
         self.fail_before_start: BaseException | None = None
         self.block: asyncio.Event | None = None
         self.survives_kill = False
+        self.cleanup_hang: asyncio.Event | None = None
+        self.cleaning = False
         self.started = asyncio.Event()
 
     @property
@@ -592,6 +605,9 @@ class ScriptedDriver:
             if self.fail is not None:
                 raise self.fail
         except BaseException:
+            self.cleaning = True
+            if self.cleanup_hang is not None:
+                await self.cleanup_hang.wait()
             await browser.kill()
             raise
         browser.start()

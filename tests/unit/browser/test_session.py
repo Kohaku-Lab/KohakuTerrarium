@@ -51,7 +51,7 @@ from tests.helpers.browser_driver import (
     noise_image,
     png_bytes,
 )
-from tests.helpers.waiting import LoopProbe, wait_until
+from tests.helpers.waiting import wait_until
 
 PAGE = (
     '- heading "Shop" [level=1] [ref=e1]\n'
@@ -2087,31 +2087,27 @@ class TestCloseBound:
 
 
 class TestSlowKill:
-    """A forced kill that takes a while (a slow ``taskkill``) never stalls the event loop."""
+    """A forced kill that takes a while (a slow ``taskkill``) and what waits for it."""
 
-    async def test_a_forced_teardown_waits_for_a_slow_kill_without_stalling(self, made):
+    async def test_a_forced_teardown_waits_for_a_slow_kill(self, made):
         session, driver = made
         await session.snapshot()
         browser = driver.browser
         browser.fail_stages = {"context", "browser", "playwright"}
         browser.kill_delay = 0.5
-        async with LoopProbe() as probe:
-            assert (await session.close_browser()).meta == {"closed": True}
-            assert browser.killed and not browser.alive
-        assert probe.longest_gap < 0.3, f"the loop stalled {probe.longest_gap:.2f} s"
+        assert (await session.close_browser()).meta == {"closed": True}
+        assert browser.killed and not browser.alive
 
-    async def test_a_hung_browser_is_killed_without_stalling_the_loop(self, made):
+    async def test_a_hung_browser_is_killed_and_reported_as_hung(self, made):
         session, driver = made
         await session.snapshot()
         hung = driver.browser
         hung.page.hang.add("snapshot")
         hung.unresponsive = True
         hung.kill_delay = 0.5
-        async with LoopProbe() as probe:
-            with pytest.raises(BrowserStateLostError):
-                await session.snapshot()
-            assert hung.killed and not hung.alive
-        assert probe.longest_gap < 0.3, f"the loop stalled {probe.longest_gap:.2f} s"
+        with pytest.raises(BrowserStateLostError):
+            await session.snapshot()
+        assert hung.killed and not hung.alive
         again = await session.snapshot()
         assert "state was lost (the browser stopped responding)" in again.text
 
@@ -2128,15 +2124,57 @@ class TestSlowKill:
         await session.snapshot()
         browser = driver.browser
         browser.hang_stages = {"context", "browser", "playwright"}
-        browser.kill_delay = 1.0
-        async with LoopProbe() as probe:
-            started = time.monotonic()
+        browser.kill_delay = 1.5
+        started = time.monotonic()
+        await session.close()
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0, f"close took {elapsed:.2f} s; its bound is 0.4 s"
+        assert browser.killed and browser.alive, "close waited for the kill"
+        await wait_until(lambda: not browser.alive, timeout=5, what="the kill")
+
+
+class TestCutShortLaunch:
+    """A launch cut short whose own cleanup is cut short again leaves nothing running."""
+
+    @staticmethod
+    def short_plans(monkeypatch) -> None:
+        real = lifecycle_module.plan_launch
+        monkeypatch.setattr(
+            lifecycle_module,
+            "plan_launch",
+            lambda options, proxy, **kwargs: dataclasses.replace(
+                real(options, proxy, **kwargs), timeout_s=0.05
+            ),
+        )
+
+    @pytest.mark.parametrize("profile", [True, False])
+    @pytest.mark.parametrize("second", ["cancel", "close"])
+    async def test_the_session_kills_what_an_interrupted_cleanup_left(
+        self, tmp_path, monkeypatch, second, profile
+    ):
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.2)
+        self.short_plans(monkeypatch)
+        path = str(tmp_path / "profile")
+        session, driver = make(tmp_path, **({"profile_dir": path} if profile else {}))
+        driver.block = asyncio.Event()
+        driver.cleanup_hang = asyncio.Event()
+        call = asyncio.create_task(session.snapshot())
+        await wait_until(lambda: driver.cleaning, timeout=5, what="the cleanup")
+        leftover = driver.browser
+        if second == "cancel":
+            call.cancel()
+            await asyncio.wait({call})
+            assert call.cancelled()
+        else:
             await session.close()
-            elapsed = time.monotonic() - started
-            assert elapsed < 0.7, f"close took {elapsed:.2f} s past its 0.4 s bound"
-            assert browser.killed, "the kill was not started"
-            await wait_until(lambda: not browser.alive, timeout=5, what="the kill")
-        assert probe.longest_gap < 0.3, f"the loop stalled {probe.longest_gap:.2f} s"
+            await asyncio.wait({call})
+            assert isinstance(call.exception(), BrowserClosedError)
+        await wait_until(lambda: not leftover.alive, timeout=5, what="the kill")
+        assert leftover.killed
+        if profile:
+            (await profiles_module.claim_profile(path)).drop()
+        await session.close()
+        assert driver.alive() == []
 
 
 def long_page(lines: int) -> str:

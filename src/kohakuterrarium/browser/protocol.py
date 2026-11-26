@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from kohakuterrarium.browser.launch import LaunchPlan
-from kohakuterrarium.browser.profiles import Exiting
 
 DOCUMENT_ID_JS = "() => performance.timeOrigin"
 FRAME_DOCUMENT_ID_JS = "el => el.ownerDocument.defaultView.performance.timeOrigin"
@@ -244,11 +243,26 @@ class PageDriver(Protocol):
     async def close(self, timeout: float) -> None: ...
 
 
+class LaunchedProcesses(Protocol):
+    """What one launch may have started, before and after the launch returns."""
+
+    def exited(self) -> bool:
+        """Whether every process the launch started is known to have ended; never waits."""
+
+    def kill(self) -> Awaitable[None]:
+        """Last resort: start ending every process the launch started, at once.
+
+        Never blocks the event loop; the result resolves once the kill has
+        finished (it is bounded), and cancelling a wait on it leaves the kill
+        running.
+        """
+
+
 class EventSink(Protocol):
     """Callbacks a driver delivers on the event loop; each must return quickly."""
 
-    def launch_started(self, processes: Exiting) -> None:
-        """From now on the launch may start browser processes; ``processes`` tells when all ended.
+    def launch_started(self, processes: LaunchedProcesses) -> None:
+        """From now on the launch may start browser processes; ``processes`` can end them.
 
         Delivered at most once per launch, before its first browser process
         can start; a launch that fails without it started none.
@@ -302,12 +316,7 @@ class BrowserDriver(Protocol):
         """Stop the automation driver process."""
 
     def kill(self) -> Awaitable[None]:
-        """Last resort: start ending every process this browser started, at once.
-
-        Never blocks the event loop; the result resolves once the kill has
-        finished (it is bounded), and cancelling a wait on it leaves the kill
-        running.
-        """
+        """Last resort: as ``LaunchedProcesses.kill``."""
 
     def exited(self) -> bool:
         """Whether every process of this browser is known to have ended; never waits."""
@@ -320,6 +329,7 @@ class Driver(Protocol):
         """Start a browser per ``plan`` with one open page; clean up fully on failure.
 
         A failed or cancelled launch ends, by force if need be, the browser
-        processes it started; the object it gave ``sink.launch_started``
-        reports when they have.
+        processes it started, and finishes that (within a bound) even when
+        cancelled again meanwhile; the object it gave ``sink.launch_started``
+        reports when they have ended.
         """

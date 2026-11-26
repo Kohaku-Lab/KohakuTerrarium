@@ -177,6 +177,18 @@ A driver that was killed or crashed proves nothing. A failed launch closes
 what it opened, stops the driver, and kills what is still not known gone. A
 launch that started nothing frees the profile as soon as its driver stops.
 
+That cleanup runs in a task of its own (`driver._outlast`, bounded by
+`ABANDON_TIMEOUT_S`): it begins inside a launch that was already cancelled
+(the launch timeout, or a `close()`), and a second cancellation (the tool
+call interrupted, `close()` cancelling the launch again) would otherwise
+stop it at whatever step it had reached. The cancelled launch waits for it,
+then re-raises. A Playwright start that is cut short is likewise let finish
+(bounded) so its driver can be stopped, since Playwright keeps the client of
+an unfinished start out of reach. Whatever the driver manages, the session
+keeps the handle from `launch_started` on its `Stack`: a teardown kills it
+when it is not known to have exited, and `close()` past its bound kills it
+like a launched browser, for throwaway profiles too.
+
 What stays unconfirmable: a browser that hung before its processes could be
 read, whose driver then had to be killed. On Windows the driver's tree kill
 ends it, but nothing can show that, so the profile stays refused until the
@@ -193,6 +205,11 @@ starts it and returns. `BrowserProcesses` defers giving back its handles or
 pidfds while a kill or a liveness check uses them, so a `release` (for
 instance from a profile check seeing the browser gone) can never let a kill
 reach a reused pid. With no running loop the kill runs in place.
+
+The Playwright driver is killed through a hold of its own like the browser.
+Where it cannot be held (no pidfd on that POSIX Python, or the handle could not
+be opened) it is killed through asyncio's `Process.kill()`, on the loop after
+the thread ends: that object belongs to the loop and its child watcher.
 
 ## Layers
 

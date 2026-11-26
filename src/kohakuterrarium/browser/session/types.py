@@ -5,7 +5,7 @@ from typing import Any
 
 from kohakuterrarium.browser.profiles import ProfileClaim
 from kohakuterrarium.browser.proxy import FilteringProxy
-from kohakuterrarium.browser.protocol import BrowserDriver
+from kohakuterrarium.browser.protocol import BrowserDriver, LaunchedProcesses
 from kohakuterrarium.browser.tabs import Tab
 
 NEW, LAUNCHING, READY, CLOSED = "new", "launching", "ready", "closed"
@@ -49,12 +49,14 @@ class Stack:
     """The resources of one launch: its proxy and, once started, its browser.
 
     ``bundled_only`` is whether its launch plan named the bundled Chromium
-    alone; ``claim`` is its hold on a persistent profile.
+    alone; ``claim`` is its hold on a persistent profile; ``started`` is what
+    the launch may have started, known before the launch returns.
     """
 
     proxy: FilteringProxy
     generation: int
     browser: BrowserDriver | None = None
+    started: LaunchedProcesses | None = None
     torn_down: bool = False
     bundled_only: bool = False
     claim: ProfileClaim | None = None

@@ -47,8 +47,10 @@ def kill_tree(pid: int) -> None:
 
     On Windows ``taskkill /T /F`` walks the tree; elsewhere the process
     group ``pid`` leads (Playwright starts Chromium as a group leader) and
-    then ``pid`` itself get ``SIGKILL``. Call it only for a pid that cannot
-    have been reused, as ``BrowserProcesses`` ensures.
+    then ``pid`` itself get ``SIGKILL``. It acts on the id alone: on Windows
+    an open handle on the process (as ``BrowserProcesses`` keeps) stops the
+    id being reused meanwhile; on POSIX a pidfd check just before narrows
+    that window but cannot close it.
     """
     if pid <= 0:
         return
@@ -166,6 +168,11 @@ class BrowserProcesses:
         """Whether any held process may still run; one that cannot be checked counts."""
         with self._in_use() as (pids, holds):
             return any(_may_run(hold, pid) for pid, hold in zip(pids, holds))
+
+    def held(self) -> bool:
+        """Whether every pid has an OS hold (handle or pidfd), so ``kill`` reaches it."""
+        with self._lock:
+            return all(hold is not None for hold in self._holds)
 
     def release(self) -> None:
         with self._lock:

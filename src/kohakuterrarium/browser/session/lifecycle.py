@@ -27,9 +27,9 @@ from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.policy import ExternalCheck, NetworkPolicy
 from kohakuterrarium.browser.profiles import claim_profile, forget_if_released
 from kohakuterrarium.browser.protocol import (
-    BrowserDriver,
     DialogDriver,
     Driver,
+    LaunchedProcesses,
     PageDriver,
 )
 from kohakuterrarium.browser.proxy import EgressRecord, FilteringProxy
@@ -289,7 +289,7 @@ class SessionLifecycleMixin:
                 self.options, stack.proxy.url, bundled_only=stack.bundled_only
             )
             stack.browser = await asyncio.wait_for(
-                self._driver.launch(plan, LaunchSink(self, generation, claim)),
+                self._driver.launch(plan, LaunchSink(self, generation, stack)),
                 plan.timeout_s + CALL_MARGIN_S,
             )
             if claim is not None:
@@ -339,6 +339,8 @@ class SessionLifecycleMixin:
             clean = await self._stage(browser.stop, "playwright") and clean
             if not clean:
                 await self._kill(browser)
+        elif stack.started is not None and not stack.started.exited():
+            await self._kill(stack.started)
         await self._stage(stack.proxy.close, "proxy")
         self._live_stacks.discard(stack)
         if stack.claim is not None:
@@ -435,10 +437,11 @@ class SessionLifecycleMixin:
 
     def _kill_live_stacks(self) -> None:
         for stack in list(self._live_stacks):
-            if stack.browser is not None:
-                self._start_kill(stack.browser)
+            target = stack.browser or stack.started
+            if target is not None:
+                self._start_kill(target)
 
-    def _start_kill(self, browser: BrowserDriver) -> asyncio.Future:
+    def _start_kill(self, browser: LaunchedProcesses) -> asyncio.Future:
         """Start killing ``browser``, kept until it ends; a failure is logged."""
         try:
             killing = asyncio.ensure_future(browser.kill())
@@ -455,7 +458,7 @@ class SessionLifecycleMixin:
         if not killing.cancelled() and killing.exception() is not None:
             logger.warning("Killing the browser failed", error=str(killing.exception()))
 
-    async def _kill(self, browser: BrowserDriver) -> None:
+    async def _kill(self, browser: LaunchedProcesses) -> None:
         """Kill ``browser`` and wait for the end; cancelling the wait leaves the kill running."""
         await asyncio.wait({self._start_kill(browser)})
 
