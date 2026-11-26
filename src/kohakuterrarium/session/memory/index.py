@@ -29,6 +29,8 @@ logger = get_logger(__name__)
 # actual evidence out of a query's top-k. Vault search only exposes ranked
 # prefixes, so progressively widen the candidate window *before* truncating.
 _MAX_RANKED_CANDIDATES = 8192
+# sqlite-vec vec0 rejects KNN requests with k > 4096, even on small tables.
+_MAX_VECTOR_CANDIDATES = 4096
 _RankedHit = TypeVar("_RankedHit")
 
 
@@ -37,12 +39,17 @@ def _without_search_echo(
     *,
     k: int,
     agent: str | None,
-) -> list[_RankedHit]:
+    max_candidates: int | None = None,
+) -> tuple[list[_RankedHit], bool]:
+    """Return visible ranked prefix and whether the backend cap hid its tail.
+
+    A full budget does not imply a failure: callers return the verified subset
+    with a warning if fewer than k eligible hits could be established.
+    """
     if k <= 0:
-        return []
-    if k > _MAX_RANKED_CANDIDATES:
-        raise ValueError("Requested memory search k exceeds candidate limit")
-    limit = min(_MAX_RANKED_CANDIDATES, max(32, k * 2))
+        return [], False
+    budget = _MAX_RANKED_CANDIDATES if max_candidates is None else max_candidates
+    limit = min(budget, max(32, k * 2))
     while True:
         candidates = retrieve(limit)
         visible = [
@@ -52,13 +59,18 @@ def _without_search_echo(
             and (agent is None or hit[2].get("agent") == agent)
         ]
         if len(visible) >= k or len(candidates) < limit:
-            return visible[:k]
-        if limit >= _MAX_RANKED_CANDIDATES:
-            raise RuntimeError(
-                "Cannot resolve search results beyond the bounded candidate "
-                "window; narrow the query."
-            )
-        limit = min(_MAX_RANKED_CANDIDATES, limit * 2)
+            return visible[:k], False
+        if limit >= budget:
+            return visible[:k], True
+        limit = min(budget, limit * 2)
+
+
+def _incomplete_warning(backend: str, limit: int, found: int, requested: int) -> str:
+    return (
+        f"Search results may be incomplete: {backend} candidate limit "
+        f"({limit}) reached after filtering; returning {found} of "
+        f"{requested} requested hits. Narrow the query for better coverage."
+    )
 
 
 @dataclass
@@ -90,6 +102,14 @@ class SearchResult:
         if elapsed < 3600:
             return f"{int(elapsed / 60)}m ago"
         return f"{elapsed / 3600:.1f}h ago"
+
+
+class SearchHits(list[SearchResult]):
+    """List-compatible search hits with a per-query, nonfatal notice."""
+
+    def __init__(self, items=(), *, warning: str | None = None) -> None:
+        super().__init__(items)
+        self.warning = warning
 
 
 @dataclass
@@ -386,10 +406,16 @@ class SessionMemory:
 
     def _search_fts(self, query: str, k: int, agent: str | None) -> list[SearchResult]:
         """FTS5 keyword search."""
-        results = _without_search_echo(
+        results, incomplete = _without_search_echo(
             lambda limit: self._fts.search(query, k=limit), k=k, agent=agent
         )
-        out = []
+        out = SearchHits(
+            warning=(
+                _incomplete_warning("FTS", _MAX_RANKED_CANDIDATES, len(results), k)
+                if incomplete
+                else None
+            )
+        )
         for row_id, score, meta in results:
             if agent and meta.get("agent") != agent:
                 continue
@@ -427,10 +453,19 @@ class SessionMemory:
     def _search_vector(
         self, query_vec, k: int, agent: str | None
     ) -> list[SearchResult]:
-        results = _without_search_echo(
-            lambda limit: self._vec.search(query_vec, k=limit), k=k, agent=agent
+        results, incomplete = _without_search_echo(
+            lambda limit: self._vec.search(query_vec, k=limit),
+            k=k,
+            agent=agent,
+            max_candidates=_MAX_VECTOR_CANDIDATES,
         )
-        out = []
+        out = SearchHits(
+            warning=(
+                _incomplete_warning("Semantic", _MAX_VECTOR_CANDIDATES, len(results), k)
+                if incomplete
+                else None
+            )
+        )
         for _, distance, meta in results:
             if agent and meta.get("agent") != agent:
                 continue
@@ -485,7 +520,15 @@ class SessionMemory:
             r = result_map[key]
             r.score = score
             out.append(r)
-        return out
+        warnings = [
+            warning
+            for warning in (
+                getattr(fts_results, "warning", None),
+                getattr(sem_results, "warning", None),
+            )
+            if warning
+        ]
+        return SearchHits(out, warning="\n".join(warnings) if warnings else None)
 
     def get_stats(self) -> dict[str, Any]:
         """Get index statistics."""

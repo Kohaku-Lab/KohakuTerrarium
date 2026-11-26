@@ -106,14 +106,18 @@ class SearchMemoryTool(BaseTool):
                 results = await asyncio.to_thread(
                     memory.search, query, mode=mode, k=k, agent=agent
                 )
+                warning = getattr(results, "warning", None)
         except Exception as e:
             return ToolResult(error=f"Search failed: {e}")
 
         if not results:
+            no_hits = (
+                "No eligible hits within the scanned candidate budget."
+                if getattr(results, "warning", None)
+                else "No results found."
+            )
             return ToolResult(
-                output=(
-                    f"{warning}\nNo results found." if warning else "No results found."
-                ),
+                output="\n".join((warning, no_hits)) if warning else no_hits,
                 exit_code=0,
             )
 

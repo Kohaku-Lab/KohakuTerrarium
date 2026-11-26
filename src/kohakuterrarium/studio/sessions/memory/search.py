@@ -165,7 +165,9 @@ def _search_session_sync(
         )
         raise SessionError(f"Memory search failed: {type(e).__name__}: {e}")
 
-    return _search_response(path, q, mode, k, results)
+    return _search_response(
+        path, q, mode, k, results, warning=getattr(results, "warning", None)
+    )
 
 
 def _search_response(path, q, mode, k, results, warning=None):

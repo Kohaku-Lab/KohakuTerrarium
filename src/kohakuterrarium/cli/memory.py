@@ -195,9 +195,15 @@ def search_cli(
             mode = "fts"
 
         results = memory.search(query, mode=mode, k=k, agent=agent)
+        if getattr(results, "warning", None):
+            print(f"Warning: {results.warning}")
 
         if not results:
-            print("No results found.")
+            print(
+                "No eligible hits within the scanned candidate budget."
+                if getattr(results, "warning", None)
+                else "No results found."
+            )
             return 0
 
         print(f"Found {len(results)} result(s) for: {query}")

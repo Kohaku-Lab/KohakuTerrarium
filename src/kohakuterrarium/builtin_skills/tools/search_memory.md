@@ -48,6 +48,9 @@ Stale, invalid and unverifiable source references return explicit errors.
 
 - Search calls and their own tool-result echoes do not take up the ranked
   results, although their recorded events remain intact.
+- If candidate filtering hits a backend limit, available matches are returned
+  with a **nonfatal incomplete-results warning**. Even with zero matches, this
+  means no eligible hits were found *within the scanned candidate window*.
 - A background tool's output might be recorded after a conversational round
   closes and not be directly searchable. When a tool-call result is found,
   use its Anchor with `before=0, after=3` to inspect the original outcome,

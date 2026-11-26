@@ -162,7 +162,7 @@ class LiveSessionMemory:
                             results = await self._store.run(
                                 self._memory._search_fts, query, k, agent
                             )
-                            return results, None
+                            return results, getattr(results, "warning", None)
                         raise ValueError("semantic search needs an embedding model")
                     for name in names:
                         start, count, blocks = await self._store.run(
@@ -191,11 +191,12 @@ class LiveSessionMemory:
                         agent,
                     )
                     if mode == "semantic":
-                        return results, None
+                        return results, getattr(results, "warning", None)
                     keywords = await self._store.run(
                         self._memory._search_fts, query, k * 2, agent
                     )
-                    return self._memory._fuse_results(keywords, results, k), None
+                    fused = self._memory._fuse_results(keywords, results, k)
+                    return fused, getattr(fused, "warning", None)
             except Exception as exc:
                 if self._closed or (mode == "semantic" and not semantic_fallback):
                     raise
@@ -205,7 +206,10 @@ class LiveSessionMemory:
                     error=str(exc) or type(exc).__name__,
                 )
         results = await self._store.run(self._memory._search_fts, query, k, agent)
-        return results, warning
+        notices = [
+            notice for notice in (warning, getattr(results, "warning", None)) if notice
+        ]
+        return results, chr(10).join(notices) if notices else None
 
 
 def live_memory_for_store(store) -> LiveSessionMemory:
