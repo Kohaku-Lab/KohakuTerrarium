@@ -3,8 +3,8 @@
 A read passes the URL check, filtering proxy and network policy ``navigate``
 uses and raises the same typed errors. Its tab, and any window that tab
 opens, is never an agent tab: the tab list, refs, observations, dialogs and
-downloads never see it, nor do the blocked hops of its own load; other
-requests the proxy blocked while it ran are reported to the agent.
+downloads never see it. Blocked requests are the read's by endpoint (host
+and port of a hop of its load) within its run; other ones go to the agent.
 ``browser/README.md`` says what ``html`` and ``text`` hold and which filters
 apply.
 """
@@ -303,7 +303,7 @@ class SessionReadMixin:
     def _raise_read_blocked(
         self, target: str, mark: int, landed: str | None = None
     ) -> None:
-        """Raise ``NavigationBlockedError`` when the proxy blocked a hop of the read's load."""
+        """Raise ``NavigationBlockedError`` for a blocked record since ``mark`` on a hop's endpoint."""
         stack = self._stack
         if stack is None:
             return
@@ -369,9 +369,9 @@ class SessionReadMixin:
     async def _end_read(self, page: PageDriver) -> None:
         """Forget the read and close its page, even if cancelled.
 
-        Of the blocked records from the read's time, only the hops of its own
-        load are dropped; the rest stay for the agent, since the proxy cannot
-        tell the read page's other connections from those of the agent's tabs.
+        Blocked records from the read's run whose host and port are those of a
+        hop of its load are dropped, whichever page made them; the rest stay
+        for the agent.
         """
         started = self._read_mark
         if started is not None and started[0] is self._stack:

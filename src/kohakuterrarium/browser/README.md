@@ -141,11 +141,14 @@ How it behaves:
   registers a service worker, changes server-side state) is there for the
   agent's tabs afterwards. A read that shares nothing uses a session of its
   own, the one-shot `read_page`, or `read_page_for`.
-- Blocked hops of the read's own load are raised to the caller and left out
-  of the agent's reports. Any other request the proxy blocked while the read
-  ran stays for the agent's next result, since the proxy cannot tell which
-  page made it; blocked subresources of the read's page are reported to the
-  agent that way too.
+- Blocked requests are attributed to the read by endpoint, best effort: the
+  filtering proxy sees connection targets, not pages, so a request it blocked
+  while the read ran whose host and port are those of the read's URL, a
+  redirect hop or the landing URL is taken as the read's: raised to the caller
+  and left out of the agent's reports, even when an agent tab made it. Any
+  other request blocked meanwhile, blocked subresources of the read's page
+  included, stays for the agent's next result; requests blocked before the
+  read began are never taken.
 - Dialogs the read's page opens are dismissed at once; downloads it starts are
   cancelled and never saved. A window opened while a read runs is decided by
   its opener: one an agent tab opened (a timer firing between agent calls)

@@ -565,6 +565,40 @@ class TestNoTrace:
         assert "ads.test" not in after.text, "the read's own hop went to the agent"
         await session.close()
 
+    async def test_blocked_records_are_attributed_to_a_read_by_endpoint_and_time(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["ads.test", "tick.test"])
+        await session.snapshot()
+        await proxied_get(session, "ads.test")
+        proxy = session._stack.proxy
+        [before_read] = list(proxy._blocked)
+
+        def setup(page):
+            async def goto(url, timeout):
+                await proxied_get(session, "ads.test")
+                await proxied_get(session, "tick.test")
+                driver.browser.sink.navigation_started(page, "http://ads.test/landing")
+                await proxied_get(session, "ads.test")
+                return NavResponse("http://ads.test/landing", 403, "block_hosts")
+
+            page.handlers["goto"] = goto
+
+        driver.browser.page_setup = setup
+        with pytest.raises(NavigationBlockedError, match="it led to ads.test"):
+            await session.read_page("http://a.test/")
+        kept = list(proxy._blocked)
+        after = await session.snapshot()
+        await session.close()
+        assert [(r.host, r.port) for r in kept] == [
+            ("ads.test", 80),
+            ("tick.test", 80),
+        ], "both in-window records on the read's endpoint go with the read"
+        assert kept[0] is before_read, "a record from before the read was taken"
+        assert "Blocked 2 requests:" in after.text
+        assert after.text.count("ads.test:80 (") == 1, after.text
+        assert "tick.test:80 (" in after.text
+
     async def test_reads_and_agent_calls_never_interleave(self, tmp_path):
         log = []
         release = asyncio.Event()

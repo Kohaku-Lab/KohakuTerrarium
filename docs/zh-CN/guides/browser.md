@@ -295,7 +295,7 @@ origin 由协议、主机和可选的端口组成，例如 `https://staging.exam
 
 读取走的是和 `browser_navigate` 相同的 URL 检查、代理和网络策略，出错时抛出异常而不是返回错误文本：URL 被拒绝或重定向被拦截时抛 `NavigationBlockedError`，加载超过 `nav_timeout_s` 时抛 `BrowserTimeoutError`，加载失败或 URL 只触发下载时抛 `NavigationError`；读取期间因 sandbox 现在拒绝而被代理切断的连接也抛 `NavigationBlockedError`。它在一个 Creature 永远看不到的临时标签页里运行：不在标签页列表里，不改变当前标签页及其 ref，无论走哪条路径结束都会被关闭。它打开的对话框会被关闭（dismiss），它开始的下载会被取消，它打开的窗口会被关闭；在此期间 Creature 的某个标签页打开的窗口照常成为标签页。
 
-在 Agent 共享的会话上，读取与 Creature 的浏览**并不隔离**。临时标签页和 Creature 的标签页用同一个浏览器 profile：cookie、登录、同源存储、缓存和 service worker 都是共用的，所以读取会带上 Creature 的 cookie，而被访问的网站所做的事（设置 cookie、注册 service worker、修改它服务器上的数据）之后也会留给 Creature 的标签页。读取自身加载中被拦截的重定向会抛给调用方，不会报告给 Creature；读取期间代理拦截的其他请求会出现在 Creature 的下一个结果里，因为代理分辨不出是哪个页面发出的。需要一个与 Creature 什么都不共用的读取时，请用 `read_page_for`、一次性的 `read_page`，或你自己的会话。
+在 Agent 共享的会话上，读取与 Creature 的浏览**并不隔离**。临时标签页和 Creature 的标签页用同一个浏览器 profile：cookie、登录、同源存储、缓存和 service worker 都是共用的，所以读取会带上 Creature 的 cookie，而被访问的网站所做的事（设置 cookie、注册 service worker、修改它服务器上的数据）之后也会留给 Creature 的标签页。被拦截的请求按端点归属于读取，尽力而为：代理只看到连接去哪里，分辨不出是哪个页面发出的。读取期间被拦截、且主机和端口与读取的 URL、某个重定向跳转或最终落地页面相同的请求，会抛给调用方，不会报告给 Creature，即使它其实是 Creature 的某个标签页发出的；读取期间代理拦截的其他请求会出现在 Creature 的下一个结果里。需要一个与 Creature 什么都不共用的读取时，请用 `read_page_for`、一次性的 `read_page`，或你自己的会话。
 
 框架工具这样读取：
 

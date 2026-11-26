@@ -603,10 +603,13 @@ browsing. The temporary tab uses the same browser profile as the creature's
 tabs: cookies, logins, same-origin storage, the cache and service workers are
 common to both, so the read is sent the creature's cookies, and whatever the
 visited site does (sets a cookie, registers a service worker, changes data on
-its server) is there for the creature's tabs afterwards. A blocked redirect of
-the read's own load is raised to the caller and not reported to the creature;
-any other request the proxy blocked while the read ran shows up in the
-creature's next result, because the proxy cannot tell which page made it. For a
+its server) is there for the creature's tabs afterwards. Blocked requests are
+attributed to the read by endpoint, best effort, because the proxy sees where a
+connection goes but not which page made it: a request blocked while the read
+ran, to the host and port of the read's URL, a redirect hop or the page it
+landed on, is raised to the caller and not reported to the creature, even when
+one of the creature's tabs made it. Any other request the proxy blocked while
+the read ran shows up in the creature's next result. For a
 read that shares nothing with the creature, use `read_page_for`, the one-shot
 `read_page`, or a session of your own.
 
