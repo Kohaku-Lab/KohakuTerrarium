@@ -88,7 +88,8 @@ Six tools, split by risk class so name-based gating is meaningful.
 | `browser_eval` | script | Run JavaScript in the page, optionally against a `ref`. Returns JSON, marked untrusted. |
 
 `browser_act` action kinds: `click` (ref, or x/y; button, double, modifiers),
-`type` (ref; `text` or `secret`; `submit`; `slowly` for per-key events),
+`type` (ref; `text` or `secret`; `submit`; `slowly` for per-key events, with
+`text` only),
 `select` (ref, `values` by label), `check` (ref, `checked`), `press` (key),
 `hover` (ref, or x/y), `scroll`, `drag` (ref or x/y → `to` ref or
 `to_x`/`to_y`), `upload` (ref, indexes into `files`), `wait` (`text` /
@@ -460,7 +461,12 @@ path or wildcard); a secret without origins is a configuration error. A
 `type` action names the secret; it is typed only when the origin of the
 element's own frame document is listed (for a ref inside a frame, the
 frame's URL, not the top page's), otherwise the action fails naming the
-secret and the offending origin. The value (at least four characters) is read
+secret and the offending origin. A secret goes only into an `input` text field
+(text, password, email, search, tel, url, number) or a `textarea`, set in one
+step by a script in that element's document with `input` and `change` events
+and no key events; editable content (`contenteditable`) is refused, and a
+`type` action with both `secret` and `slowly` is refused when the batch is
+parsed, before anything runs. The value (at least four characters) is read
 from the environment at execution and redacted as `[secret:<name>]` from
 every text result, raw and URL- or JSON-encoded. Password field values are
 redacted whole; Chromium's aria snapshot carries them in plain text, so when
