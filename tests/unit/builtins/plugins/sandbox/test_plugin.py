@@ -1,8 +1,10 @@
 """Sandbox file policy: glob roots and declared tool path arguments."""
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from kohakuterrarium.builtins.plugins.sandbox import plugin as plugin_mod
@@ -628,6 +630,118 @@ class TestUnparseableNetworkDeclarations:
         assert seen == [
             "SandboxViolation[network]: pkg_url: unparseable URL (http://[::1)"
         ]
+
+
+def _recording_fetch(monkeypatch) -> list[str]:
+    """Replace ``web_fetch``'s backend chain with one recording each fetched URL."""
+    fetched: list[str] = []
+
+    async def record(self, url):
+        fetched.append(url)
+        return ToolResult(output="page", exit_code=0)
+
+    monkeypatch.setattr(WebFetchTool, "_fetch_auto", record)
+    return fetched
+
+
+class TestUrlArgumentsAreReadAsTheToolReadsThem:
+    """The host the sandbox judges is the host the URL-taking tool connects to."""
+
+    @pytest.mark.parametrize(
+        ("url", "host"),
+        [
+            ("HTTPS://ok.test/", "ok.test"),
+            ("Http://ok.test:8443/x", "ok.test"),
+            ("ok.test/a", "ok.test"),
+            ("https://OK.TEST/", "ok.test"),
+            ("https://[::1]/", "::1"),
+            ("https://[::1]:8080/", "::1"),
+            ("[::1]:8080/x", "::1"),
+        ],
+    )
+    async def test_web_fetch_connects_to_the_host_the_sandbox_judged(
+        self, paths, monkeypatch, url, host
+    ):
+        _, _, context = paths
+        fetched = _recording_fetch(monkeypatch)
+        allowed = _managed(SandboxPlugin(network_allowlist=[host]), WebFetchTool())
+        assert (await allowed({"url": url}, context=context)).output == "page"
+        assert [httpx.URL(u).host for u in fetched] == [host]
+        refused = _managed(
+            SandboxPlugin(network_allowlist=["other.test"]), WebFetchTool()
+        )
+        with pytest.raises(PluginBlockError, match=f"host '{re.escape(host)}' not"):
+            await refused({"url": url}, context=context)
+        assert len(fetched) == 1
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "HTTPS://ok.test/",
+            "  https://ok.test/  ",
+            "\x00https://ok.test/\n",
+            " ok.test/a\t",
+            "https://o\tk.test/",
+        ],
+    )
+    async def test_scheme_case_and_surrounding_whitespace_reach_the_host(
+        self, paths, url
+    ):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network_allowlist=["ok.test"])
+        assert await _gate(sandbox, _UrlTool(), {"target": url}, context) is None
+
+    @pytest.mark.parametrize(
+        "url", ["HTTPS://evil.test/", " Https://evil.test/", "\tevil.test/x"]
+    )
+    async def test_normalised_miss_names_the_real_host(self, paths, url):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network_allowlist=["ok.test"])
+        with pytest.raises(PluginBlockError, match="host 'evil.test' not allowlisted"):
+            await _gate(sandbox, _UrlTool(), {"target": url}, context)
+
+    @pytest.mark.parametrize(
+        "url", ["https://evil.test\\@ok.test/", "evil.test\\@ok.test/x"]
+    )
+    async def test_backslash_in_the_authority_is_unparseable(self, paths, url):
+        _, _, context = paths
+        execute = _managed(SandboxPlugin(network_allowlist=["ok.test"]), _UrlTool())
+        with pytest.raises(PluginBlockError, match="unparseable URL"):
+            await execute({"target": url}, context=context)
+
+    async def test_backslash_after_the_authority_is_judged_by_host(self, paths):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network_allowlist=["ok.test"])
+        args = {"target": "https://ok.test/a\\b?q=c\\d"}
+        assert await _gate(sandbox, _UrlTool(), args, context) is None
+
+    @pytest.mark.parametrize(
+        ("url", "allowed"),
+        [
+            ("https://user@ok.test/", True),
+            ("https://ok.test@evil.test/", False),
+            ("https://ok.test:443@evil.test/", False),
+            ("https://ok.test./", False),
+            ("https://münchen.de/", True),
+            ("https://MÜNCHEN.de/", True),
+            ("https://xn--mnchen-3ya.de/", False),
+        ],
+    )
+    async def test_userinfo_trailing_dot_and_idn_hosts(self, paths, url, allowed):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network_allowlist=["ok.test", "münchen.de"])
+        call = _gate(sandbox, _UrlTool(), {"target": url}, context)
+        if allowed:
+            assert await call is None
+        else:
+            with pytest.raises(PluginBlockError, match="not allowlisted"):
+                await call
+
+    async def test_without_an_allowlist_the_url_is_not_validated(self, paths):
+        _, _, context = paths
+        sandbox = SandboxPlugin()
+        for url in ("https://evil.test\\@ok.test/", "HTTPS://[::1", "  "):
+            assert await _gate(sandbox, _UrlTool(), {"target": url}, context) is None
 
 
 class TestWebToolsKeepTheirDecisions:
