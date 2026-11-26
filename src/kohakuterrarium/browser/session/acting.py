@@ -15,6 +15,7 @@ from kohakuterrarium.browser import snapshot as snap
 from kohakuterrarium.browser.actions import (
     DONE,
     FAILED,
+    SLOW_KEY_S,
     BatchReport,
     format_details,
     format_report,
@@ -34,7 +35,7 @@ from kohakuterrarium.browser.errors import (
 from kohakuterrarium.browser.observe import Observation, blocked_reason, origin_of
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.refs import RefBook
-from kohakuterrarium.browser.secrets import SecretStore
+from kohakuterrarium.browser.secrets import SecretStore, web_origin
 from kohakuterrarium.browser.proxy import EgressRecord
 from kohakuterrarium.browser.session.navigation import endpoint_of
 from kohakuterrarium.browser.session.types import (
@@ -80,9 +81,21 @@ class ActContext:
     def require_no_dialog(self) -> None:
         self._session._dialogs.require_none()
 
-    async def secret(self, name: str, ref: str) -> str:
+    async def type_secret(self, name: str, ref: str, *, slowly: bool) -> None:
         secrets = self._session._secrets
-        origin = await self._session._ref_origin(self._tab, ref)
+        value = secrets.resolve(name)
+        timeout = self.timeout + (len(value) * SLOW_KEY_S if slowly else 0.0)
+
+        def allow(url: str) -> bool:
+            return secrets.allows(name, web_origin(url))
+
+        url = await self.call(
+            lambda: self.page.type_checked(
+                ref, value, allow, slowly=slowly, timeout=timeout
+            ),
+            timeout,
+        )
+        origin = web_origin(url)
         if not secrets.allows(name, origin):
             where = (
                 f"{ref} is on {origin}"
@@ -93,7 +106,6 @@ class ActContext:
                 f"refused: secret {name} may be typed only into "
                 f"{', '.join(secrets.origins(name))}; {where}"
             )
-        return secrets.resolve(name)
 
     async def check_ref(self, ref: str) -> None:
         if self._fresh is None:

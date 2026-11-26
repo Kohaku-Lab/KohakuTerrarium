@@ -182,8 +182,11 @@ class ActionContext(Protocol):
 
     def require_no_dialog(self) -> None: ...
 
-    async def secret(self, name: str, ref: str) -> str:
-        """The value of secret ``name``; ``ActionFailedError`` unless ``ref`` is on one of its origins."""
+    async def type_secret(self, name: str, ref: str, *, slowly: bool) -> None:
+        """Type secret ``name`` into ``ref``, judged by that element's own document.
+
+        ``ActionFailedError`` unless that document is on one of the secret's origins.
+        """
         ...
 
     async def check_ref(self, ref: str) -> None:
@@ -718,11 +721,10 @@ async def execute(action: Action, ctx: ActionContext) -> str:
 
 async def _type_text(action: Action, ctx: ActionContext) -> str:
     page, t = ctx.page, ctx.timeout
+    value = action.text or ""
     if action.secret:
-        value = await ctx.secret(action.secret, action.ref)
-    else:
-        value = action.text or ""
-    if action.slowly:
+        await ctx.type_secret(action.secret, action.ref, slowly=action.slowly)
+    elif action.slowly:
         slow = t + len(value) * SLOW_KEY_S
         await ctx.call(lambda: page.fill(action.ref, "", t), t)
         await ctx.call(lambda: page.type_text(action.ref, value, slow), slow)

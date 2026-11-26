@@ -22,6 +22,7 @@ from PIL import Image
 
 from kohakuterrarium.browser.errors import DriverDisconnectedError, PageClosedError
 from kohakuterrarium.browser.launch import LaunchPlan
+from kohakuterrarium.browser.observe import frame_owners
 from kohakuterrarium.browser.protocol import (
     DOCUMENT_ID_JS,
     FRAME_DOCUMENT_ID_JS,
@@ -30,7 +31,9 @@ from kohakuterrarium.browser.protocol import (
     PageContent,
     ProbeFrames,
 )
+from kohakuterrarium.browser.refs import frame_prefix
 from kohakuterrarium.browser.settle import QUIET_JS
+from kohakuterrarium.browser.snapshot import parse as parse_snapshot
 
 _DOCS = itertools.count(1)
 _MISSING = object()
@@ -140,6 +143,7 @@ class ScriptedPage:
         self.history_back: list[str] = []
         self.closed = False
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.typed: list[tuple[str, str]] = []
         self.handlers: dict[str, Any] = {}
         self.raises: dict[str, BaseException] = {}
         self.hang: set[str] = set()
@@ -310,6 +314,27 @@ class ScriptedPage:
 
     async def type_text(self, ref: str, text: str, timeout: float) -> None:
         await self._do("type_text", ref=ref, text=text, timeout=timeout)
+
+    def document_url(self, ref: str) -> str:
+        """The URL of the document ``ref`` is in: the tab's, or its frame's from ``frame_url_map``."""
+        prefix = frame_prefix(ref)
+        if not prefix:
+            return self._url
+        owner = frame_owners(parse_snapshot(self.snapshot_text)).get(prefix)
+        return self.frame_url_map.get(owner, "") if owner else ""
+
+    async def type_checked(self, ref, text, allow, *, slowly, timeout) -> str:
+        """``text`` lands in ``typed`` when ``allow`` accepts the element's document URL.
+
+        A ``type_checked`` handler returns the URL the element is in instead.
+        """
+        result = await self._enter(
+            "type_checked", ref=ref, slowly=slowly, timeout=timeout
+        )
+        url = self.document_url(ref) if result is _MISSING else result
+        if allow(url):
+            self.typed.append((ref, text))
+        return url
 
     async def press(self, ref, key: str, timeout: float) -> None:
         await self._do("press", ref=ref, key=key, timeout=timeout)

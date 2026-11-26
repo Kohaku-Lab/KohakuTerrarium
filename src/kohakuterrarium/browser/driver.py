@@ -80,6 +80,39 @@ _CONTENT_JS = """(limit) => {
   return {html: html.slice(0, limit), text: text.slice(0, limit),
           htmlChars: html.length, textChars: text.length, passwords};
 }"""
+_PLACE_JS = """(el, [text, url]) => {
+  const doc = el.ownerDocument, view = doc.defaultView;
+  if (!el.isConnected || !view || new URL(doc.URL).origin !== new URL(url).origin) {
+    return "moved";
+  }
+  if (el.isContentEditable) {
+    el.focus();
+    const range = doc.createRange();
+    range.selectNodeContents(el);
+    view.getSelection().removeAllRanges();
+    view.getSelection().addRange(range);
+    doc.execCommand("insertText", false, text);
+    return "ok";
+  }
+  const textTypes = ["", "text", "password", "email", "search", "tel", "url", "number"];
+  let proto = null;
+  if (el instanceof view.HTMLTextAreaElement) proto = view.HTMLTextAreaElement.prototype;
+  else if (el instanceof view.HTMLInputElement && textTypes.includes(el.type)) {
+    proto = view.HTMLInputElement.prototype;
+  }
+  if (proto === null) return "not_text";
+  if (el.disabled || el.readOnly) return "not_editable";
+  el.focus();
+  Object.getOwnPropertyDescriptor(proto, "value").set.call(el, text);
+  el.dispatchEvent(new view.Event("input", {bubbles: true}));
+  el.dispatchEvent(new view.Event("change", {bubbles: true}));
+  return "ok";
+}"""
+_PLACE_FAILURES = {
+    "moved": "the element was replaced or its document changed during the call",
+    "not_text": "the element is not a text field",
+    "not_editable": "the text field is disabled or read-only",
+}
 _SCROLL_HEIGHT_JS = (
     "() => Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,"
     " document.body ? document.body.scrollHeight : 0)"
@@ -348,6 +381,46 @@ class PlaywrightPage:
         await self._run(
             lambda: self._ref(ref).press_sequentially(text, timeout=timeout * 1000)
         )
+
+    async def type_checked(
+        self,
+        ref: str,
+        text: str,
+        allow: Callable[[str], bool],
+        *,
+        slowly: bool,
+        timeout: float,
+    ) -> str:
+        """One element handle: its frame's URL is judged, then it alone is typed into.
+
+        Without ``slowly`` the value is set by one synchronous script in that
+        element's document, which re-checks the document's origin first; with
+        ``slowly`` the handle is cleared and typed into key by key.
+        """
+        ms = timeout * 1000
+
+        async def place() -> str:
+            handle = await self._ref(ref).element_handle(timeout=ms)
+            try:
+                frame = await handle.owner_frame()
+                url = frame.url if frame is not None else ""
+                if not allow(url):
+                    return url
+                if slowly:
+                    await handle.fill("", timeout=ms)
+                    await handle.type(text, timeout=ms)
+                    return url
+                outcome = await handle.evaluate(_PLACE_JS, [text, url])
+                if outcome != "ok":
+                    raise DriverError(_PLACE_FAILURES.get(outcome, "the call failed"))
+                return url
+            finally:
+                try:
+                    await handle.dispose()
+                except self._owner.api.Error:
+                    pass
+
+        return await self._run(lambda: asyncio.wait_for(place(), timeout))
 
     async def press(self, ref: str | None, key: str, timeout: float) -> None:
         if ref is None:

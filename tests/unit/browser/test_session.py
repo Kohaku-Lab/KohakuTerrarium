@@ -21,6 +21,7 @@ from kohakuterrarium.browser.errors import (
     BrowserStateLostError,
     BrowserTimeoutError,
     BrowserUnavailableError,
+    ContextDestroyedError,
     DriverDisconnectedError,
     DriverError,
     DriverTimeoutError,
@@ -897,10 +898,9 @@ class TestAct:
             ok = await session.act(
                 [{"kind": "type", "ref": "e3", "secret": "shop_pw", "submit": True}]
             )
-            assert ("fill", {"ref": "e3", "text": SECRET_VALUE, "timeout": 0.3}) in (
-                page.calls
-            )
-            page.raises["fill"] = DriverError(f"could not type {SECRET_VALUE}")
+            assert page.typed == [("e3", SECRET_VALUE)]
+            assert not [c for c in page.calls if c[0] in ("fill", "type_text")]
+            page.raises["type_checked"] = DriverError(f"could not type {SECRET_VALUE}")
             failed = await session.act(
                 [{"kind": "type", "ref": "e3", "secret": "shop_pw"}]
             )
@@ -935,9 +935,52 @@ class TestAct:
             "1. type e3: failed — refused: secret shop_pw may be typed only into "
             "http://shop.test; e3 is on http://evil.test"
         ) in result.text
+        assert page.typed == []
         assert not [c for c in page.calls if c[0] in ("fill", "type_text")]
         assert SECRET_VALUE not in result.text + json.dumps(result.meta)
         assert "frame_views" not in page.names(), "the main frame needs no round trip"
+
+    async def test_a_secret_goes_by_the_document_of_the_element_itself(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SHOP_PW", SECRET_VALUE)
+        session, driver = make(tmp_path, secrets=SHOP_SECRET)
+        try:
+            await session.snapshot()
+            page = driver.browser.page
+            page.handlers["type_checked"] = lambda **_: "http://evil.test/login"
+            result = await session.act(
+                [{"kind": "type", "ref": "e3", "secret": "shop_pw"}]
+            )
+            assert page.url == "http://shop.test/", "the tab still shows the shop"
+        finally:
+            await session.close()
+        assert page.typed == []
+        assert not [c for c in page.calls if c[0] in ("fill", "type_text")]
+        assert "e3 is on http://evil.test" in result.text and result.is_error
+
+    async def test_a_document_replaced_while_typing_a_secret_fails_the_action(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SHOP_PW", SECRET_VALUE)
+        session, driver = make(tmp_path, secrets=SHOP_SECRET)
+        try:
+            await session.snapshot()
+            page = driver.browser.page
+            page.raises["type_checked"] = ContextDestroyedError(
+                "a navigation interrupted the call"
+            )
+            result = await session.act(
+                [{"kind": "type", "ref": "e3", "secret": "shop_pw", "slowly": True}]
+            )
+        finally:
+            await session.close()
+        assert page.typed == [] and result.is_error
+        assert "1. type e3: failed — a navigation interrupted the call" in result.text
+        [call] = [c for c in page.calls if c[0] == "type_checked"]
+        assert call[1]["slowly"] is True
+        assert call[1]["timeout"] > 0.3, "typing slowly gets the longer bound"
+        assert SECRET_VALUE not in result.text
 
     async def test_a_cross_origin_frame_in_an_allowed_page_is_refused(
         self, tmp_path, monkeypatch
@@ -973,8 +1016,7 @@ class TestAct:
             "refused: secret shop_pw may be typed only into http://shop.test; "
             "f1e1 is on https://pay.test"
         ) in refused.text
-        fills = [c[1] for c in page.calls if c[0] == "fill"]
-        assert fills == [{"ref": "f2e1", "text": SECRET_VALUE, "timeout": 0.3}]
+        assert page.typed == [("f2e1", SECRET_VALUE)]
         assert "typed secret shop_pw" in typed.text and typed.meta["ok"]
         for blob in (refused.text, typed.text):
             assert SECRET_VALUE not in blob
@@ -1003,7 +1045,7 @@ class TestAct:
             "refused: secret shop_pw may be typed only into http://shop.test; "
             "the origin of the frame holding f1e1 could not be read"
         ) in result.text
-        assert not [c for c in driver.browser.page.calls if c[0] == "fill"]
+        assert driver.browser.page.typed == []
 
     async def test_typed_text_stays_out_of_reasons_and_meta(self, made):
         session, driver = made

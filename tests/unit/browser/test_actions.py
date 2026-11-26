@@ -217,9 +217,8 @@ class FakeContext:
         if self.pending:
             raise DialogPendingError("a dialog is waiting")
 
-    async def secret(self, name, ref):
-        self.events.append(("secret", name, ref))
-        return "s3cret-value"
+    async def type_secret(self, name, ref, *, slowly):
+        self.events.append(("type_secret", name, ref, slowly))
 
     async def check_ref(self, ref):
         self.events.append(("check", ref))
@@ -376,19 +375,29 @@ class TestRunBatch:
         ]
         assert ("check", "e1") in ctx.events and ("check", "e2") in ctx.events
 
-    async def test_secret_is_resolved_at_execution(self):
-        report, ctx = await run([{"kind": "type", "ref": "e1", "secret": "pw"}])
-        assert ctx.page.calls[0] == ("fill", ("e1", "s3cret-value", 1.0), {})
-        assert ctx.events[:2] == [("check", "e1"), ("secret", "pw", "e1")]
+    @pytest.mark.parametrize("slowly", [False, True])
+    async def test_a_secret_is_checked_and_typed_in_one_context_step(self, slowly):
+        report, ctx = await run(
+            [{"kind": "type", "ref": "e1", "secret": "pw", "slowly": slowly}]
+        )
+        assert ctx.page.calls == [], "the secret never goes through a plain fill"
+        assert ctx.events[:2] == [("check", "e1"), ("type_secret", "pw", "e1", slowly)]
         assert report.outcomes[0].reason == "typed secret pw"
+
+    async def test_submit_after_a_secret_presses_enter_on_the_ref(self):
+        report, ctx = await run(
+            [{"kind": "type", "ref": "e1", "secret": "pw", "submit": True}]
+        )
+        assert ctx.page.calls == [("press", ("e1", "Enter", 1.0), {})]
+        assert report.outcomes[0].reason == "typed secret pw and pressed Enter"
 
     async def test_a_refused_secret_types_nothing(self):
         ctx = FakeContext()
 
-        async def refuse(name, ref):
+        async def refuse(name, ref, *, slowly):
             raise ActionFailedError(f"refused: secret {name} may not go to {ref}")
 
-        ctx.secret = refuse
+        ctx.type_secret = refuse
         report = await run_batch(
             parse_actions([{"kind": "type", "ref": "e1", "secret": "pw"}]), ctx
         )

@@ -23,7 +23,6 @@ from kohakuterrarium.browser.errors import (
 from kohakuterrarium.browser.observe import (
     Observation,
     format_blocked_records,
-    frame_owners,
     observe,
     origin_of,
     read_document,
@@ -33,8 +32,8 @@ from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.policy import NetworkPolicy
 from kohakuterrarium.browser.protocol import FRAME_DOCUMENT_ID_JS
 from kohakuterrarium.browser.proxy import EgressRecord
-from kohakuterrarium.browser.refs import RefBook, frame_prefix
-from kohakuterrarium.browser.secrets import SecretStore, web_origin
+from kohakuterrarium.browser.refs import RefBook
+from kohakuterrarium.browser.secrets import SecretStore
 from kohakuterrarium.browser.session.types import (
     COMPACT_MAX_CHARS,
     DETAIL_MAX_CHARS,
@@ -175,29 +174,6 @@ class SessionObserveMixin:
         verdict = self._refs.judge_document(tab.id, ref, document)
         if not verdict.ok:
             raise ActionFailedError(verdict.message)
-
-    async def _ref_origin(self, tab: Tab, ref: str) -> str | None:
-        """The web origin of the document ``ref``'s element is in; ``None`` when unknown.
-
-        A main-frame ref answers from the tab's URL; a frame ref asks the
-        browser what its iframe (from the latest observation) shows now.
-        """
-        prefix = frame_prefix(ref)
-        if not prefix:
-            return web_origin(tab.page.url)
-        obs = self._last.get(tab.id)
-        owner = frame_owners(obs.raw).get(prefix) if obs is not None else None
-        if owner is None:
-            return None
-        timeout = self.options.action_timeout_s
-        views = await self._call(
-            tab,
-            lambda: tab.page.frame_views([owner], timeout),
-            timeout,
-            f"reading the frame of {ref}",
-        )
-        view = views.get(owner)
-        return web_origin(view.url) if view is not None else None
 
     async def _render(self, nodes: list[snap.Node], **options: Any) -> snap.Rendered:
         return await asyncio.to_thread(lambda: snap.render(nodes, **options))

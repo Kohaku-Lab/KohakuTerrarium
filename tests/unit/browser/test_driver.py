@@ -438,6 +438,10 @@ def site():
         "application/javascript",
     )
     server.html("/tall", "<!doctype html><div style='height:5000px'>tall</div>")
+    server.html(
+        "/fields-area",
+        "<!doctype html><title>Area</title><label>Notes <textarea></textarea></label>",
+    )
     server.html("/tallbox", TALL_BOX)
     server.file(
         "/report.csv",
@@ -690,6 +694,73 @@ async def test_a_click_refused_at_connect_reads_as_a_blocked_landing(live, site)
         "the page did not load."
     ) in result.text
     assert "Blocked 1 request" not in result.text
+
+
+CHECKED = "checked-Value-77"
+FIELD_VALUES = (
+    "Array.from(document.querySelectorAll('input,textarea'), e => e.value).join('|')"
+)
+
+
+async def field_values(page) -> str:
+    return await within(page.evaluate(FIELD_VALUES, timeout=5), "reading fields")
+
+
+@LIVE
+async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
+    text = (await live.navigate(site.url("/form"))).text
+    name = ref_of(text, "textbox", "Name")
+    page = live._tabs.active.page
+    seen = []
+    url = await page.type_checked(
+        name, CHECKED, lambda u: seen.append(u) or True, slowly=False, timeout=5
+    )
+    assert url == site.url("/form") and seen == [url]
+    assert CHECKED in await field_values(page)
+    refused = await page.type_checked(
+        name, "refused-x", lambda u: False, slowly=False, timeout=5
+    )
+    assert refused == url and "refused-x" not in await field_values(page)
+    await page.type_checked(name, "slow-Value", lambda u: True, slowly=True, timeout=5)
+    assert (await field_values(page)).startswith("slow-Value|")
+    area = ref_of(
+        (await live.navigate(site.url("/fields-area"))).text, "textbox", "Notes"
+    )
+    await page.type_checked(area, CHECKED, lambda u: True, slowly=False, timeout=5)
+    assert await field_values(page) == CHECKED
+
+
+@LIVE
+@pytest.mark.parametrize("slowly", [False, True])
+@pytest.mark.parametrize("change", ["reload", "swap"])
+async def test_a_checked_type_fails_when_its_element_changed_after_the_check(
+    live, site, monkeypatch, change, slowly
+):
+    text = (await live.navigate(site.url("/form"))).text
+    name = ref_of(text, "textbox", "Name")
+    page = live._tabs.active.page
+    raw = page._page
+    probe = await raw.query_selector("#name")
+    handle_type = type(probe)
+    await probe.dispose()
+    real = handle_type.owner_frame
+
+    async def changed_first(handle):
+        if change == "reload":
+            await raw.goto(site.url("/form"))
+        else:
+            await raw.evaluate(
+                "() => { const old = document.getElementById('name');"
+                " old.replaceWith(old.cloneNode()); }"
+            )
+        return await real(handle)
+
+    monkeypatch.setattr(handle_type, "owner_frame", changed_first)
+    with pytest.raises(DriverError):
+        await page.type_checked(name, CHECKED, lambda u: True, slowly=slowly, timeout=5)
+    monkeypatch.undo()
+    assert CHECKED not in await field_values(page)
+    assert CHECKED[:3] not in await field_values(page)
 
 
 @LIVE

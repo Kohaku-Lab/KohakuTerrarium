@@ -7,7 +7,7 @@ the session adds an outer bound. Failures are the ``Driver*`` errors from
 ``browser.errors``.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -200,6 +200,23 @@ class PageDriver(Protocol):
         self, ref: str, files: Sequence[str], timeout: float
     ) -> None:
         """Set files on a file input (or a label for one); ``NotFileInputError`` otherwise."""
+
+    async def type_checked(
+        self,
+        ref: str,
+        text: str,
+        allow: Callable[[str], bool],
+        *,
+        slowly: bool,
+        timeout: float,
+    ) -> str:
+        """Type ``text`` into ``ref`` only when ``allow`` accepts its own document's URL.
+
+        ``ref`` is resolved once; the URL judged and the element typed into
+        come from that one resolution, so an element replaced or a document
+        navigated in between fails the call instead of receiving ``text``.
+        Returns the URL judged (empty when it could not be read).
+        """
 
     async def choose_files(
         self, ref: str, files: Sequence[str], timeout: float
