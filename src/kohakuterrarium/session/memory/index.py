@@ -4,8 +4,9 @@ Events are grouped into rounds and searchable text, tool, trigger, or user block
 """
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from kohakuvault import KVault, TextVault, VectorKVault
 
@@ -23,6 +24,41 @@ from kohakuterrarium.session.store.lifecycle.version import require_writable_for
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Search calls/results are retained as recorded events, but must not crowd
+# actual evidence out of a query's top-k. Vault search only exposes ranked
+# prefixes, so progressively widen the candidate window *before* truncating.
+_MAX_RANKED_CANDIDATES = 8192
+_RankedHit = TypeVar("_RankedHit")
+
+
+def _without_search_echo(
+    retrieve: Callable[[int], list[_RankedHit]],
+    *,
+    k: int,
+    agent: str | None,
+) -> list[_RankedHit]:
+    if k <= 0:
+        return []
+    if k > _MAX_RANKED_CANDIDATES:
+        raise ValueError("Requested memory search k exceeds candidate limit")
+    limit = min(_MAX_RANKED_CANDIDATES, max(32, k * 2))
+    while True:
+        candidates = retrieve(limit)
+        visible = [
+            hit
+            for hit in candidates
+            if hit[2].get("tool_name") != "search_memory"
+            and (agent is None or hit[2].get("agent") == agent)
+        ]
+        if len(visible) >= k or len(candidates) < limit:
+            return visible[:k]
+        if limit >= _MAX_RANKED_CANDIDATES:
+            raise RuntimeError(
+                "Cannot resolve search results beyond the bounded candidate "
+                "window; narrow the query."
+            )
+        limit = min(_MAX_RANKED_CANDIDATES, limit * 2)
 
 
 @dataclass
@@ -350,7 +386,9 @@ class SessionMemory:
 
     def _search_fts(self, query: str, k: int, agent: str | None) -> list[SearchResult]:
         """FTS5 keyword search."""
-        results = self._fts.search(query, k=k * 2)  # Agent filtering may discard rows.
+        results = _without_search_echo(
+            lambda limit: self._fts.search(query, k=limit), k=k, agent=agent
+        )
         out = []
         for row_id, score, meta in results:
             if agent and meta.get("agent") != agent:
@@ -389,7 +427,9 @@ class SessionMemory:
     def _search_vector(
         self, query_vec, k: int, agent: str | None
     ) -> list[SearchResult]:
-        results = self._vec.search(query_vec, k=k * 2)
+        results = _without_search_echo(
+            lambda limit: self._vec.search(query_vec, k=limit), k=k, agent=agent
+        )
         out = []
         for _, distance, meta in results:
             if agent and meta.get("agent") != agent:

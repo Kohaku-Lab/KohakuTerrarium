@@ -151,6 +151,27 @@ class SearchMemoryTool(BaseTool):
             lines.append(content)
             lines.append("")
 
+        tool_call = next(
+            (
+                r
+                for r in results
+                if getattr(r, "anchor", "")
+                and r.block_type == "tool"
+                and r.content.startswith("[tool:")
+            ),
+            None,
+        )
+        if tool_call:
+            lines.extend(
+                (
+                    "Navigation (optional): Follow this tool call to its "
+                    "recorded output, which may not be directly searchable:",
+                    f'search_memory(anchor="{tool_call.anchor}", before=0, after=3)',
+                    "Continue from the last returned event's anchor if more "
+                    "neighboring events are needed.",
+                )
+            )
+
         return ToolResult(output="\n".join(lines), exit_code=0)
 
     @staticmethod
@@ -165,6 +186,12 @@ class SearchMemoryTool(BaseTool):
                     f"content_slice={event.start}:{event.end}/{event.total}"
                     f" next_offset={event.end if event.end < event.total else 'none'}"
                 )
+                if event.truncated and event.end < event.total:
+                    lines.append(
+                        "Continue: "
+                        f'search_memory(anchor="{event.anchor}", '
+                        f"before=0, after=0, offset={event.end})"
+                    )
             lines.append("")
         before = (
             "unknown" if window.has_before is None else str(window.has_before).lower()

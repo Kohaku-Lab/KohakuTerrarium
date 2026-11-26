@@ -45,3 +45,13 @@ returned continuation Anchors. Navigation is restricted to the selected indexed
 branch; a legacy index must first be upgraded by the operator via
 `kt memory rebuild SESSION`, after closing its writers.
 Stale, invalid and unverifiable source references return explicit errors.
+
+- Search calls and their own tool-result echoes do not take up the ranked
+  results, although their recorded events remain intact.
+- A background tool's output might be recorded after a conversational round
+  closes and not be directly searchable. When a tool-call result is found,
+  use its Anchor with `before=0, after=3` to inspect the original outcome,
+  then follow neighboring Anchors as needed. Do not infer missing source text
+  from a negative direct search.
+- For a long event whose context includes `next_offset=N`, use the **same
+  event's anchor** with `before=0, after=0, offset=N` for the next slice.
