@@ -415,14 +415,17 @@ class BasePlugin(UIOwnerMixin):
         """Called when agent shuts down."""
 
     def on_disable(self) -> None:
-        """Called once after a runtime disable took effect; ``on_unload`` is not.
+        """Notify the plugin once after a runtime disable took effect.
 
-        Release what the plugin owns while it is off (re-enabling calls
-        ``on_load`` again). Not called for a disable that changed nothing, nor
-        on unload. Synchronous (an ``async def`` hook is not run) and must
-        return promptly: the manager does not wait for cleanup started here,
-        so schedule async work yourself and await it in ``on_unload``. An
-        exception is logged and does not undo the disable.
+        A lifecycle notification, not a teardown barrier: the manager does not
+        wait for cleanup started here, and a hook call already in progress may
+        still be running. ``on_unload`` is not called on disable. Re-enabling
+        calls ``on_load`` again, possibly before that cleanup has finished, so
+        a plugin that owns resources orders its own cleanup against a later
+        ``on_load`` and awaits it in ``on_unload``. Not called for a disable
+        that changed nothing, nor on unload. Synchronous (an ``async def`` hook
+        is not run) and must return promptly. An exception is logged and does
+        not undo the disable.
         """
 
     async def pre_llm_call(self, messages: list[dict], **kwargs) -> list[dict] | None:
