@@ -863,6 +863,10 @@ class TestModulesIntegration:
                     "allowlisted (https://evil.test/a)"
                 )
             assert policy.check("evil.test", 443) == "host 'evil.test' not allowlisted"
+            unparseable = await run("net_probe", {"target": "http://[::1"})
+            assert unparseable.error == (
+                "SandboxViolation[network]: net_probe: unparseable URL (http://[::1)"
+            )
             mgr.set_plugin_options("sandbox", {"network": "deny"})
             assert policy.mode == "deny"
             assert policy.check("ok.test", 443) == "network access denied"

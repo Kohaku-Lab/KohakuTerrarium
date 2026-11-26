@@ -87,7 +87,9 @@ class MirrorTool(BaseTool):
 
 - `url_arguments`：值可以是一个 URL 或 URL 列表；没有 scheme 的值以
   `https://` 检查。每个主机都要通过白名单，`network=deny` 时拒绝呼叫。
-- `network_hosts`：每个主机以 `https://<host>/` 检查。
+  设有白名单时，无法解析出主机的值（例如 `http://[::1`）也会拒绝呼叫。
+- `network_hosts`：每个主机以 `https://<host>/` 检查；无法解析的主机同样
+  拒绝。
 - `network_access`：`network=deny` 时拒绝呼叫；逐主机的检查由工具自己
   负责（例如透过 sandbox 的 `network_policy` runtime service）。
 

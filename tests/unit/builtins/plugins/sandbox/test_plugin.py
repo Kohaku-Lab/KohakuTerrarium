@@ -27,6 +27,8 @@ from kohakuterrarium.modules.plugin.base import (
     PluginContext,
     PluginLockedError,
 )
+from kohakuterrarium.modules.plugin.manager import manager as manager_mod
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult
 from kohakuterrarium.modules.tool.function import tool as kt_tool
 
@@ -534,6 +536,90 @@ class TestDeclaredNetworkUse:
             await sandbox.pre_tool_execute(
                 {"target": "https://evil.test"}, tool_name="pkg_url", context=context
             )
+
+
+class _TwoUrlTool(_UrlTool):
+    url_arguments = ("first", "second")
+
+
+def _managed(sandbox, tool):
+    """``tool.execute`` behind a real plugin manager holding ``sandbox``."""
+    manager = PluginManager()
+    manager.register(sandbox)
+    return manager.wrap_method(
+        "pre_tool_execute",
+        "post_tool_execute",
+        tool.execute,
+        input_kwarg="args",
+        extra_kwargs={"tool_name": tool.tool_name, "tool": tool},
+    )
+
+
+class TestUnparseableNetworkDeclarations:
+    """A declared URL or host the parser rejects is a denial, not a hook failure."""
+
+    @pytest.mark.parametrize(
+        ("tool", "args", "requested"),
+        [
+            (_UrlTool(), {"target": "http://[::1"}, "http://[::1"),
+            (_UrlTool(), {"target": "https://[not-an-ip]/"}, "https://[not-an-ip]/"),
+            (
+                _UrlTool(),
+                {"target": ["https://ok.test/", "https://]/"]},
+                "https://]/",
+            ),
+            (_UrlTool(), {"target": [["x"]]}, "https://['x']"),
+            (
+                _TwoUrlTool(),
+                {"first": "https://ok.test/", "second": "http://[::1"},
+                "http://[::1",
+            ),
+        ],
+    )
+    async def test_allowlist_denies_the_call_through_the_manager(
+        self, paths, tool, args, requested
+    ):
+        _, _, context = paths
+        execute = _managed(SandboxPlugin(network_allowlist=["ok.test"]), tool)
+        with pytest.raises(PluginBlockError) as err:
+            await execute(args, context=context)
+        assert str(err.value) == (
+            f"SandboxViolation[network]: {tool.tool_name}: unparseable URL "
+            f"({requested})"
+        )
+
+    async def test_malformed_declared_host_is_denied(self, paths):
+        _, _, context = paths
+        tool = _HostTool()
+        tool.network_hosts = ("[::1",)
+        execute = _managed(SandboxPlugin(network_allowlist=["ok.test"]), tool)
+        with pytest.raises(PluginBlockError, match="unparseable URL"):
+            await execute({}, context=context)
+
+    async def test_unrestricted_network_runs_the_call_without_a_hook_failure(
+        self, paths, monkeypatch
+    ):
+        _, _, context = paths
+        seen: list[str] = []
+        monkeypatch.setattr(
+            manager_mod.logger, "warning", lambda msg, *a, **k: seen.append(msg)
+        )
+        execute = _managed(SandboxPlugin(), _UrlTool())
+        result = await execute({"target": "http://[::1"}, context=context)
+        assert result.output == "sent"
+        assert seen == [], "no pre-hook failure was logged"
+
+    async def test_audit_mode_logs_and_allows(self, paths, monkeypatch):
+        _, _, context = paths
+        seen = _record_warnings(monkeypatch)
+        sandbox = SandboxPlugin(backend="audit", network_allowlist=["ok.test"])
+        result = await _managed(sandbox, _UrlTool())(
+            {"target": "http://[::1"}, context=context
+        )
+        assert result.output == "sent"
+        assert seen == [
+            "SandboxViolation[network]: pkg_url: unparseable URL (http://[::1)"
+        ]
 
 
 class TestWebToolsKeepTheirDecisions:

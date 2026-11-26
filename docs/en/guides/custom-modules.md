@@ -114,8 +114,10 @@ class MirrorTool(BaseTool):
 
 - `url_arguments`: a value may be one URL or a list of URLs; a value
   without a scheme is checked as `https://`. Each host must pass the
-  allowlist, and `network=deny` refuses the call.
-- `network_hosts`: each host is checked as `https://<host>/`.
+  allowlist, and `network=deny` refuses the call. Under an allowlist, a
+  value whose host cannot be parsed (such as `http://[::1`) refuses it too.
+- `network_hosts`: each host is checked as `https://<host>/`, with the
+  same refusal for one that cannot be parsed.
 - `network_access`: the call is refused under `network=deny`; per-host
   checks are the tool's own job (for example through the sandbox's
   `network_policy` runtime service).

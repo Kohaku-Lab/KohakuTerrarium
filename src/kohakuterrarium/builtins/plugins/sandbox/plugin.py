@@ -437,7 +437,13 @@ class SandboxPlugin(BasePlugin):
     def _check_network(self, tool_name: str, url: str) -> None:
         if self._profile.network == "deny":
             self._violate("network", url, f"{tool_name}: {NETWORK_DENIED}")
-        host = urlparse(url).hostname or ""
+        if not self._network_allowlist:
+            return
+        try:
+            host = urlparse(url).hostname or ""
+        except ValueError:
+            self._violate("network", url, f"{tool_name}: unparseable URL")
+            return
         reason = self._allowlist_denial(host)
         if reason is not None:
             self._violate("network", url, f"{tool_name}: {reason}")
