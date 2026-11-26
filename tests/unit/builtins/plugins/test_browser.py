@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 import kohakuterrarium as kt
+from kohakuterrarium.browser import profiles as profiles_module
 from kohakuterrarium.browser import proxy as proxy_module
 from kohakuterrarium.browser.errors import BrowserClosedError
 from kohakuterrarium.browser.launch import Candidate
@@ -470,6 +471,52 @@ class TestNoOverlap:
         assert result.success and len(driver.plans) == 2
         assert seen == [0], "a second browser started on the same profile"
         assert not old.alive and driver.plans[1].profile_dir == profile
+        await plugin.on_unload()
+        assert driver.alive() == []
+
+    @pytest.mark.parametrize("change", ["options", "reenable"])
+    async def test_a_profile_is_refused_while_the_old_browser_outlives_its_kill(
+        self, tmp_path, monkeypatch, change
+    ):
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.2)
+        plugin, driver = scripted_plugin(profile_dir=str(tmp_path / "profile"))
+        manager = PluginManager()
+        manager.register(plugin)
+        await manager.load_all(plugin_context(tmp_path, manager))
+        context = tool_context(plugin, tmp_path)
+        assert (await call(plugin, "browser_snapshot", {}, context)).success
+        old = driver.browser
+        hold_close(old)
+        old.survives_kill = True
+        if change == "options":
+            plugin.set_options({"viewport": "800x600"})
+        else:
+            manager.disable("browser")
+            manager.enable("browser")
+            await manager.load_pending()
+        context = tool_context(plugin, tmp_path)
+        result = await call(plugin, "browser_snapshot", {}, context)
+        assert not result.success and "could not be confirmed" in result.error
+        assert old.killed and len(driver.plans) == 1
+        old.alive = False
+        assert (await call(plugin, "browser_snapshot", {}, context)).success
+        assert len(driver.plans) == 2 and driver.alive() == [driver.browser]
+        await manager.unload_all()
+        assert driver.alive() == []
+
+    async def test_a_throwaway_profile_starts_beside_an_old_browser_that_outlived_its_kill(
+        self, tmp_path
+    ):
+        plugin, driver = await loaded(tmp_path)
+        context = tool_context(plugin, tmp_path)
+        assert (await call(plugin, "browser_snapshot", {}, context)).success
+        old = driver.browser
+        hold_close(old)
+        old.survives_kill = True
+        plugin.set_options({"viewport": "800x600"})
+        assert (await call(plugin, "browser_snapshot", {}, context)).success
+        assert old.killed and old.alive and len(driver.plans) == 2
+        old.alive = False
         await plugin.on_unload()
         assert driver.alive() == []
 

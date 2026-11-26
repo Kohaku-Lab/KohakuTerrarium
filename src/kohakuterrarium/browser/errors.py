@@ -26,7 +26,8 @@ class BrowserError(KTError):
 
 
 class BrowserUnavailableError(BrowserError, RuntimeError):
-    """The browser cannot run here: Playwright, Chromium or the event loop is missing."""
+    """The browser cannot run here: Playwright, Chromium or the event loop is missing,
+    or its persistent profile is still held by a browser not known to have exited."""
 
 
 class BrowserLaunchError(BrowserError, RuntimeError):

@@ -538,6 +538,8 @@ class PlaywrightBrowser:
         self._context_closed = False
         self._watchers: set[asyncio.Task] = set()
         self._held = BrowserProcesses([])
+        self._closed_cleanly = False
+        self._exited = False
 
     def attach(self, sink: EventSink) -> None:
         """Start delivering events to ``sink`` and wrap the pages already open."""
@@ -657,11 +659,14 @@ class PlaywrightBrowser:
     async def close_context(self) -> None:
         self._closing = True
         await self._context.close()
+        if self._browser is None:
+            self._closed_cleanly = True
 
     async def close_browser(self) -> None:
         self._closing = True
         if self._browser is not None:
             await self._browser.close()
+            self._closed_cleanly = True
 
     async def stop(self) -> None:
         self._closing = True
@@ -675,7 +680,22 @@ class PlaywrightBrowser:
         if driver_pid is not None:
             kill_tree(driver_pid)
         _kill_driver(self._manager)
-        self._held.release()
+
+    def exited(self) -> bool:
+        """Whether every browser process is known to have ended; once true, stays true.
+
+        With processes held since launch, when none of them runs any more;
+        with none held, when Playwright's own close of the browser returned
+        (it waits for the browser process to exit).
+        """
+        if not self._exited:
+            if self._held.pids:
+                self._exited = not self._held.running()
+            else:
+                self._exited = self._closed_cleanly
+            if self._exited:
+                self._held.release()
+        return self._exited
 
     async def record_processes(self, timeout: float) -> None:
         """Hold the browser's processes for ``kill``; a failed read keeps the old hold."""

@@ -129,7 +129,8 @@ anything for a model:
 | `options`, `policy`, `secrets` | options, the network policy, secret references and redaction |
 | `proxy`, `egress` | the filtering proxy every connection goes through; navigation endpoints and refusal reasons |
 | `launch`, `protocol`, `driver` | the launch plan, the driver protocol, its Playwright implementation |
-| `processes` | ending a browser's whole process tree when it no longer answers |
+| `processes` | ending a browser's whole process tree when it no longer answers, and seeing that it ended |
+| `profiles` | one browser per persistent profile: a launch waits for the last browser on it to be known gone, or refuses |
 | `settle`, `tabs`, `tasks` | settling after a load or action, the tab registry, background futures |
 | `downloads`, `dialogs` | download saving and caps; dialog bookkeeping |
 | `session/types`, `session/sink`, `session/lifecycle` | states and limits, driver events, launch / lock / teardown / idle close |

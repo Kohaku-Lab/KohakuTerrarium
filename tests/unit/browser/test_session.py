@@ -20,6 +20,7 @@ from kohakuterrarium.browser.errors import (
     BrowserLaunchError,
     BrowserStateLostError,
     BrowserTimeoutError,
+    BrowserUnavailableError,
     DriverDisconnectedError,
     DriverError,
     DriverTimeoutError,
@@ -30,6 +31,7 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
 )
 from kohakuterrarium.browser import actions as actions_module
+from kohakuterrarium.browser import profiles as profiles_module
 from kohakuterrarium.browser.images import image_size
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.protocol import NavResponse, ProbeFrames
@@ -427,6 +429,57 @@ class TestTimeoutsAndCancellation:
         again = await session.snapshot()
         assert again.text.count("Browser state was lost") == 1
         assert driver.browser is not dead and again.text.startswith("[t2]")
+
+    @staticmethod
+    def surviving_hang(browser) -> None:
+        """Make ``browser`` hang, refuse every close stage, and outlive its kill."""
+        browser.page.hang.add("snapshot")
+        browser.unresponsive = True
+        browser.hang_stages = {"context", "browser", "playwright"}
+        browser.survives_kill = True
+
+    async def test_a_profile_is_not_reused_while_its_killed_browser_may_run(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.2)
+        profile = str(tmp_path / "profile")
+        session, driver = make(tmp_path, profile_dir=profile)
+        try:
+            await session.snapshot()
+            dead = driver.browser
+            self.surviving_hang(dead)
+            with pytest.raises(BrowserStateLostError):
+                await session.snapshot()
+            assert dead.killed and dead.alive
+            with pytest.raises(BrowserUnavailableError) as info:
+                await session.snapshot()
+            assert profile in str(info.value)
+            assert "could not be confirmed" in str(info.value)
+            assert len(driver.plans) == 1 and session.state == "new"
+            dead.alive = False
+            again = await session.snapshot()
+            assert len(driver.plans) == 2
+            assert again.text.count("Browser state was lost") == 1
+        finally:
+            await session.close()
+        assert driver.alive() == []
+
+    async def test_a_throwaway_profile_relaunches_beside_a_surviving_browser(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path)
+        try:
+            await session.snapshot()
+            dead = driver.browser
+            self.surviving_hang(dead)
+            with pytest.raises(BrowserStateLostError):
+                await session.snapshot()
+            assert (await session.snapshot()).text.count("state was lost") == 1
+            assert len(driver.plans) == 2 and dead.alive
+        finally:
+            await session.close()
+            dead.alive = False
+        assert driver.alive() == []
 
     async def test_a_timeout_on_a_browser_that_answers_keeps_the_browser(self, made):
         session, driver = made

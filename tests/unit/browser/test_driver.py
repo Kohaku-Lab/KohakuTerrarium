@@ -22,6 +22,7 @@ import pytest_asyncio
 from PIL import Image
 
 from kohakuterrarium.browser import driver as driver_module
+from kohakuterrarium.browser import profiles as profiles_module
 from kohakuterrarium.browser.driver import (
     PlaywrightBrowser,
     PlaywrightDriver,
@@ -258,12 +259,57 @@ class TestWithoutBrowser:
             release=lambda: order.append(("released", 100)),
         )
         handle.kill()
-        assert order == [
-            ("held", 100),
-            ("tree", 7000),
-            ("driver kill", 7000),
-            ("released", 100),
-        ]
+        assert order == [("held", 100), ("tree", 7000), ("driver kill", 7000)]
+
+    def test_exited_follows_the_held_processes_and_latches(self):
+        handle, _ = self.fake_browser()
+        running = [True]
+        released = []
+        handle._held = SimpleNamespace(
+            pids=[100],
+            running=lambda: running[0],
+            kill=lambda: None,
+            release=lambda: released.append(True),
+        )
+        handle.kill()
+        assert not handle.exited(), "a kill alone confirms nothing"
+        running[0] = False
+        assert handle.exited() and released == [True]
+        handle._held = SimpleNamespace(pids=[], running=lambda: True)
+        assert handle.exited(), "a confirmed exit stays confirmed"
+
+    async def test_without_held_processes_only_a_clean_close_counts(self):
+        handle, _ = self.fake_browser()
+
+        async def closed():
+            pass
+
+        async def broken():
+            raise RuntimeError("close failed")
+
+        assert not handle.exited()
+        handle.kill()
+        assert not handle.exited(), "a kill of unknown processes confirms nothing"
+        handle._browser.close = broken
+        with pytest.raises(RuntimeError):
+            await handle.close_browser()
+        assert not handle.exited()
+        handle._browser.close = closed
+        await handle.close_browser()
+        assert handle.exited()
+
+    async def test_a_persistent_context_counts_as_closed_once_it_closed(self):
+        handle, _ = self.fake_browser()
+        handle._browser = None
+
+        async def closed():
+            pass
+
+        handle._context = SimpleNamespace(close=closed)
+        await handle.close_browser()
+        assert not handle.exited(), "a persistent browser closes with its context"
+        await handle.close_context()
+        assert handle.exited()
 
     async def test_a_kill_after_a_clean_driver_stop_still_ends_the_browser(self):
         handle, _ = self.fake_browser()
@@ -1112,6 +1158,39 @@ async def crash_and_recover(live, site):
         await asyncio.sleep(0.1)
     old = [pid for pid in survivors if pid in pids]
     assert survivors == [], f"alive 15 s after close: killed {old}, fresh {survivors}"
+
+
+@LIVE
+async def test_a_persistent_profile_starts_one_browser_until_the_last_is_gone(
+    site, browser_env, downloads, tmp_path, monkeypatch
+):
+    def on(profile: str) -> Bounded:
+        options = {"allow_loopback": True, "action_timeout_s": 5}
+        return Bounded(
+            BrowserSession(
+                BrowserOptions.from_mapping({**options, "profile_dir": profile}),
+                downloads_dir=downloads,
+            )
+        )
+
+    profile = str(tmp_path / "profile")
+    first, second = on(profile), on(profile)
+    await start(first, site.url("/form"))
+    try:
+        browser = first.session._stack.browser
+        old = list(browser._held.pids)
+        assert old and not browser.exited()
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.5)
+        with pytest.raises(BrowserUnavailableError, match="could not be confirmed"):
+            await second.navigate(site.url("/form"))
+        browser.kill()
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 20.0)
+        page = await second.navigate(site.url("/form"))
+        assert "Form" in page.text and browser.exited()
+        assert set(await second.process_ids()).isdisjoint(old)
+    finally:
+        await first.close()
+        await second.close()
 
 
 @LIVE

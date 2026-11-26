@@ -278,6 +278,9 @@ class BrowserDriver(Protocol):
     def kill(self) -> None:
         """Last resort: end every process this browser started, without waiting."""
 
+    def exited(self) -> bool:
+        """Whether every process of this browser is known to have ended; never waits."""
+
 
 class Driver(Protocol):
     """Starts browsers."""

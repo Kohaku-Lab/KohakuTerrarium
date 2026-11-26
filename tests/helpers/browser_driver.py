@@ -6,7 +6,8 @@ primitive with ``page.handlers[name]`` (a callable, sync or async, called with
 the primitive's keyword arguments), make it raise with ``page.raises[name]``,
 or make it hang with ``page.hang.add(name)``; a hung call fails the way
 Playwright's do once the browser crashes or is closed. ``alive`` tells whether
-the fake browser process would still be running.
+the fake browser process would still be running; ``survives_kill`` makes a
+forced kill leave it running.
 """
 
 import asyncio
@@ -387,6 +388,7 @@ class ScriptedBrowser:
         self.connected = True
         self.dead = False
         self.killed = False
+        self.survives_kill = False
         self.unresponsive = False
         self.probes = 0
         self.stages: list[str] = []
@@ -496,9 +498,12 @@ class ScriptedBrowser:
 
     def kill(self) -> None:
         self.killed = True
-        self.alive = False
+        self.alive = self.survives_kill
         self.connected = False
         self._release(DriverDisconnectedError("the browser closed unexpectedly"))
+
+    def exited(self) -> bool:
+        return not self.alive
 
 
 class ScriptedDriver:

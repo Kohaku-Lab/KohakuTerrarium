@@ -1,4 +1,4 @@
-"""Ending a browser's process tree at once, without asking the browser.
+"""Ending a browser's process tree at once, without asking the browser, and seeing it end.
 
 Synchronous and bounded: a forced kill must work on a browser that no longer
 answers, so nothing here goes through Playwright or CDP.
@@ -17,8 +17,10 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 TASKKILL_TIMEOUT_S = 5.0
-_WIN_ACCESS = 0x0001 | 0x00100000 | 0x1000
+_WIN_SYNCHRONIZE = 0x00100000
+_WIN_ACCESS = 0x0001 | _WIN_SYNCHRONIZE | 0x1000
 _WAIT_TIMEOUT = 0x102
+_ERROR_INVALID_PARAMETER = 87
 
 
 @functools.cache
@@ -73,25 +75,32 @@ class BrowserProcesses:
     """A launched browser's process ids (root first), held so a later kill hits only them.
 
     On Windows an open handle per process stops its id being reused; on
-    Linux a pidfd names the exact process. ``kill`` ends the root's tree only
-    while the root is still the process that was held, then each held
-    process; ``release`` gives the holds back and forgets the pids, as
+    Linux a pidfd names the exact process. ``kill`` (once; later calls do
+    nothing) ends the root's tree only while the root is still the process
+    that was held, then each held process; ``running`` tells whether any may
+    still run; ``release`` gives the holds back and forgets the pids, as
     garbage collection does.
     """
 
     def __init__(self, pids: list[int]) -> None:
         self.pids = list(pids)
         self._holds = [_hold(pid) for pid in self.pids]
+        self._killed = False
         self._finalizer = weakref.finalize(self, _drop_all, list(self._holds))
 
     def kill(self) -> None:
         """End every held process that still runs, and the root's tree."""
-        if not self.pids:
+        if not self.pids or self._killed:
             return
+        self._killed = True
         if _still_running(self._holds[0], self.pids[0]):
             kill_tree(self.pids[0])
         for pid, hold in zip(self.pids, self._holds):
             _kill_held(hold, pid)
+
+    def running(self) -> bool:
+        """Whether any held process may still run; one that cannot be checked counts."""
+        return any(_may_run(hold, pid) for pid, hold in zip(self.pids, self._holds))
 
     def release(self) -> None:
         self.pids = []
@@ -127,6 +136,30 @@ def _still_running(hold: int | None, pid: int) -> bool:
         return os.getpgid(pid) == pid
     except OSError:
         return False
+
+
+def _may_run(hold: int | None, pid: int) -> bool:
+    """Whether ``pid`` may still run: exact through a hold, else by its id (which may be reused)."""
+    if sys.platform == "win32":
+        if hold is not None:
+            return _kernel32().WaitForSingleObject(hold, 0) == _WAIT_TIMEOUT
+        handle = _kernel32().OpenProcess(_WIN_SYNCHRONIZE, False, pid)
+        if not handle:
+            return ctypes.get_last_error() != _ERROR_INVALID_PARAMETER
+        try:
+            return _kernel32().WaitForSingleObject(handle, 0) == _WAIT_TIMEOUT
+        finally:
+            _kernel32().CloseHandle(handle)
+    try:
+        if hold is not None:
+            signal.pidfd_send_signal(hold, 0)
+        else:
+            os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def _kill_held(hold: int | None, pid: int) -> None:

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from kohakuterrarium.browser.profiles import ProfileClaim
 from kohakuterrarium.browser.proxy import FilteringProxy
 from kohakuterrarium.browser.protocol import BrowserDriver
 from kohakuterrarium.browser.tabs import Tab
@@ -47,7 +48,8 @@ class BrowserResult:
 class Stack:
     """The resources of one launch: its proxy and, once started, its browser.
 
-    ``bundled_only`` is whether its launch plan named the bundled Chromium alone.
+    ``bundled_only`` is whether its launch plan named the bundled Chromium
+    alone; ``claim`` is its hold on a persistent profile.
     """
 
     proxy: FilteringProxy
@@ -55,6 +57,7 @@ class Stack:
     browser: BrowserDriver | None = None
     torn_down: bool = False
     bundled_only: bool = False
+    claim: ProfileClaim | None = None
 
 
 @dataclass(eq=False)

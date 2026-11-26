@@ -25,6 +25,7 @@ from kohakuterrarium.browser.launch import plan_launch
 from kohakuterrarium.browser.observe import Observation
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.policy import ExternalCheck, NetworkPolicy
+from kohakuterrarium.browser.profiles import claim_profile, forget_if_released
 from kohakuterrarium.browser.protocol import DialogDriver, Driver, PageDriver
 from kohakuterrarium.browser.proxy import EgressRecord, FilteringProxy
 from kohakuterrarium.browser.refs import RefBook
@@ -266,7 +267,15 @@ class SessionLifecycleMixin:
             self._lost = None
 
     async def _launch(self, generation: int) -> Stack:
-        stack = Stack(self._proxy_factory(self.policy), generation)
+        claim = None
+        if self.options.profile_dir is not None:
+            claim = await claim_profile(self.options.profile_dir)
+        try:
+            stack = Stack(self._proxy_factory(self.policy), generation, claim=claim)
+        except BaseException:
+            if claim is not None:
+                claim.drop()
+            raise
         self._live_stacks.add(stack)
         plan = None
         self._expect_page += 1
@@ -280,6 +289,8 @@ class SessionLifecycleMixin:
                 self._driver.launch(plan, LaunchSink(self, generation)),
                 plan.timeout_s + CALL_MARGIN_S,
             )
+            if claim is not None:
+                claim.held_by(stack.browser)
             arrived, self._arrived = self._arrived, []
             for page in dict.fromkeys([*arrived, *stack.browser.pages()]):
                 self._admit(page, opened_by_page=False)
@@ -330,6 +341,11 @@ class SessionLifecycleMixin:
                     logger.warning("Killing the browser failed", error=str(exc))
         await self._stage(stack.proxy.close, "proxy")
         self._live_stacks.discard(stack)
+        if stack.claim is not None:
+            if browser is None:
+                stack.claim.drop()
+            else:
+                forget_if_released(stack.claim)
 
     async def _teardown_shielded(self, stack: Stack) -> None:
         """Tear ``stack`` down to the end even if the caller is cancelled; ``close`` waits for it."""

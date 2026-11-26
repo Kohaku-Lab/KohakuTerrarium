@@ -157,3 +157,60 @@ def test_release_and_an_empty_hold_are_harmless():
     held.kill()
     held.release()
     held.release()
+
+
+def test_running_follows_every_held_process_until_it_ends():
+    parent, child = spawn_tree()
+    try:
+        held = BrowserProcesses([parent.pid, child])
+        assert held.running()
+        parent.kill()
+        parent.wait(10)
+        assert held.running(), "the child still runs"
+        kill_tree(child)
+        deadline = time.monotonic() + 10
+        while held.running() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not held.running()
+        held.release()
+    finally:
+        reap(parent)
+        kill_tree(child)
+
+
+def test_a_second_kill_reaches_no_process(monkeypatch):
+    sleeper = subprocess.Popen(
+        SLEEPER, **({} if sys.platform == "win32" else {"start_new_session": True})
+    )
+    try:
+        held = BrowserProcesses([sleeper.pid])
+        held.kill()
+        sleeper.wait(10)
+        trees, singles = [], []
+        monkeypatch.setattr(processes_module, "kill_tree", trees.append)
+        monkeypatch.setattr(
+            processes_module, "_kill_held", lambda hold, pid: singles.append(pid)
+        )
+        held.kill()
+        assert trees == [] and singles == [], "a pid that may be reused was killed"
+        assert not held.running()
+        held.release()
+    finally:
+        if sleeper.poll() is None:
+            sleeper.kill()
+        sleeper.wait(10)
+
+
+def test_a_process_without_a_hold_counts_as_running_while_it_exists(monkeypatch):
+    sleeper = subprocess.Popen(SLEEPER)
+    try:
+        monkeypatch.setattr(processes_module, "_hold", lambda pid: None)
+        held = BrowserProcesses([sleeper.pid])
+        assert held.running()
+        sleeper.kill()
+        sleeper.wait(10)
+        assert not held.running()
+    finally:
+        if sleeper.poll() is None:
+            sleeper.kill()
+        sleeper.wait(10)

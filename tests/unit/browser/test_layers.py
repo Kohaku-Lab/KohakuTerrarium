@@ -25,6 +25,7 @@ RUNTIME = {
     "options",
     "policy",
     "processes",
+    "profiles",
     "protocol",
     "proxy",
     "read",
