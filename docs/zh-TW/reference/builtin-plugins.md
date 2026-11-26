@@ -1,6 +1,6 @@
 ---
 title: 內建外掛
-summary: 框架附帶的執行期外掛參考：sandbox、budget、permgate、compact.auto、browser。
+summary: 框架附帶的執行期外掛參考：sandbox、budget、repeat_guard、permgate、compact.auto、browser。
 tags:
   - reference
   - plugins
@@ -9,7 +9,7 @@ tags:
 
 # 內建外掛
 
-KohakuTerrarium 附帶下列執行期外掛。它們在框架裡沒有任何特權，用的
+KohakuTerrarium 附帶以下執行期外掛。它們在框架裡沒有任何特權，用的
 是和使用者外掛一樣的 hook。它們在 agent 啟動時被自動發現；config 用
 和其他外掛一樣的 `plugins:` 區塊來啟用。
 
@@ -20,11 +20,21 @@ KohakuTerrarium 附帶下列執行期外掛。它們在框架裡沒有任何特�
 |------|----------|-------|------|
 | [`sandbox`](#sandbox) | 1 | `pre_tool_execute`、`runtime_services`、`on_load` | 檔案 / 網路 / 子行程能力閘門。 |
 | [`budget`](#budget) | 5 | `pre_llm_call`、`post_llm_call`、`pre_tool_execute`、`pre_subagent_run`、`get_prompt_content` | 回合 / 工具呼叫 / 牆鐘預算記帳。 |
+| [`repeat_guard`](#repeat_guard) | 10 | `pre_tool_execute`、`post_tool_execute`、`on_event` | 阻擋一直以同樣方式失敗的工具呼叫。 |
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`、`on_load` | 在高 token LLM 呼叫之後觸發 context 壓縮。 |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`、`on_load` | 互動式使用者批准工具呼叫。 |
 | [`browser`](#browser) | 0 | `contribute_tools`、`runtime_services`、`pre_tool_execute`、`get_prompt_content`、`on_disable` | 由六個 `browser_*` 工具驅動的互動式 Chromium。 |
 
 `pre_*` hook 在低 priority 先跑。上面列的順序是預設註冊順序。
+
+`repeat_guard` **預設開啟**（`ui.apps`、`ui.declarative` 也是），其他外掛預設關閉。
+`repeat_guard` 不增加提示詞，也不增加工具。在 `plugins:` 中加一項即可關閉：
+
+```yaml
+plugins:
+  - name: repeat_guard
+    enabled: false
+```
 
 ## `sandbox`
 
@@ -171,6 +181,51 @@ plugins:
       turn_budget: [40, 60]
       tool_call_budget: [75, 100]
       walltime_budget: [300, 600]
+```
+
+要停止一直失敗的同一個工具呼叫，請見 [`repeat_guard`](#repeat_guard)。
+
+## `repeat_guard`
+
+阻止模型反覆發出一直失敗的同一個工具呼叫。預設開啟。
+實作：`src/kohakuterrarium/builtins/plugins/repeat_guard/plugin.py`。
+
+### Options
+
+| Option | 類型 | 預設 | 用途 |
+|--------|------|------|------|
+| `repeat_failures` | int ≥ 0 | 3 | 同一個呼叫以相同參數、相同錯誤連續失敗這麼多次後，阻擋下一次相同呼叫。`0` 表示關閉。 |
+
+### 行為
+
+- **相同呼叫**：工具名加上參數，以正規化 JSON 比較（鍵的順序不影響）。
+  忽略呼叫控制參數 `run_in_background` 與 `allow_concurrent`。
+- **失敗**：工具結果帶有錯誤或非零結束碼。只有當錯誤與輸出都和該呼叫上一次
+  失敗相同時才累加；不同的失敗會把計數重設為 1。輸出每次都不同的指令
+  （例如會印出耗時的測試）因此不會達到上限。
+- **重設**：同一呼叫成功會結束它的計數，其他呼叫不影響它。新回合開始時清空
+  全部計數：使用者訊息、頻道訊息、計時器，或任何不是背景工具 / 子 agent
+  結果的事件。不會跨使用者回合阻擋。
+- **阻擋**：達到 `repeat_failures` 次相同失敗後，下一次相同呼叫不會執行，
+  模型收到以下工具結果：
+
+  ```text
+  This exact call to image_gen failed 3 times in a row with the same arguments: <上一次錯誤的第一行>. Change the arguments or take another approach; repeating it will fail the same way.
+  ```
+
+  同一回合內之後的相同呼叫都得到同樣的結果；被阻擋的呼叫不增加計數。
+  改變任何一個參數的呼叫照常執行。
+- **範圍**：計數屬於外掛實例。每個 agent、每次子 agent 執行都有自己的實例，
+  共用同一個工具也不會互相影響。被其他外掛（`sandbox`、`budget`、`permgate`）
+  阻擋的呼叫沒有執行，不計入。計數不隨 session 保存。
+
+### 範例
+
+```yaml
+plugins:
+  - name: repeat_guard
+    options:
+      repeat_failures: 5   # 0 表示關閉；`enabled: false` 移除外掛
 ```
 
 ## `compact.auto`

@@ -6,7 +6,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::backend::Backend;
 use crate::material::{self, Material};
-use crate::navigation::{is_internal, is_openable};
+use crate::navigation::{is_backend_resource, is_internal, is_openable, RETURN_TO_APP};
 use crate::popout;
 use crate::settings::ShellSettings;
 use crate::smoke;
@@ -110,6 +110,10 @@ pub fn create(app: &App) -> tauri::Result<()> {
                 if payload.url().path() == "/__kt_desktop_boot" {
                     backend.mark_shell_loaded();
                 }
+                return;
+            }
+            if is_backend_resource(payload.url(), backend.port()) {
+                let _ = window.eval(RETURN_TO_APP);
                 return;
             }
             if let (Some(port), Some(token)) = (backend.port(), backend.token()) {

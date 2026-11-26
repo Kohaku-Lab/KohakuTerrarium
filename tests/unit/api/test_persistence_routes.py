@@ -193,6 +193,9 @@ class TestReconcileSingleFlight:
         def list(self, **kw):
             return TestReconcileSingleFlight._FakePage()
 
+        def location_counts(self):
+            return {}
+
     @staticmethod
     def _install(monkeypatch, tmp_path, calls, block=None):
         """Point the module at a fake index/dir and a recording reconcile."""

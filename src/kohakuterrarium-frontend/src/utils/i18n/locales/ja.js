@@ -434,7 +434,14 @@ export default {
   "settings.mcp.saveFailed": "MCP サーバーの保存に失敗しました",
   "settings.mcp.removeFailed": "削除に失敗しました",
   "settings.mcp.transportStdio": "stdio（サブプロセス）",
-  "settings.mcp.transportHttp": "HTTP/SSE（リモート）",
+  "settings.mcp.transportStreamableHttp": "Streamable HTTP（リモート推奨）",
+  "settings.mcp.transportSse": "SSE（レガシー）",
+  "settings.mcp.transportStdioHint":
+    "サーバーをローカルのサブプロセスとして起動します（command + args）。",
+  "settings.mcp.transportStreamableHttpHint":
+    "https://host/mcp のような URL にあるリモートサーバー向けです。現在のほとんどのサーバーはこれを使います。",
+  "settings.mcp.transportSseHint":
+    "https://host/sse のような SSE エンドポイントを持つ古いサーバー専用です。",
   "settings.account.loadFailed": "Codex 使用状況の読み込みに失敗しました",
   "settings.account.loginHint": "認証するには `kt login codex` を実行してください。",
   "settings.account.unknownPlan": "不明なプラン",

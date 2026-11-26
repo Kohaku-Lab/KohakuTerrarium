@@ -13,12 +13,15 @@ from typing import Any, Callable
 import yaml
 
 from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
+from kohakuterrarium.mcp.transports import MCP_TRANSPORT_CHOICES, parse_transport
 from kohakuterrarium.utils.config_dir import config_dir
 
 # Retain legacy display constants; live persistence resolves through
 # :func:`mcp_config_path` so configuration-directory changes remain visible.
 KT_DIR = Path.home() / ".kohakuterrarium"
 MCP_SERVERS_PATH = KT_DIR / "mcp_servers.yaml"
+
+TRANSPORT_LABEL = f"Transport ({', '.join(MCP_TRANSPORT_CHOICES)})"
 
 
 def mcp_config_path() -> Path:
@@ -78,11 +81,14 @@ def prompt_server_dict(
     """Build and validate an MCP server record through a prompt callback.
 
     ``prompt(label, default)`` supplies each raw field. Invalid JSON, field
-    shapes, names, and timeouts raise ``ValueError`` for the caller to present.
+    shapes, names, transports and timeouts raise ``ValueError`` for the caller
+    to present; an unknown transport is rejected before the remaining prompts.
     """
     existing = existing or {}
     name = prompt("Name", existing.get("name", ""))
-    transport = prompt("Transport", existing.get("transport", "stdio"))
+    transport = parse_transport(
+        prompt(TRANSPORT_LABEL, existing.get("transport") or "stdio")
+    )
     command = prompt("Command", existing.get("command", ""))
     args_raw = prompt(
         "Args JSON array",

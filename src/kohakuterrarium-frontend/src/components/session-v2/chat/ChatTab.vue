@@ -1,12 +1,12 @@
 <template>
   <div class="h-full min-h-0 flex overflow-hidden">
     <ConversationRail v-if="showRail" />
-    <div class="flex-1 min-w-0 min-h-0 relative">
+    <div ref="columnHostEl" class="flex-1 min-w-0 min-h-0 relative" :style="dockClearance" data-test="v2-chat-column-host">
       <ChatColumn :reserve-right="reserveForWidget" :strip="false" />
       <button v-if="activeChannel && !isCompact && !membersOpen" class="kt-v2-float kt-v2-edge absolute top-3 right-4 z-20 h-8 px-2.5 rounded-lg border shadow-sm flex items-center gap-1.5 text-xs text-warm-600 dark:text-warm-300 hover:text-iolite" :title="t('members.show')" data-test="channel-members-show" @click="setMembersOpen(true)"><span class="i-carbon-user-multiple" />{{ t("members.title") }}</button>
       <div v-if="!isCompact" class="absolute right-4 bottom-24 z-30 flex flex-col items-end gap-2 pointer-events-none">
         <div v-if="ctx.widget.value" class="pointer-events-auto"><WidgetFrame :id="ctx.widget.value" :key="ctx.widget.value" /></div>
-        <div class="pointer-events-auto"><Dock /></div>
+        <div ref="dockEl" class="pointer-events-auto" data-test="v2-dock-slot"><Dock /></div>
       </div>
     </div>
     <template v-if="!isCompact">
@@ -25,6 +25,7 @@ import AddDialog from "@/components/session-v2/add/AddDialog.vue"
 import ChannelMembers from "@/components/session-v2/chat/ChannelMembers.vue"
 import ChatColumn from "@/components/session-v2/chat/ChatColumn.vue"
 import ConversationRail from "@/components/session-v2/chat/ConversationRail.vue"
+import { useBottomFootprint } from "@/components/session-v2/chat/useBottomFootprint"
 import Dock from "@/components/session-v2/dock/Dock.vue"
 import WidgetFrame from "@/components/session-v2/dock/WidgetFrame.vue"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
@@ -81,6 +82,10 @@ function setMembersOpen(value) {
 const showRail = computed(() => !isCompact.value)
 // On wide screens an open widget takes its own lane, so it never covers the composer; beside a side view the column is too narrow for a lane.
 const reserveForWidget = computed(() => !!ctx.widget.value && isExpansive.value && !ctx.side.value)
+// The dock floats over the column's bottom-right; the transcript pads its tail past it.
+const columnHostEl = ref(null)
+const dockEl = ref(null)
+const dockClearance = useBottomFootprint(columnHostEl, dockEl, "--kt-dock-clearance")
 const hasArtifacts = computed(() => canvas.artifacts.length > 0)
 
 // Artifacts found in the loaded history count as seen (baseline taken a tick after

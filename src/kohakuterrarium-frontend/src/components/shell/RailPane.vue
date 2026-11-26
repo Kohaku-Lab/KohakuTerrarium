@@ -8,6 +8,7 @@
       <div class="w-6 my-1 shrink-0 border-t border-warm-300 dark:border-warm-700" />
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.rail.commandPalette')" @click="openPalette"><span class="i-carbon-search" /></button>
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md bg-iolite text-white hover:bg-iolite-shadow" :title="appMode === 'studio' ? t('studioApp.nav.new') : t('lab.new.title')" data-test="rail-strip-new" @click="onStripNew"><span class="i-carbon-add-large" /></button>
+      <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('lab.rail.projects.title')" data-test="rail-strip-projects" @click="toggleCollapsed"><span class="i-carbon-folders" /></button>
       <button v-for="item in STRIP" :key="item.id" class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :class="stripActive(item) ? 'text-iolite' : 'text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200'" :title="t(item.label)" @click="item.app ? goTo(item.app) : openShellTab(item.tab)"><span :class="item.icon" /></button>
       <span class="flex-1" />
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.quick.settings')" @click="openShellTab({ kind: 'settings', id: 'settings' })"><span class="i-carbon-settings" /></button>
@@ -35,6 +36,8 @@
           <RailNav />
 
           <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
+
+          <RailProjects />
 
           <RailGroupAttached />
 
@@ -77,6 +80,7 @@ import RailGroupAttached from "@/components/shell/RailGroupAttached.vue"
 import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import RailAppSwitch from "@/components/shell/rail/RailAppSwitch.vue"
 import RailNav from "@/components/shell/rail/RailNav.vue"
+import RailProjects from "@/components/shell/rail/RailProjects.vue"
 import { setAppMode, useAppMode } from "@/components/shell/rail/useAppMode"
 import { StudioRailNav, goStudio, useGoToApp } from "@/components/shell/rail/useOpenStudio"
 import SitePill from "@/components/cluster/SitePill.vue"

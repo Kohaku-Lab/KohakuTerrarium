@@ -208,6 +208,9 @@ function onClick(e) {
   // keep their default handling. Without an opener, a relative link the host
   // cannot resolve locally (no explicit origin) is swallowed here so it never
   // destroys the app, while the browser host keeps its normal in-app navigation.
+  // A backend file link (`/api/...`) is rendered `_blank`; a desktop shell's
+  // document link guard has already claimed it when `defaultPrevented` is set.
+  if (e.defaultPrevented) return
   const anchor = e.target.closest?.("a[href]")
   if (!anchor) return
   const href = anchor.getAttribute("href")

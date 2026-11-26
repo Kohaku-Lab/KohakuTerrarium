@@ -13,6 +13,7 @@ _BUILTIN_PLUGIN_NAMES = {
     "compact.auto",
     "goal",
     "permgate",
+    "repeat_guard",
     "sandbox",
 }
 
@@ -58,3 +59,16 @@ class TestResolvePluginSpecs:
         specs = pc.resolve_plugin_specs(["goal"])
         assert [s["name"] for s in specs] == ["goal"]
         assert specs[0]["module"] == "kohakuterrarium.builtins.plugins.goal.plugin"
+
+
+class TestDefaultOn:
+    def test_repeat_guard_is_on_by_default(self):
+        assert pc.is_default_on("repeat_guard") is True
+        assert pc.lookup_plugin("repeat_guard") == {
+            "module": "kohakuterrarium.builtins.plugins.repeat_guard.plugin",
+            "class": "RepeatGuardPlugin",
+        }
+
+    def test_policy_plugins_stay_off_by_default(self):
+        for name in ("budget", "permgate", "sandbox", "goal", "compact.auto"):
+            assert pc.is_default_on(name) is False

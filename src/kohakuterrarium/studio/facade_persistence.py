@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from kohakuterrarium.studio.persistence import (
     fork as _persistence_fork,
     history as _persistence_history,
+    projects as _projects,
     resume as _persistence_resume,
     store as _persistence_store,
 )
@@ -30,6 +31,7 @@ from kohakuterrarium.studio.persistence.viewer import (
     turns as _viewer_turns,
 )
 from kohakuterrarium.studio.sessions import handles as _session_handles
+from kohakuterrarium.studio.sessions import lifecycle as _session_lifecycle
 from kohakuterrarium.studio.sessions.summary import edit as _summary_edit
 
 if TYPE_CHECKING:
@@ -42,6 +44,7 @@ class _PersistenceNS:
     def __init__(self, studio: "Studio") -> None:
         self._studio = studio
         self.viewer = _PersistenceViewer()
+        self.projects = _PersistenceProjects(studio)
 
     def list(
         self,
@@ -54,18 +57,21 @@ class _PersistenceNS:
         status: str | None = None,
         config_type: str | None = None,
         node_id: str | None = None,
+        project: str | None = None,
     ) -> "list[dict]":
         """Return every indexed session matching the supplied filters.
 
         Listing reads only the sidecar index and deliberately does not paginate.
         ``refresh`` reconciles external changes incrementally, while
         ``full_rescan`` bypasses cached fingerprints and re-reads every session
-        file.
+        file. ``project`` keeps one project's sessions (``"none"``: sessions
+        without a folder); every row carries ``project`` (``{"id", "name"}``).
         """
         session_dir = _persistence_store._session_dir()
         index = _persistence_get_index(session_dir)
         if refresh or full_rescan:
             _persistence_reconcile(index, session_dir, full=full_rescan)
+        view, locations = _projects.session_scope(index, project)
         # The programmatic contract is unpaginated, so the shared index query is
         # widened to the current row count rather than inheriting HTTP limits.
         total = index.count() or 1
@@ -78,7 +84,9 @@ class _PersistenceNS:
             order=order,
             limit=total,
             offset=0,
+            locations=locations,
         )
+        _projects.annotate_rows(view, page.rows)
         return page.rows
 
     def stats(
@@ -157,6 +165,49 @@ class _PersistenceNS:
         record = await _summary_edit.regenerate(store)
         await _summary_edit.reindex(store)
         return record
+
+
+class _PersistenceProjects:
+    """Working-folder projects over the default session directory."""
+
+    def __init__(self, studio: "Studio") -> None:
+        self._studio = studio
+
+    def _index(self) -> Any:
+        return _persistence_get_index(_persistence_store._session_dir())
+
+    def _running(self) -> "list[tuple[str, str]]":
+        service = self._studio._service
+        out: list[tuple[str, str]] = []
+        for listing in _session_lifecycle.list_sessions(service):
+            try:
+                session = _session_lifecycle.get_session(service, listing.session_id)
+            except KeyError:
+                continue
+            out.append((listing.node_id, session.pwd))
+        return out
+
+    def list(self, *, include_hidden: bool = False) -> dict[str, Any]:
+        """``{"projects", "unassigned"}`` as ``GET /api/projects`` returns it."""
+        return _projects.list_projects(
+            self._index(), live=self._running(), include_hidden=include_hidden
+        )
+
+    def add(
+        self, path: str, *, node: str | None = None, name: str | None = None
+    ) -> dict[str, Any]:
+        return _projects.add_project(
+            self._index(), path, node=node, name=name, live=self._running()
+        )
+
+    def update(self, project_id: str, **changes: Any) -> dict[str, Any]:
+        """Change ``name`` / ``pinned`` / ``hidden``; a found project is saved."""
+        return _projects.update_project(
+            self._index(), project_id, changes, live=self._running()
+        )
+
+    def forget(self, project_id: str) -> dict[str, str]:
+        return _projects.forget_project(project_id)
 
 
 class _PersistenceViewer:

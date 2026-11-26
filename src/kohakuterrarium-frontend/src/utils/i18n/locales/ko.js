@@ -430,7 +430,13 @@ export default {
   "settings.mcp.saveFailed": "MCP 서버 저장 실패",
   "settings.mcp.removeFailed": "제거 실패",
   "settings.mcp.transportStdio": "stdio(하위 프로세스)",
-  "settings.mcp.transportHttp": "HTTP/SSE(원격)",
+  "settings.mcp.transportStreamableHttp": "Streamable HTTP(원격에 권장)",
+  "settings.mcp.transportSse": "SSE(레거시)",
+  "settings.mcp.transportStdioHint": "서버를 로컬 하위 프로세스로 실행합니다(command + args).",
+  "settings.mcp.transportStreamableHttpHint":
+    "https://host/mcp 같은 URL의 원격 서버용입니다. 현재 대부분의 서버가 이 방식을 사용합니다.",
+  "settings.mcp.transportSseHint":
+    "https://host/sse 같은 SSE 엔드포인트가 있는 오래된 서버 전용입니다.",
   "settings.account.loadFailed": "Codex 사용량을 불러오지 못했습니다",
   "settings.account.loginHint": "인증하려면 `kt login codex`를 실행하세요.",
   "settings.account.unknownPlan": "알 수 없는 요금제",

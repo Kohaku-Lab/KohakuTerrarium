@@ -2,8 +2,9 @@
 
 The embedded webview has no back button and, on some platforms, loads a new-window
 request into the app's own view. The frontend therefore hands external links to
-``open_external``; if a page still escapes, :class:`AppLinks` opens it in the
-system browser and brings the window back to the app.
+``open_external`` and shows backend files in-app; if a page still escapes,
+:class:`AppLinks` brings the window back to the app, opening a foreign page in
+the system browser first.
 """
 
 import webbrowser
@@ -15,6 +16,7 @@ logger = get_logger(__name__)
 
 OPENABLE_SCHEMES = frozenset({"http", "https", "mailto"})
 _WEB_SCHEMES = frozenset({"http", "https"})
+BACKEND_PATH_PREFIXES = ("/api/", "/ws/")
 
 
 def is_openable(url: object) -> bool:
@@ -33,6 +35,16 @@ def is_foreign(current: str | None, home: str | None) -> bool:
         return False
     scheme, _ = _origin(current)
     return scheme in _WEB_SCHEMES and _origin(current) != _origin(home)
+
+
+def is_backend_resource(current: str | None, home: str | None) -> bool:
+    """Return whether ``current`` is a backend file or endpoint on the app's origin."""
+    if not current or not home:
+        return False
+    scheme, _ = _origin(current)
+    if scheme not in _WEB_SCHEMES or _origin(current) != _origin(home):
+        return False
+    return urlsplit(current).path.startswith(BACKEND_PATH_PREFIXES)
 
 
 def open_external(url: str) -> bool:
@@ -64,6 +76,9 @@ class AppLinks:
         try:
             current = self._window.get_current_url()
         except Exception:
+            return
+        if is_backend_resource(current, self._home):
+            self._return_to_app()
             return
         if not is_foreign(current, self._home):
             return

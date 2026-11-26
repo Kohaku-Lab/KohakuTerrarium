@@ -68,6 +68,7 @@ from kohakuterrarium.studio.sessions.memory import search as _memory_search
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.llm_seam import real_llm_providers
+from kohakuterrarium.testing.mcp_http import bearer_mcp_server
 from tests.helpers.kt_biome import find_kt_biome_source
 from tests.helpers.pet_archive import pet_archive
 from tests.helpers.resume_metadata_contention import resume_with_metadata_contention
@@ -722,6 +723,77 @@ class TestApiIntegration:
         resp = client.get("/api/settings/mcp")
         assert resp.status_code == 200
         assert "servers" in resp.json()
+
+        # The Settings > MCP flow against a real token-protected
+        # streamable-HTTP server: add with ``${VAR}`` in the header, Test,
+        # switch transports through the edit dialog's PATCH, Test again.
+        mcp_token = "it-api-s3cret"
+        monkeypatch.setenv("KT_IT_API_MCP_TOKEN", mcp_token)
+        with bearer_mcp_server(mcp_token) as mcp_base:
+            mcp_url = f"{mcp_base}/mcp"
+            resp = client.post(
+                "/api/settings/mcp",
+                json={
+                    "name": "sandbox",
+                    "transport": "streamable_http",
+                    "url": mcp_url,
+                    "headers": {"Authorization": "Bearer ${KT_IT_API_MCP_TOKEN}"},
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            listed = client.get("/api/settings/mcp")
+            assert mcp_token not in listed.text
+            sandbox = next(
+                s for s in listed.json()["servers"] if s["name"] == "sandbox"
+            )
+            assert sandbox["headers"] == {
+                "Authorization": "Bearer ${KT_IT_API_MCP_TOKEN}"
+            }
+            probe = client.post("/api/settings/mcp/sandbox/test").json()
+            assert probe["ok"] is True, probe
+            assert probe["tool_count"] == 1
+
+            resp = client.patch("/api/settings/mcp/sandbox", json={"transport": "sse"})
+            assert resp.status_code == 200, resp.text
+            probe = client.post("/api/settings/mcp/sandbox/test").json()
+            assert probe["ok"] is False
+            assert probe["error"] == (
+                f"MCP server sandbox: HTTP 400 Bad Request from {mcp_url}; the server "
+                "may speak streamable HTTP: try the streamable_http transport"
+            )
+            assert probe["elapsed_ms"] < 5000
+
+            resp = client.patch(
+                "/api/settings/mcp/sandbox",
+                json={
+                    "transport": "streamable_http",
+                    "headers": {"Authorization": "Bearer wrong"},
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            probe = client.post("/api/settings/mcp/sandbox/test").json()
+            assert probe["error"] == (
+                f"MCP server sandbox: HTTP 401 Unauthorized from {mcp_url}; "
+                "check the headers/token"
+            )
+            assert probe["elapsed_ms"] < 5000
+
+            resp = client.patch(
+                "/api/settings/mcp/sandbox",
+                json={"headers": {"Authorization": "Bearer ${KT_IT_API_MCP_UNSET}"}},
+            )
+            monkeypatch.delenv("KT_IT_API_MCP_UNSET", raising=False)
+            probe = client.post("/api/settings/mcp/sandbox/test").json()
+            assert probe["error"] == (
+                "environment variable KT_IT_API_MCP_UNSET is not set "
+                "(used in headers of server sandbox)"
+            )
+            resp = client.patch(
+                "/api/settings/mcp/sandbox", json={"transport": "websocket"}
+            )
+            assert resp.status_code == 422
+            resp = client.delete("/api/settings/mcp/sandbox")
+            assert resp.status_code == 200
 
         # Drive settings endpoints (Phase H). Local target (no ``node``) resolves
         # against the host's own config home + engine.

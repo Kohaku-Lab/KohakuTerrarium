@@ -6,8 +6,10 @@ cost to one file open and one table scan instead of opening every
 ``.kohakutr`` file.
 
 Queries use FTS5 BM25 ranking. Exact-match facets such as ``status``,
-``config_type``, and ``node_id`` filter the FTS hit set without changing its
-relevance scores.
+``config_type``, ``node_id``, and ``project`` filter the FTS hit set without
+changing its relevance scores. Every row carries ``project`` (``{"id",
+"name"}`` or ``None``). The listing reads the request's session directory, so
+an L4 user sees only their own sessions.
 
 ``refresh=true`` incrementally reconciles only files whose ``(mtime, size)``
 fingerprint changed. ``full_rescan=true`` rereads every file and is intended
@@ -21,13 +23,19 @@ to preserve the session API URLs.
 """
 
 import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.auth import User, get_optional_user
+from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
 from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
+)
+from kohakuterrarium.studio.persistence.projects import (
+    annotate_rows,
+    session_scope,
 )
 from kohakuterrarium.studio.persistence.session_index import (
     aggregate_stats,
@@ -99,18 +107,23 @@ def _list_via_index(
     offset: int,
     refresh: bool,
     full_rescan: bool,
+    project: str | None = None,
+    session_dir: Path | None = None,
+    user_id: int | None = None,
 ) -> dict:
     """List indexed sessions through one synchronous executor entrypoint.
 
-    Passing ``_session_dir()`` explicitly keeps the index singleton aligned
-    with runtime or test overrides of the session directory.
+    ``session_dir`` is the request's directory; ``None`` falls back to
+    ``_session_dir()``. ``project`` and ``user_id`` select project membership
+    from that user's saved projects.
     """
     limit = max(1, min(limit, MAX_LIST_LIMIT))
     offset = max(0, offset)
-    session_dir = _session_dir()
+    session_dir = _session_dir() if session_dir is None else session_dir
     index = get_session_index_default(session_dir)
     if refresh or full_rescan:
         _reconcile_guarded(session_dir, index, full_rescan=full_rescan)
+    view, locations = session_scope(index, project, user_id=user_id)
     page = index.list(
         search=search,
         status=status,
@@ -120,8 +133,10 @@ def _list_via_index(
         order=order,
         limit=limit,
         offset=offset,
+        locations=locations,
     )
     result = page.to_dict()
+    annotate_rows(view, result.get("sessions", []))
     # Only local working directories can be checked from this host. Remote
     # workers report their own ``pwd_exists`` value when resuming.
     for row in result.get("sessions", []):
@@ -144,6 +159,9 @@ async def list_sessions(
     status: str | None = None,
     config_type: str | None = None,
     node_id: str | None = None,
+    project: str | None = None,
+    session_dir: Path = Depends(resolve_request_session_dir),
+    user: User | None = Depends(get_optional_user),
 ):
     """List indexed sessions with search, sorting, facets, and pagination.
 
@@ -152,6 +170,7 @@ async def list_sessions(
     ``sort=relevance`` uses BM25 order; other sort fields reorder the matching
     set. ``refresh`` reconciles changed fingerprints before listing, while
     ``full_rescan`` rereads every session file to account for external edits.
+    ``project`` is a project id, or ``none`` for sessions without a folder.
     """
     return await run_in_persistence_executor(
         _list_via_index,
@@ -165,6 +184,9 @@ async def list_sessions(
         offset=offset,
         refresh=refresh,
         full_rescan=full_rescan,
+        project=project,
+        session_dir=session_dir,
+        user_id=user.id if user is not None else None,
     )
 
 

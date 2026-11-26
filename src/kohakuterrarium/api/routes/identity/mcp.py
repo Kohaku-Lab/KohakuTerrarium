@@ -8,7 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api.auth import verify_admin_token
-from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
+from kohakuterrarium.errors import MCPError
+from kohakuterrarium.mcp.client import (
+    DEFAULT_MCP_CONNECT_TIMEOUT,
+    MCPClientManager,
+    MCPServerConfig,
+)
+from kohakuterrarium.mcp.diagnose import leaf_exceptions
+from kohakuterrarium.mcp.transports import MCPTransportName
 from kohakuterrarium.studio.identity.mcp.servers import (
     delete_server,
     find_server,
@@ -19,12 +26,14 @@ from kohakuterrarium.studio.identity.mcp.usage import find_creatures_using_serve
 
 router = APIRouter()
 
+_PROBE_GRACE_SECONDS = 5.0
+
 
 class MCPServerRequest(BaseModel):
     """Describe a complete MCP server registration."""
 
     name: str
-    transport: str = "stdio"
+    transport: MCPTransportName = "stdio"
     command: str = ""
     args: list[str] = []
     env: dict[str, str] = {}
@@ -40,7 +49,7 @@ class MCPServerPatch(BaseModel):
     replace their existing values in full rather than merging element-wise.
     """
 
-    transport: Literal["stdio", "http"] | None = None
+    transport: MCPTransportName | None = None
     command: str | None = None
     args: list[str] | None = None
     env: dict[str, str] | None = None
@@ -116,27 +125,35 @@ async def remove_mcp_server(name: str):
     dependencies=[Depends(verify_admin_token)],
 )
 async def test_mcp_server(name: str) -> MCPTestResult:
-    """Connect, list advertised tools, and disconnect within 20 seconds.
+    """Connect, list advertised tools, and disconnect.
 
-    Probe and optional-dependency failures are returned as ``ok=False`` results
-    rather than server errors so the caller receives diagnostic details.
+    The connect uses the server's ``connect_timeout`` (20 seconds when
+    unset). Failures are returned as ``ok=False`` with the root cause
+    rather than as server errors.
     """
     server = find_server(name)
     if server is None:
         raise HTTPException(404, f"MCP server not found: {name}")
+    limit = _probe_timeout(server) + _PROBE_GRACE_SECONDS
     start = time.monotonic()
     try:
-        result = await asyncio.wait_for(_probe_server(server), timeout=20.0)
+        result = await asyncio.wait_for(_probe_server(server), timeout=limit)
+    except MCPError as e:
+        return MCPTestResult(
+            ok=False,
+            error=str(e),
+            elapsed_ms=int((time.monotonic() - start) * 1000),
+        )
     except asyncio.TimeoutError:
         return MCPTestResult(
             ok=False,
-            error="probe timed out after 20s",
+            error=f"probe timed out after {limit:g}s",
             elapsed_ms=int((time.monotonic() - start) * 1000),
         )
     except Exception as e:
         return MCPTestResult(
             ok=False,
-            error=f"{type(e).__name__}: {e}",
+            error=_probe_error_text(e),
             elapsed_ms=int((time.monotonic() - start) * 1000),
         )
     elapsed = int((time.monotonic() - start) * 1000)
@@ -157,22 +174,11 @@ async def mcp_server_usage(name: str) -> list[CreatureRef]:
 async def _probe_server(server: dict[str, Any]) -> dict[str, Any]:
     """Connect to a registry entry and return its advertised tool count.
 
-    The client defers its optional SDK import until connection, and shutdown is
-    attempted for every outcome.
+    ``${VAR}`` markers are expanded for the connection only, and shutdown
+    is attempted for every outcome.
     """
-    # Registry entries may carry metadata that is not part of the connection
-    # schema, so only constructor-supported fields cross this boundary.
-    allowed = {
-        "name",
-        "transport",
-        "command",
-        "args",
-        "env",
-        "url",
-        "headers",
-        "connect_timeout",
-    }
-    cfg = MCPServerConfig(**{k: v for k, v in server.items() if k in allowed})
+    cfg = MCPServerConfig.from_entry(server)
+    cfg.connect_timeout = _probe_timeout(server)
     mgr = MCPClientManager()
     try:
         info = await mgr.connect(cfg)
@@ -182,3 +188,22 @@ async def _probe_server(server: dict[str, Any]) -> dict[str, Any]:
             await mgr.shutdown()
         except Exception:  # pragma: no cover - defensive
             pass
+
+
+def _probe_timeout(server: dict[str, Any]) -> float:
+    """Return the entry's positive ``connect_timeout`` or the default."""
+    try:
+        value = float(server.get("connect_timeout") or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+    return value if value > 0 else float(DEFAULT_MCP_CONNECT_TIMEOUT)
+
+
+def _probe_error_text(error: BaseException) -> str:
+    """Render a probe failure as its root cause, typed MCP errors verbatim."""
+    if isinstance(error, MCPError):
+        return str(error)
+    root = leaf_exceptions(error)[0]
+    if isinstance(root, MCPError):
+        return str(root)
+    return f"{type(root).__name__}: {root}" if str(root) else type(root).__name__

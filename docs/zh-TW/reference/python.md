@@ -72,6 +72,12 @@ kt.packages       # package install / resolve facade (subpackage)
   - `TurnError(KTError)`：輪次失敗 (provider 錯誤、工具無法復原的崩潰)。
   - `TurnTimeoutError(TurnError, TimeoutError)`：輪次超出 `timeout=` 預算並被取消。
   - `AgentNotRunningError(KTError, RuntimeError)`：操作需要已啟動的 agent。
+- MCP：
+  - `MCPError(KTError)`：MCP 伺服器條目與連線錯誤的基底類別。
+  - `MCPConfigError(MCPError, ConfigError)`：條目無效（未知 transport、未設定的 `${VAR}`）。
+  - `MCPConnectionError(MCPError, ConnectionError)`：伺服器無法連上或拒絕握手；帶有 `server`、`url`、`status`。
+  - `MCPCommandNotFoundError(MCPConnectionError, FileNotFoundError)`：stdio 伺服器的命令無法啟動。
+  - `MCPTimeoutError(MCPConnectionError, TimeoutError)`：握手沒有在 `connect_timeout` 內完成。
 - 請求形 (給 studio 層用；HTTP adapter 會對應到狀態碼)：
   `NotFoundError(KTError, KeyError)`、
   `InvalidRequestError(KTError, ValueError)`、`ConflictError(KTError)`。

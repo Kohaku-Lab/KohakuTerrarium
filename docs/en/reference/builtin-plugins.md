@@ -1,6 +1,6 @@
 ---
 title: Built-in plugins
-summary: Reference for the runtime plugins shipped with the framework. Sandbox, budget, permgate, compact.auto, ui.apps, browser.
+summary: Reference for the runtime plugins shipped with the framework. Sandbox, budget, repeat_guard, permgate, compact.auto, ui.apps, browser.
 tags:
   - reference
   - plugins
@@ -22,6 +22,7 @@ of the sandbox plugin, see
 |---|---|---|---|
 | [`sandbox`](#sandbox) | 1 | `pre_tool_execute`, `runtime_services`, `on_load` | Filesystem / network / subprocess capability gating. |
 | [`budget`](#budget) | 5 | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Turn / tool-call / walltime budget accounting. |
+| [`repeat_guard`](#repeat_guard) | 10 | `pre_tool_execute`, `post_tool_execute`, `on_event` | Blocks a tool call that keeps failing the same way. |
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`, `on_load` | Trigger eager context compaction after high-token LLM calls. |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls. |
 | [`ui.apps`](#uiapps) | 50 | `contribute_tools`, `presentation_contribution` | Adds `show_app`: model-written HTML apps in the web UI. |
@@ -31,10 +32,11 @@ of the sandbox plugin, see
 Lower priority runs earlier on `pre_*` hooks. The order above is the
 default registration order.
 
-`ui.apps` and `ui.declarative` are **on by default**; every other plugin
-starts off. Both add nothing until an attached client draws their renderer, so
-a headless creature gets no prompt or tool from them. Turn one off with an
-entry in `plugins:`:
+`repeat_guard`, `ui.apps` and `ui.declarative` are **on by default**; every
+other plugin starts off. `repeat_guard` adds no prompt text and no tool; the
+`ui.*` pair adds nothing until an attached client draws their renderer, so a
+headless creature gets no prompt or tool from them. Turn one off with an entry
+in `plugins:`:
 
 ```yaml
 plugins:
@@ -46,7 +48,7 @@ A plugin that is on only by default yields: if one of its tools has a name a
 configured tool or another plugin already uses, it is turned off with a
 warning instead of failing the build. A user's own toggle in the Plugins tab is
 saved with the session and wins on resume. KohakuTerrarium's own MCP tool
-server, which has no chat client, starts both off.
+server, which has no chat client, starts all three off.
 
 ## `sandbox`
 
@@ -274,6 +276,58 @@ plugins:
       turn_budget: [40, 60]
       tool_call_budget: [75, 100]
       walltime_budget: [300, 600]
+```
+
+To stop one tool call that keeps failing, see [`repeat_guard`](#repeat_guard).
+
+## `repeat_guard`
+
+Stops a model that repeats a tool call that keeps failing. On by default.
+Implementation: `src/kohakuterrarium/builtins/plugins/repeat_guard/plugin.py`.
+
+### Options
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `repeat_failures` | int ≥ 0 | 3 | Block a call after it failed this many times in a row with the same arguments and the same error. `0` turns the guard off. |
+
+### Behaviour
+
+- **Same call**: the tool name plus the arguments, compared as canonical JSON
+  (key order does not matter). The call-control arguments `run_in_background`
+  and `allow_concurrent` are ignored.
+- **Failure**: the tool result has an error or a non-zero exit code. A
+  failure counts toward the streak only when its error and output are the
+  same as the previous failure of that call; a different failure starts the
+  streak again at 1. A command whose output changes between runs (a test run
+  that prints its duration) therefore never reaches the limit.
+- **Reset**: a success of the same call ends its streak. Other calls do not
+  touch it. Every streak ends when a new turn opens: a user message, a channel
+  message, a timer or any other event that is not a background tool or
+  sub-agent result. The guard never blocks across user turns.
+- **Block**: after `repeat_failures` identical failures, the next identical
+  call does not run. The model gets this tool result instead:
+
+  ```text
+  This exact call to image_gen failed 3 times in a row with the same arguments: <first line of the last error>. Change the arguments or take another approach; repeating it will fail the same way.
+  ```
+
+  Each further identical call in the same turn gets the same result; blocked
+  calls do not add to the count. A call with any changed argument runs
+  normally.
+- **Scope**: the streaks belong to the plugin instance. Every agent and every
+  sub-agent run has its own instance, so one agent's failures never block
+  another agent that shares the same tool. A call that another plugin blocks
+  (`sandbox`, `budget`, `permgate`) never runs, so it is not counted. Streaks
+  are not saved with the session.
+
+### Example
+
+```yaml
+plugins:
+  - name: repeat_guard
+    options:
+      repeat_failures: 5   # 0 turns it off; `enabled: false` removes it
 ```
 
 ## `compact.auto`

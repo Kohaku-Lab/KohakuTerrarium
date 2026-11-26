@@ -1,10 +1,17 @@
 """Identity MCP — PATCH / /test / /usage routes."""
 
+import sys
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.identity import mcp as mcp_mod
+from kohakuterrarium.errors import MCPConnectionError, MCPTimeoutError
+from kohakuterrarium.mcp.client import MCPClientManager, MCPServerInfo
+
+if sys.version_info < (3, 11):  # pragma: no cover - CI runs 3.12+
+    from exceptiongroup import ExceptionGroup
 
 
 @pytest.fixture
@@ -64,6 +71,35 @@ class TestPatch:
         }
         assert stored["fs"]["headers"] == {}
 
+    def test_every_transport_choice_is_accepted_on_create_and_update(self, client):
+        for transport in ("stdio", "streamable_http", "sse", "http"):
+            created = client.post(
+                "/api/settings/mcp",
+                json={"name": f"n-{transport}", "transport": transport, "url": "u"},
+            )
+            assert created.status_code == 200, (transport, created.text)
+            patched = client.patch(
+                "/api/settings/mcp/fs", json={"transport": transport, "url": "u"}
+            )
+            assert patched.status_code == 200, (transport, patched.text)
+            assert patched.json()["server"]["transport"] == transport
+        stored = {
+            s["name"]: s["transport"]
+            for s in client.get("/api/settings/mcp").json()["servers"]
+        }
+        assert stored["n-streamable_http"] == "streamable_http"
+        assert stored["fs"] == "http"
+
+    def test_unknown_transport_is_rejected_on_create_and_update(self, client):
+        created = client.post(
+            "/api/settings/mcp", json={"name": "bad", "transport": "websocket"}
+        )
+        assert created.status_code == 422
+        patched = client.patch("/api/settings/mcp/fs", json={"transport": "websocket"})
+        assert patched.status_code == 422
+        names = [s["name"] for s in client.get("/api/settings/mcp").json()["servers"]]
+        assert "bad" not in names
+
     def test_patch_name_immutable(self, client):
         resp = client.patch(
             "/api/settings/mcp/fs",
@@ -99,6 +135,101 @@ class TestTest:
         assert body["ok"] is False
         assert "simulated" in body["error"]
         assert body["elapsed_ms"] is not None
+
+    def test_typed_mcp_error_is_shown_as_is(self, client, monkeypatch):
+        async def _refused(self, config):
+            raise MCPConnectionError(
+                "MCP server fs: HTTP 401 Unauthorized from http://h/mcp; "
+                "check the headers/token"
+            )
+
+        monkeypatch.setattr(MCPClientManager, "connect", _refused)
+        body = client.post("/api/settings/mcp/fs/test").json()
+        assert body["ok"] is False
+        assert body["error"] == (
+            "MCP server fs: HTTP 401 Unauthorized from http://h/mcp; "
+            "check the headers/token"
+        )
+
+    def test_exception_group_is_unwrapped_to_its_cause(self, client, monkeypatch):
+        async def _grouped(server):
+            raise ExceptionGroup(
+                "unhandled errors in a TaskGroup", [OSError("socket gone")]
+            )
+
+        monkeypatch.setattr(mcp_mod, "_probe_server", _grouped)
+        body = client.post("/api/settings/mcp/fs/test").json()
+        assert body["ok"] is False
+        assert body["error"] == "OSError: socket gone"
+
+    def test_probe_applies_the_default_connect_timeout(self, client, monkeypatch):
+        seen = []
+
+        async def _capture(self, config):
+            seen.append(config.connect_timeout)
+            raise MCPTimeoutError("MCP server fs: timed out after 20s")
+
+        monkeypatch.setattr(MCPClientManager, "connect", _capture)
+        body = client.post("/api/settings/mcp/fs/test").json()
+        assert seen == [20.0]
+        assert body["error"] == "MCP server fs: timed out after 20s"
+
+        client.patch("/api/settings/mcp/fs", json={"connect_timeout": 3})
+        client.post("/api/settings/mcp/fs/test")
+        assert seen[-1] == 3
+
+    def test_probe_expands_env_vars_but_the_registry_keeps_them_raw(
+        self, client, monkeypatch
+    ):
+        monkeypatch.setenv("KT_UT_SANDBOX_TOKEN", "s3cret")
+        client.post(
+            "/api/settings/mcp",
+            json={
+                "name": "sandbox",
+                "transport": "streamable_http",
+                "url": "http://h/mcp",
+                "headers": {"Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"},
+            },
+        )
+        seen = []
+
+        async def _capture(self, config):
+            seen.append(config.headers)
+            return MCPServerInfo(config=config, status="connected")
+
+        monkeypatch.setattr(MCPClientManager, "connect", _capture)
+        body = client.post("/api/settings/mcp/sandbox/test").json()
+        assert body["ok"] is True
+        assert seen == [{"Authorization": "Bearer s3cret"}]
+        listed = client.get("/api/settings/mcp").json()["servers"]
+        stored = next(s for s in listed if s["name"] == "sandbox")
+        assert stored["headers"] == {"Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"}
+        assert "s3cret" not in client.get("/api/settings/mcp").text
+
+    def test_probe_with_unset_env_var_reports_it(self, client, monkeypatch):
+        monkeypatch.delenv("KT_UT_SANDBOX_TOKEN", raising=False)
+        client.post(
+            "/api/settings/mcp",
+            json={
+                "name": "sandbox",
+                "transport": "streamable_http",
+                "url": "http://h/mcp",
+                "headers": {"Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"},
+            },
+        )
+        connects = []
+
+        async def _capture(self, config):
+            connects.append(config)
+
+        monkeypatch.setattr(MCPClientManager, "connect", _capture)
+        body = client.post("/api/settings/mcp/sandbox/test").json()
+        assert body["ok"] is False
+        assert body["error"] == (
+            "environment variable KT_UT_SANDBOX_TOKEN is not set "
+            "(used in headers of server sandbox)"
+        )
+        assert connects == []
 
     def test_test_success_path(self, client, monkeypatch):
         async def _fake(server):
