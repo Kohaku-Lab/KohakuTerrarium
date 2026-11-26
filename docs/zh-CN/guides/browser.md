@@ -210,7 +210,7 @@ plugins:
 
 - **`network: deny`**：任何浏览器工具都不会运行，sandbox 在调用到达浏览器之前就会拒绝。
 - **`network_allowlist`**：`browser_navigate` 和 `browser_tabs` 的 URL 参数要过它的检查，代理打开的每一个连接（包括子资源）也一样。allowlist 只写主机名（不带端口），它叠加在浏览器自己的 `allow_hosts` 之上，一个主机必须两边都通过。
-- **`os_enforce: require`**：浏览器拒绝启动（已在运行的也会被关闭），因为 Chromium 无法在 sandbox 的子进程隔离下运行。浏览器被视为网络工具，所以 `syscall` 级别不会拦它。
+- **`os_enforce: require`**：浏览器拒绝启动，因为 Chromium 无法在 sandbox 的子进程隔离下运行。该设置生效时已在运行的浏览器，会在下一次浏览器调用（或下一次框架读取，见下文）时被关闭；在此之前它继续运行，它的连接仍按网络规则照常判断（每 2 秒一次的重新判断不看 `os_enforce`）。浏览器被视为网络工具，所以 `syscall` 级别不会拦它。
 - **文件路径**：`browser_act` 的 `files`（读取）和 `browser_screenshot` 的 `path`（写入）与其他文件工具一样经过路径检查。
 - **下载** 在创建任何文件之前，先按文件写入规则（`fs_write`、`fs_deny`）检查；被拒绝的下载会被取消，并报告为被拒绝。
 - **`backend: audit`** 只记录本来会拒绝的操作，然后放行。

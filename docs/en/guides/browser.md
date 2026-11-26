@@ -379,10 +379,13 @@ and with its current options. No tool call is needed for a change to apply.
   `browser_tabs` are checked against it, and so is every connection the proxy
   opens, subresources included. The allowlist names hosts only (no ports). It
   applies on top of the browser's own `allow_hosts`; a host must pass both.
-- **`os_enforce: require`**: the browser refuses to start (and closes a running
-  one), because Chromium cannot run under the sandbox's subprocess
-  confinement. The browser is treated as a network tool, so the `syscall`
-  level does not block it.
+- **`os_enforce: require`**: the browser refuses to start, because Chromium
+  cannot run under the sandbox's subprocess confinement. A browser already
+  running when the setting takes effect is closed at the next browser call
+  (or the next framework read, see below); until then it keeps running, and its
+  connections are judged by the network rules as before (the 2-second re-judge
+  does not look at `os_enforce`). The browser is treated as a network tool, so
+  the `syscall` level does not block it.
 - **File paths**: `files` in `browser_act` (read) and `path` in
   `browser_screenshot` (write) go through the same path checks as other file
   tools.

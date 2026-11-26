@@ -321,8 +321,10 @@ link-local 位址就算列在 `allow_hosts` 裡也會被拒絕；沒有任何 op
 - **`network_allowlist`**：`browser_navigate` 與 `browser_tabs` 的 URL 參數會拿來
   比對，代理開出的每條連線（含子資源）也一樣。這份清單只寫主機名稱（沒有連接埠），
   並疊加在瀏覽器自己的 `allow_hosts` 之上；主機必須兩邊都通過。
-- **`os_enforce: require`**：瀏覽器會拒絕啟動（已在跑的也會關閉），因為 Chromium
-  無法在 sandbox 的子行程隔離下執行。瀏覽器被當成網路工具看待，所以 `syscall`
+- **`os_enforce: require`**：瀏覽器會拒絕啟動，因為 Chromium 無法在 sandbox 的
+  子行程隔離下執行。這個設定生效時已在跑的瀏覽器，會在下一次瀏覽器呼叫（或下一次
+  框架讀取，見下文）時關閉；在那之前它繼續執行，它的連線仍照網路規則判斷（每 2 秒
+  一次的重新判斷不看 `os_enforce`）。瀏覽器被當成網路工具看待，所以 `syscall`
   等級不會擋它。
 - **檔案路徑**：`browser_act` 的 `files`（讀取）與 `browser_screenshot` 的
   `path`（寫入）會經過和其他檔案工具相同的路徑檢查。
