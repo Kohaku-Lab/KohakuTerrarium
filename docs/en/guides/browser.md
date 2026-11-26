@@ -69,7 +69,10 @@ running session: `/plugin enable browser` from the chat, or the Plugins tab in
 the web UI, which can also edit its options. Changed options take effect
 on the next browser call: the current browser closes, and a new one starts with
 the new options once the old one has finished closing (two browsers never run
-on the same profile at once).
+on the same profile at once; see
+[What the browser keeps](#what-the-browser-keeps-and-when-it-starts-over)).
+Options changed while the plugin is disabled are kept and apply once it is
+enabled again; no browser starts in between.
 
 Disabling the plugin starts closing the browser at once. The tools disappear
 from the creature, and enabling the plugin again starts a fresh browser on the
@@ -245,6 +248,16 @@ or on `close_browser`; a browser that stops answering is killed together with
 every process it started. The next call starts a fresh one and says that state
 was lost. A fresh browser has a throwaway profile unless `profile_dir` is set,
 so logins do not survive a restart.
+
+With `profile_dir`, a browser starts only once every browser that ran on that
+profile in this process is known to have exited: the processes it was started
+with have ended, or its own close finished. A killed browser usually ends
+within moments. When it cannot be confirmed gone within 5 seconds, the call
+fails with an error naming the profile instead of starting a second browser on
+it (two Chromium processes on one profile corrupt it), and a later call tries
+again. This covers a restart inside the session, an options change and
+disabling then enabling the plugin. It knows only browsers this process
+started. A throwaway profile does not wait.
 
 When the creature stops, or the plugin is unloaded or disabled, the browser
 closes for good. A call that reaches a closed browser fails; it never starts a
@@ -636,6 +649,10 @@ kt run examples/agent-apps/web_tester --llm <your preset>
   instead; it brings all six tools.
 - **"the browser session is closed".** The creature stopped or the plugin was
   disabled. Enable the plugin again; the next call starts a fresh browser.
+- **"the browser profile … is in use by a browser that could not be confirmed
+  to have exited".** A browser on that `profile_dir` was killed and its
+  processes have not ended yet. Try again shortly; if it keeps failing, end the
+  Chromium processes still using that profile directory.
 
 ## See also
 

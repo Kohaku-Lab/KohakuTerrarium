@@ -46,7 +46,7 @@ plugins:
 
 ### 运行时
 
-每个 Creature 都能发现这个插件，所以可以在运行中的会话里打开它：在聊天里输入 `/plugin enable browser`，或者使用网页 UI 的 Plugins 标签页，那里也能编辑它的 options。修改后的 options 从下一次浏览器调用开始生效：当前浏览器关闭，等旧浏览器关闭完成后，再用新 options 启动一个新的（同一个 profile 上绝不会同时跑两个浏览器）。
+每个 Creature 都能发现这个插件，所以可以在运行中的会话里打开它：在聊天里输入 `/plugin enable browser`，或者使用网页 UI 的 Plugins 标签页，那里也能编辑它的 options。修改后的 options 从下一次浏览器调用开始生效：当前浏览器关闭，等旧浏览器关闭完成后，再用新 options 启动一个新的（同一个 profile 上绝不会同时跑两个浏览器，见下文“浏览器保留什么，何时重来”）。插件停用期间修改的 options 会被保留，等重新启用后才生效；在此之间不会启动任何浏览器。
 
 停用插件会立即开始关闭浏览器，工具也会从 Creature 上消失；重新启用后，下一次调用会在旧浏览器关闭之后启动一个全新的浏览器（标签页、cookie、登录都不会保留）。
 
@@ -131,6 +131,8 @@ ref 只对模型最后一次看到的页面有效。每次批量操作前，会�
 ### 浏览器保留什么，何时重来
 
 浏览器在第一次浏览器调用时启动（`action` 为 `list` 的 `browser_tabs` 不会启动它）。闲置超过 `idle_close_s`、崩溃，或执行 `close_browser` 时，它会关闭；不再响应的浏览器会连同它启动的所有进程一起被强制结束。下一次调用会启动一个新的，并说明状态已丢失。除非设置了 `profile_dir`，新浏览器用的都是一次性 profile，所以登录状态不会跨重启保留。
+
+设置了 `profile_dir` 时，只有当本进程中曾在这个 profile 上运行的每个浏览器都已确认退出（它启动时的那些进程都已结束，或它自己的关闭流程已完成），才会启动新浏览器。被强制结束的浏览器通常很快就会退出。如果 5 秒内无法确认它已退出，这次调用会失败，并给出指明该 profile 的错误，而不是在上面再启动第二个浏览器（同一个 profile 上的两个 Chromium 进程会损坏它）；之后的调用会再试一次。这适用于会话内的重启、修改 options，以及停用后再启用插件。它只了解本进程启动的浏览器。一次性 profile 不需要等待。
 
 Creature 停止、插件被卸载或停用时，浏览器永久关闭。之后的调用会直接失败，绝不会在背后悄悄再启动一个。
 
@@ -334,6 +336,7 @@ kt run examples/agent-apps/web_tester --llm <你的预设>
 - **"ref eN is no longer on the page" / "now points at a different element"。** 页面在模型上次看过之后变了。重新快照，用新的 ref。
 - **"the browser tools need the browser plugin"。** 有某个 `browser_*` 工具被写在 `tools:` 下，却没有启用插件。改为启用 `browser` 插件，它会带上全部六个工具。
 - **"the browser session is closed"。** Creature 已停止，或插件被停用。重新启用插件，下一次调用会启动一个全新的浏览器。
+- **"the browser profile … is in use by a browser that could not be confirmed to have exited"。** 使用该 `profile_dir` 的浏览器被强制结束了，但它的进程还没有退出。稍后再试；如果一直失败，请结束仍在使用该 profile 目录的 Chromium 进程。
 
 ## 延伸阅读
 
