@@ -1,10 +1,12 @@
 """Unit tests for ``studio.persistence.projects.ops`` over a real index."""
 
 import json
+import os
 
 import pytest
 
 from kohakuterrarium.errors import InvalidRequestError, NotFoundError, ProjectsFileError
+from kohakuterrarium.studio.persistence.projects import paths as paths_mod
 from kohakuterrarium.studio.persistence.projects.ops import (
     add_project,
     annotate_rows,
@@ -23,6 +25,12 @@ from kohakuterrarium.studio.persistence.session_index.entry import (
     SessionIndexEntry,
 )
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
+
+
+@pytest.fixture(autouse=True)
+def host_local_paths(monkeypatch):
+    """Local folders here are real temp folders, so they follow this host's rules."""
+    monkeypatch.setattr(paths_mod, "LOCAL_WINDOWS", os.name == "nt")
 
 
 @pytest.fixture
