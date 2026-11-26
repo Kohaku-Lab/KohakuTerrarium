@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -236,6 +237,41 @@ def test_a_process_without_a_hold_counts_as_running_while_it_exists(monkeypatch)
         sleeper.wait(10)
         assert not held.running()
     finally:
+        if sleeper.poll() is None:
+            sleeper.kill()
+        sleeper.wait(10)
+
+
+def test_a_release_while_a_kill_runs_keeps_the_holds_until_the_kill_ends(monkeypatch):
+    sleeper = subprocess.Popen(
+        SLEEPER, **({} if sys.platform == "win32" else {"start_new_session": True})
+    )
+    entered, proceed = threading.Event(), threading.Event()
+    real = processes_module.kill_tree
+
+    def slow(pid: int) -> None:
+        entered.set()
+        proceed.wait(10)
+        real(pid)
+
+    monkeypatch.setattr(processes_module, "kill_tree", slow)
+    try:
+        held = BrowserProcesses([sleeper.pid])
+        killer = threading.Thread(target=held.kill)
+        killer.start()
+        assert entered.wait(10)
+        held.release()
+        assert held.pids == [] and not held.running()
+        assert (
+            held._finalizer.alive
+        ), "the holds were given back while the kill used them"
+        proceed.set()
+        killer.join(10)
+        assert not killer.is_alive()
+        assert not held._finalizer.alive, "the holds were kept after the kill ended"
+        assert sleeper.wait(10) == KILLED
+    finally:
+        proceed.set()
         if sleeper.poll() is None:
             sleeper.kill()
         sleeper.wait(10)

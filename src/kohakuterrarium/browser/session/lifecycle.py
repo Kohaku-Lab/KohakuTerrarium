@@ -26,7 +26,12 @@ from kohakuterrarium.browser.observe import Observation
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.policy import ExternalCheck, NetworkPolicy
 from kohakuterrarium.browser.profiles import claim_profile, forget_if_released
-from kohakuterrarium.browser.protocol import DialogDriver, Driver, PageDriver
+from kohakuterrarium.browser.protocol import (
+    BrowserDriver,
+    DialogDriver,
+    Driver,
+    PageDriver,
+)
 from kohakuterrarium.browser.proxy import EgressRecord, FilteringProxy
 from kohakuterrarium.browser.refs import RefBook
 from kohakuterrarium.browser.session.sink import LaunchSink
@@ -95,6 +100,7 @@ class SessionLifecycleMixin:
         self._live_stacks: set[Stack] = set()
         self._cleanup_task: asyncio.Task | None = None
         self._teardowns: set[asyncio.Task] = set()
+        self._kills: set[asyncio.Future] = set()
         self._background: set[asyncio.Task] = set()
         self._expect_page = 0
         self._late_opens = 0
@@ -202,11 +208,8 @@ class SessionLifecycleMixin:
         if self._stack is not stack or self._state == CLOSED:
             return
         logger.warning("The browser stopped responding; killing it")
-        try:
-            stack.browser.kill()
-        except Exception as exc:
-            logger.warning("Killing the browser failed", error=str(exc))
         self._mark_lost(LOST_HUNG)
+        await self._kill(stack.browser)
 
     def _operation_error(self, exc: Exception, op: Op) -> Exception:
         """The error an operation raises for ``exc``, redacted when it is a browser error."""
@@ -335,10 +338,7 @@ class SessionLifecycleMixin:
             clean = await self._stage(browser.close_browser, "browser") and clean
             clean = await self._stage(browser.stop, "playwright") and clean
             if not clean:
-                try:
-                    browser.kill()
-                except Exception as exc:
-                    logger.warning("Killing the browser failed", error=str(exc))
+                await self._kill(browser)
         await self._stage(stack.proxy.close, "proxy")
         self._live_stacks.discard(stack)
         if stack.claim is not None:
@@ -435,12 +435,29 @@ class SessionLifecycleMixin:
 
     def _kill_live_stacks(self) -> None:
         for stack in list(self._live_stacks):
-            if stack.browser is None:
-                continue
-            try:
-                stack.browser.kill()
-            except Exception as exc:
-                logger.warning("Killing the browser failed", error=str(exc))
+            if stack.browser is not None:
+                self._start_kill(stack.browser)
+
+    def _start_kill(self, browser: BrowserDriver) -> asyncio.Future:
+        """Start killing ``browser``, kept until it ends; a failure is logged."""
+        try:
+            killing = asyncio.ensure_future(browser.kill())
+        except Exception as exc:
+            logger.warning("Killing the browser failed", error=str(exc))
+            killing = asyncio.get_running_loop().create_future()
+            killing.set_result(None)
+        self._kills.add(killing)
+        killing.add_done_callback(self._kill_ended)
+        return killing
+
+    def _kill_ended(self, killing: asyncio.Future) -> None:
+        self._kills.discard(killing)
+        if not killing.cancelled() and killing.exception() is not None:
+            logger.warning("Killing the browser failed", error=str(killing.exception()))
+
+    async def _kill(self, browser: BrowserDriver) -> None:
+        """Kill ``browser`` and wait for the end; cancelling the wait leaves the kill running."""
+        await asyncio.wait({self._start_kill(browser)})
 
     async def _close(self) -> None:
         self._cancel_idle()

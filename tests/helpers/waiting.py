@@ -63,3 +63,33 @@ def wait_until_sync(
         if time.monotonic() >= deadline:
             raise AssertionError(f"timed out after {timeout}s waiting for {what}")
         time.sleep(interval)
+
+
+class LoopProbe:
+    """A task that ticks every ``interval`` seconds; ``longest_gap`` is its worst stall.
+
+    A blocked event loop shows as a gap far above ``interval``.
+    """
+
+    def __init__(self, interval: float = 0.01) -> None:
+        self.interval = interval
+        self.longest_gap = 0.0
+        self._task: asyncio.Task | None = None
+
+    async def _tick(self) -> None:
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(self.interval)
+            now = time.monotonic()
+            self.longest_gap = max(self.longest_gap, now - last)
+            last = now
+
+    async def __aenter__(self) -> "LoopProbe":
+        self._task = asyncio.create_task(self._tick())
+        await asyncio.sleep(0)
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> None:
+        await asyncio.sleep(self.interval * 3)
+        self._task.cancel()
+        await asyncio.wait({self._task})

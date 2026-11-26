@@ -1,16 +1,21 @@
 """Ending a browser's process tree at once, without asking the browser, and seeing it end.
 
-Synchronous and bounded: a forced kill must work on a browser that no longer
-answers, so nothing here goes through Playwright or CDP.
+Bounded, and never through Playwright or CDP: a forced kill must work on a
+browser that no longer answers. The kill itself blocks; ``in_thread`` runs it
+off the event loop.
 """
 
+import asyncio
 import ctypes
 import functools
 import os
 import signal
 import subprocess
 import sys
+import threading
 import weakref
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 
 from kohakuterrarium.utils.logging import get_logger
 
@@ -71,6 +76,56 @@ def _taskkill(pid: int) -> None:
         logger.debug("taskkill failed", error=type(exc).__name__)
 
 
+class _Finished:
+    """An awaitable that is already done."""
+
+    def __await__(self) -> Iterator[None]:
+        return iter(())
+
+
+def in_thread(work: Callable[[], None]) -> Awaitable[None]:
+    """Start blocking ``work`` now, off the event loop; await the result to wait for its end.
+
+    With a running loop ``work`` runs on a thread of its own that is not a
+    daemon, so a cancelled wait, a closing loop or the interpreter's exit
+    leave it to finish. Without a running loop, or when no thread can be
+    started, it runs here before this returns. A failure of ``work`` is
+    logged, never raised.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _run_logged(work)
+        return _Finished()
+    finished = loop.create_future()
+
+    def run() -> None:
+        _run_logged(work)
+        try:
+            loop.call_soon_threadsafe(_settle, finished)
+        except RuntimeError:
+            pass  # the loop closed; nothing waits any more
+
+    try:
+        threading.Thread(target=run, name="browser-kill").start()
+    except RuntimeError:
+        _run_logged(work)
+        finished.set_result(None)
+    return finished
+
+
+def _run_logged(work: Callable[[], None]) -> None:
+    try:
+        work()
+    except Exception as exc:
+        logger.warning("Ending browser processes failed", error=type(exc).__name__)
+
+
+def _settle(finished: asyncio.Future) -> None:
+    if not finished.done():
+        finished.set_result(None)
+
+
 class BrowserProcesses:
     """A launched browser's process ids (root first), held so a later kill hits only them.
 
@@ -78,34 +133,65 @@ class BrowserProcesses:
     Linux a pidfd names the exact process. ``kill`` (once; later calls do
     nothing) ends the root's tree only while the root is still the process
     that was held, then each held process; ``running`` tells whether any may
-    still run; ``release`` gives the holds back and forgets the pids, as
-    garbage collection does.
+    still run; ``release`` forgets the pids and gives the holds back, as
+    garbage collection does. Any thread may call these; holds a running
+    ``kill`` or ``running`` uses stay open until it returns, a ``release``
+    meanwhile included.
     """
 
     def __init__(self, pids: list[int]) -> None:
         self.pids = list(pids)
         self._holds = [_hold(pid) for pid in self.pids]
         self._killed = False
+        self._lock = threading.Lock()
+        self._users = 0
+        self._release_due = False
         self._finalizer = weakref.finalize(self, _drop_all, list(self._holds))
 
     def kill(self) -> None:
-        """End every held process that still runs, and the root's tree."""
-        if not self.pids or self._killed:
-            return
-        self._killed = True
-        if _still_running(self._holds[0], self.pids[0]):
-            kill_tree(self.pids[0])
-        for pid, hold in zip(self.pids, self._holds):
-            _kill_held(hold, pid)
+        """End every held process that still runs, and the root's tree; blocks while it does."""
+        with self._lock:
+            if self._killed:
+                return
+            self._killed = True
+        with self._in_use() as (pids, holds):
+            if not pids:
+                return
+            if _still_running(holds[0], pids[0]):
+                kill_tree(pids[0])
+            for pid, hold in zip(pids, holds):
+                _kill_held(hold, pid)
 
     def running(self) -> bool:
         """Whether any held process may still run; one that cannot be checked counts."""
-        return any(_may_run(hold, pid) for pid, hold in zip(self.pids, self._holds))
+        with self._in_use() as (pids, holds):
+            return any(_may_run(hold, pid) for pid, hold in zip(pids, holds))
 
     def release(self) -> None:
-        self.pids = []
-        self._holds = []
+        with self._lock:
+            self.pids = []
+            self._holds = []
+            if self._users:
+                self._release_due = True
+                return
         self._finalizer()
+
+    @contextmanager
+    def _in_use(self) -> Iterator[tuple[list[int], list[int | None]]]:
+        """The pids and holds, kept open until the block ends."""
+        with self._lock:
+            self._users += 1
+            pids, holds = list(self.pids), list(self._holds)
+        try:
+            yield pids, holds
+        finally:
+            with self._lock:
+                self._users -= 1
+                drop = self._release_due and not self._users
+                if drop:
+                    self._release_due = False
+            if drop:
+                self._finalizer()
 
 
 def _hold(pid: int) -> int | None:

@@ -51,6 +51,7 @@ from tests.helpers.browser_driver import (
     noise_image,
     png_bytes,
 )
+from tests.helpers.waiting import LoopProbe, wait_until
 
 PAGE = (
     '- heading "Shop" [level=1] [ref=e1]\n'
@@ -2049,6 +2050,59 @@ class TestCloseBound:
         finally:
             release.set()
             await asyncio.sleep(0.05)
+
+
+class TestSlowKill:
+    """A forced kill that takes a while (a slow ``taskkill``) never stalls the event loop."""
+
+    async def test_a_forced_teardown_waits_for_a_slow_kill_without_stalling(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+        browser.fail_stages = {"context", "browser", "playwright"}
+        browser.kill_delay = 0.5
+        async with LoopProbe() as probe:
+            assert (await session.close_browser()).meta == {"closed": True}
+            assert browser.killed and not browser.alive
+        assert probe.longest_gap < 0.3, f"the loop stalled {probe.longest_gap:.2f} s"
+
+    async def test_a_hung_browser_is_killed_without_stalling_the_loop(self, made):
+        session, driver = made
+        await session.snapshot()
+        hung = driver.browser
+        hung.page.hang.add("snapshot")
+        hung.unresponsive = True
+        hung.kill_delay = 0.5
+        async with LoopProbe() as probe:
+            with pytest.raises(BrowserStateLostError):
+                await session.snapshot()
+            assert hung.killed and not hung.alive
+        assert probe.longest_gap < 0.3, f"the loop stalled {probe.longest_gap:.2f} s"
+        again = await session.snapshot()
+        assert "state was lost (the browser stopped responding)" in again.text
+
+    async def test_close_keeps_its_bound_while_a_slow_kill_runs_on(self, tmp_path):
+        driver = ScriptedDriver(shop)
+        session = BrowserSession(
+            BrowserOptions.from_mapping({"action_timeout_s": 0.3}),
+            downloads_dir=tmp_path / "downloads",
+            driver=driver,
+            close_stage_timeout=0.05,
+            close_timeout=0.4,
+            settle_grace=0.001,
+        )
+        await session.snapshot()
+        browser = driver.browser
+        browser.hang_stages = {"context", "browser", "playwright"}
+        browser.kill_delay = 1.0
+        async with LoopProbe() as probe:
+            started = time.monotonic()
+            await session.close()
+            elapsed = time.monotonic() - started
+            assert elapsed < 0.7, f"close took {elapsed:.2f} s past its 0.4 s bound"
+            assert browser.killed, "the kill was not started"
+            await wait_until(lambda: not browser.alive, timeout=5, what="the kill")
+        assert probe.longest_gap < 0.3, f"the loop stalled {probe.longest_gap:.2f} s"
 
 
 def long_page(lines: int) -> str:

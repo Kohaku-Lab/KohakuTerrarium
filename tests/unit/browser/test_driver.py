@@ -22,6 +22,7 @@ import pytest_asyncio
 from PIL import Image
 
 from kohakuterrarium.browser import driver as driver_module
+from kohakuterrarium.browser import processes as processes_module
 from kohakuterrarium.browser import profiles as profiles_module
 from kohakuterrarium.browser.driver import (
     PlaywrightBrowser,
@@ -53,7 +54,7 @@ from tests.helpers.browser_site import (
     process_alive,
     suspend_process,
 )
-from tests.helpers.waiting import finish_within
+from tests.helpers.waiting import LoopProbe, finish_within, wait_until
 
 # One worker runs this module and tests/integration/test_browser.py, one after the other.
 pytestmark = pytest.mark.xdist_group("browser")
@@ -238,26 +239,49 @@ class TestWithoutBrowser:
         assert isinstance(timeout, DriverTimeoutError)
         assert str(timeout) == "timed out after 0.3 s"
 
-    def test_kill_ends_the_recorded_browser_processes_before_the_driver(
+    async def test_kill_ends_the_recorded_browser_processes_before_the_driver(
         self, monkeypatch
     ):
         handle, _ = self.fake_browser()
+        extra = {} if sys.platform == "win32" else {"start_new_session": True}
+        sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
+        browser, driver = subprocess.Popen(sleep, **extra), subprocess.Popen(
+            sleep, **extra
+        )
         order = []
-        proc = SimpleNamespace(pid=7000, returncode=None)
+        proc = SimpleNamespace(pid=driver.pid, returncode=None)
         proc.kill = lambda: order.append(("driver kill", proc.pid))
+        proc._transport = SimpleNamespace(
+            is_closing=lambda: False,
+            close=lambda: order.append(("transport closed", proc.pid)),
+        )
         handle._manager = SimpleNamespace(
-            _connection=SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
+            _client=SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
         )
-        monkeypatch.setattr(
-            driver_module, "kill_tree", lambda pid: order.append(("tree", pid))
-        )
-        handle._held = SimpleNamespace(
-            pids=[100, 101],
-            kill=lambda: order.append(("held", 100)),
-            release=lambda: order.append(("released", 100)),
-        )
-        handle.kill()
-        assert order == [("held", 100), ("tree", 7000), ("driver kill", 7000)]
+        real = processes_module.kill_tree
+
+        def tree(pid: int) -> None:
+            order.append(("tree", pid))
+            real(pid)
+
+        monkeypatch.setattr(processes_module, "kill_tree", tree)
+        try:
+            handle._held = BrowserProcesses([browser.pid])
+            await handle.kill()
+            assert order == [
+                ("tree", browser.pid),
+                ("tree", driver.pid),
+                ("driver kill", driver.pid),
+                ("transport closed", driver.pid),
+            ]
+            assert browser.wait(10) is not None and driver.wait(10) is not None
+            await handle.kill()
+            assert len(order) == 4, "a second kill repeated the first"
+        finally:
+            for process in (browser, driver):
+                if process.poll() is None:
+                    process.kill()
+                process.wait(10)
 
     def test_exited_follows_the_held_processes_and_latches(self):
         handle, _ = self.fake_browser()
@@ -286,7 +310,7 @@ class TestWithoutBrowser:
             raise RuntimeError("close failed")
 
         assert not handle.exited()
-        handle.kill()
+        await handle.kill()
         assert not handle.exited(), "a kill of unknown processes confirms nothing"
         handle._browser.close = broken
         with pytest.raises(RuntimeError):
@@ -323,7 +347,7 @@ class TestWithoutBrowser:
         try:
             handle._held = BrowserProcesses([hung.pid])
             await handle.stop()
-            handle.kill()
+            await handle.kill()
             assert hung.wait(10) is not None
         finally:
             if hung.poll() is None:
@@ -398,6 +422,49 @@ class TestWithoutBrowser:
         assert not handle.exited()
         running[0] = False
         assert handle.exited()
+
+    async def test_a_slow_kill_never_stalls_the_event_loop(self, monkeypatch):
+        handle, _ = self.fake_browser()
+        sleeper = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            **({} if sys.platform == "win32" else {"start_new_session": True}),
+        )
+        real = processes_module.kill_tree
+
+        def slow(pid: int) -> None:
+            time.sleep(0.6)
+            real(pid)
+
+        monkeypatch.setattr(processes_module, "kill_tree", slow)
+        try:
+            handle._held = BrowserProcesses([sleeper.pid])
+            async with LoopProbe() as probe:
+                started = time.monotonic()
+                await handle.kill()
+                assert time.monotonic() - started >= 0.5, "the kill did not wait"
+            assert (
+                probe.longest_gap < 0.3
+            ), f"the loop stalled {probe.longest_gap:.2f} s"
+            assert sleeper.wait(10) is not None
+        finally:
+            if sleeper.poll() is None:
+                sleeper.kill()
+            sleeper.wait(10)
+
+    def test_a_kill_without_a_running_loop_still_ends_the_processes(self):
+        handle, _ = self.fake_browser()
+        sleeper = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            **({} if sys.platform == "win32" else {"start_new_session": True}),
+        )
+        try:
+            handle._held = BrowserProcesses([sleeper.pid])
+            handle.kill()
+            assert sleeper.wait(10) is not None
+        finally:
+            if sleeper.poll() is None:
+                sleeper.kill()
+            sleeper.wait(10)
 
     async def test_launch_processes_are_recorded_without_failing_the_launch(self):
         handle, _ = self.fake_browser()
@@ -1383,7 +1450,7 @@ async def test_a_persistent_profile_starts_one_browser_until_the_last_is_gone(
         monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.5)
         with pytest.raises(BrowserUnavailableError, match="could not be confirmed"):
             await second.navigate(site.url("/form"))
-        browser.kill()
+        await browser.kill()
         monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 20.0)
         page = await second.navigate(site.url("/form"))
         assert "Form" in page.text and browser.exited()
@@ -1410,7 +1477,7 @@ async def test_a_forced_kill_ends_a_hung_browser_and_all_its_processes(
         pids = await session.process_ids()
         assert len(pids) > 1 and process_alive(pids[0])
         suspend_process(pids[0])
-        session.session._stack.browser.kill()
+        await session.session._stack.browser.kill()
         survivors = list(pids)
         for _ in range(200):
             survivors = [pid for pid in pids if process_alive(pid)]
@@ -1509,3 +1576,55 @@ async def test_a_launch_that_started_no_browser_frees_its_profile_at_once(
         (await profiles_module.claim_profile(profile)).drop()
     finally:
         await session.close()
+
+
+@LIVE
+async def test_close_keeps_its_bound_while_a_slow_kill_of_a_hung_browser_runs(
+    site, browser_env, downloads, monkeypatch
+):
+    session = Bounded(
+        BrowserSession(
+            BrowserOptions.from_mapping(
+                {"allow_loopback": True, "action_timeout_s": 5}
+            ),
+            downloads_dir=downloads,
+            close_stage_timeout=0.2,
+            close_timeout=1.0,
+        )
+    )
+    await start(session, site.url("/form"))
+    handle = session.session._stack.browser
+    pids = list(handle._held.pids)
+    try:
+        assert pids and process_alive(pids[0])
+
+        async def hang():
+            await asyncio.Event().wait()
+
+        handle.close_context = handle.close_browser = handle.stop = hang
+        real = processes_module.kill_tree
+
+        def slow(pid: int) -> None:
+            time.sleep(2.0)
+            real(pid)
+
+        monkeypatch.setattr(processes_module, "kill_tree", slow)
+        async with LoopProbe() as probe:
+            started = time.monotonic()
+            await session.close()
+            elapsed = time.monotonic() - started
+            assert elapsed < 1.6, f"close took {elapsed:.2f} s past its 1 s bound"
+            assert handle._held._finalizer.alive, "the holds went before the kill"
+            survivors = await gone_within(pids, 20.0)
+            assert survivors == [], f"alive 20 s after close: {survivors} of {pids}"
+            assert handle.exited()
+            await wait_until(
+                lambda: not handle._held._finalizer.alive,
+                timeout=20,
+                what="the holds to be given back after the kill",
+            )
+        assert probe.longest_gap < 0.5, f"the loop stalled {probe.longest_gap:.2f} s"
+    finally:
+        for pid in pids:
+            if process_alive(pid):
+                kill_process(pid)

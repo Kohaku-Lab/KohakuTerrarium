@@ -7,7 +7,8 @@ the primitive's keyword arguments), make it raise with ``page.raises[name]``,
 or make it hang with ``page.hang.add(name)``; a hung call fails the way
 Playwright's do once the browser crashes or is closed. ``alive`` tells whether
 the fake browser process would still be running; ``survives_kill`` makes a
-forced kill leave it running.
+forced kill leave it running, and ``kill_delay`` makes the kill take that many
+seconds of blocking work (off the event loop, as the protocol requires).
 """
 
 import asyncio
@@ -16,6 +17,8 @@ import io
 import itertools
 import random
 import struct
+import time
+from collections.abc import Awaitable
 from typing import Any
 
 from PIL import Image
@@ -23,6 +26,7 @@ from PIL import Image
 from kohakuterrarium.browser.errors import DriverDisconnectedError, PageClosedError
 from kohakuterrarium.browser.launch import LaunchPlan
 from kohakuterrarium.browser.observe import frame_owners
+from kohakuterrarium.browser.processes import in_thread
 from kohakuterrarium.browser.protocol import (
     DOCUMENT_ID_JS,
     FRAME_DOCUMENT_ID_JS,
@@ -414,6 +418,7 @@ class ScriptedBrowser:
         self.dead = False
         self.killed = False
         self.survives_kill = driver.survives_kill
+        self.kill_delay = 0.0
         self.unresponsive = False
         self.probes = 0
         self.stages: list[str] = []
@@ -521,11 +526,26 @@ class ScriptedBrowser:
         await self._stage("playwright")
         self.alive = False
 
-    def kill(self) -> None:
+    def kill(self) -> Awaitable[None]:
+        """Start the kill now; the process ends once ``kill_delay`` has passed."""
         self.killed = True
-        self.alive = self.alive and self.survives_kill
         self.connected = False
         self._release(DriverDisconnectedError("the browser closed unexpectedly"))
+        if not self.kill_delay:
+            self._killed()
+            return in_thread(lambda: None)
+        return self._slow_kill(in_thread(lambda: time.sleep(self.kill_delay)))
+
+    async def _slow_kill(self, blocking: Awaitable[None]) -> None:
+        await blocking
+        self._killed()
+
+    def _killed(self) -> None:
+        """The kill took effect; like Playwright, report the lost browser a moment later."""
+        was_alive = self.alive
+        self.alive = self.alive and self.survives_kill
+        if was_alive and not self.alive:
+            asyncio.get_running_loop().call_soon(self.sink.disconnected)
 
     def exited(self) -> bool:
         return not self.alive
@@ -574,7 +594,7 @@ class ScriptedDriver:
             if self.fail is not None:
                 raise self.fail
         except BaseException:
-            browser.kill()
+            await browser.kill()
             raise
         browser.start()
         if self.setup is not None:

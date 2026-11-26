@@ -6,6 +6,7 @@ of ``browser.errors`` with a short reason; call logs never leave this module.
 """
 
 import asyncio
+import functools
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -21,7 +22,7 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
 )
 from kohakuterrarium.browser.launch import Candidate, LaunchPlan, check_event_loop
-from kohakuterrarium.browser.processes import BrowserProcesses, kill_tree
+from kohakuterrarium.browser.processes import BrowserProcesses, in_thread
 from kohakuterrarium.browser.protocol import (
     DOCUMENT_ID_JS,
     EventSink,
@@ -629,6 +630,7 @@ class PlaywrightBrowser:
         self._held = BrowserProcesses([])
         self._closed_cleanly = False
         self._exited = False
+        self._killing: Awaitable[None] | None = None
 
     def attach(self, sink: EventSink) -> None:
         """Start delivering events to ``sink`` and wrap the pages already open."""
@@ -776,16 +778,28 @@ class PlaywrightBrowser:
             await _quietly(self.close_browser())
         await _quietly(self.stop())
         if not self.exited():
-            self.kill()
+            await self.kill()
 
-    def kill(self) -> None:
-        """End the browser processes held since launch with their trees, then the driver."""
-        self._closing = True
-        self._held.kill()
-        driver_pid = _driver_pid(self._manager)
-        if driver_pid is not None:
-            kill_tree(driver_pid)
-        _kill_driver(self._manager)
+    def kill(self) -> Awaitable[None]:
+        """Start ending the browser processes held since launch with their trees, then the driver.
+
+        Never blocks the event loop (``processes.in_thread``); await the
+        result to wait for the end. A later call waits for the first kill.
+        """
+        if self._killing is None:
+            self._closing = True
+            driver = BrowserProcesses(_driver_pids(self._manager))
+            self._killing = in_thread(
+                functools.partial(_end_processes, self._held, driver, self._manager)
+            )
+            if isinstance(self._killing, asyncio.Future):
+                self._killing.add_done_callback(
+                    lambda _: _close_driver_transport(self._manager)
+                )
+        killing = self._killing
+        if isinstance(killing, asyncio.Future):
+            return asyncio.shield(killing)
+        return killing
 
     def exited(self) -> bool:
         """Whether every browser process is known to have ended; once true, stays true.
@@ -844,13 +858,34 @@ def _driver_exited_cleanly(manager: Any) -> bool:
     return process is not None and process.returncode == 0
 
 
-def _driver_pid(manager: Any) -> int | None:
-    """The Playwright driver's process id while it runs."""
+def _driver_pids(manager: Any) -> list[int]:
+    """The Playwright driver's process id while it runs; empty otherwise."""
     process = _driver_process(manager)
     if process is None or process.returncode is not None:
-        return None
+        return []
     pid = getattr(process, "pid", None)
-    return pid if isinstance(pid, int) else None
+    return [pid] if isinstance(pid, int) else []
+
+
+def _end_processes(
+    held: BrowserProcesses, driver: BrowserProcesses, manager: Any
+) -> None:
+    """Kill the browser's held processes, then the driver's tree and process; blocks."""
+    held.kill()
+    driver.kill()
+    driver.release()
+    _kill_driver(manager)
+
+
+def _close_driver_transport(manager: Any) -> None:
+    """Close the killed driver's ``asyncio`` transport, which Playwright no longer will."""
+    transport = getattr(_driver_process(manager), "_transport", None)
+    if transport is None or transport.is_closing():
+        return
+    try:
+        transport.close()
+    except Exception as exc:
+        logger.debug("Closing the driver transport failed", error=type(exc).__name__)
 
 
 def _kill_driver(manager: Any) -> None:

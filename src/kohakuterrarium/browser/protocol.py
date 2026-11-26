@@ -7,7 +7,7 @@ the session adds an outer bound. Failures are the ``Driver*`` errors from
 ``browser.errors``.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -300,8 +300,13 @@ class BrowserDriver(Protocol):
     async def stop(self) -> None:
         """Stop the automation driver process."""
 
-    def kill(self) -> None:
-        """Last resort: end every process this browser started, without waiting."""
+    def kill(self) -> Awaitable[None]:
+        """Last resort: start ending every process this browser started, at once.
+
+        Never blocks the event loop; the result resolves once the kill has
+        finished (it is bounded), and cancelling a wait on it leaves the kill
+        running.
+        """
 
     def exited(self) -> bool:
         """Whether every process of this browser is known to have ended; never waits."""

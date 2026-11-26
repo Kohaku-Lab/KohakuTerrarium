@@ -175,6 +175,18 @@ read, whose driver then had to be killed. On Windows the driver's tree kill
 ends it, but nothing can show that, so the profile stays refused until the
 process restarts.
 
+A forced kill can be slow (`taskkill /T /F` may take seconds per tree on
+Windows), and the session's event loop is shared with every other agent and
+tool, so `BrowserDriver.kill()` only starts the kill and returns an awaitable.
+`processes.in_thread` runs the blocking part on a thread of its own, not a
+daemon: a cancelled wait, a closing loop or interpreter exit leave it to
+finish, and every step is bounded. The session waits for the kill where it
+can afford to (a teardown, a hung browser), and `close()` past its bound only
+starts it and returns. `BrowserProcesses` defers giving back its handles or
+pidfds while a kill or a liveness check uses them, so a `release` (for
+instance from a profile check seeing the browser gone) can never let a kill
+reach a reused pid. With no running loop the kill runs in place.
+
 ## Layers
 
 The **runtime layer** knows browsers, networks and pages; it never formats
