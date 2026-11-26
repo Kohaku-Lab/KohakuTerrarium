@@ -453,6 +453,17 @@ that names the secret and the offending origin, never the value, for example
 `refused: secret staging_pw may be typed only into https://staging.example.com;
 e7 is on https://evil.example`.
 
+The check and the typing are one step on one element: the session finds the
+element once, judges the origin of that element's own document, and types into
+that same element. If the page replaces the element or navigates its document
+in between, the action fails rather than typing the secret anywhere else.
+Without `slowly` the value is set at once by a script in that document, which
+checks the document's origin again just before (the field gets `input` and
+`change` events but no key events). With `slowly` it is typed key by key into
+the focused element, so a page that moves the focus while typing is under way
+can receive the remaining keys elsewhere; use `slowly` with a secret only for
+a field that needs keystrokes.
+
 The value must be at least four characters. In every text result it shows as
 `[secret:staging_pw]`, raw and in its URL- and JSON-encoded spellings.
 Password fields are redacted too: a password field's value shows as
@@ -474,7 +485,11 @@ What can still see a secret:
 - **`browser_eval`.** A script runs with the page's privileges and can read a
   field's value. Gate `browser_eval` with `permgate`, or turn it off, when
   secrets are in play.
-- **The site itself**, of course. Type secrets only into sites you trust.
+- **The site itself**, of course. Origin scoping decides which site may be
+  given the secret; it does not limit what that site does with it once typed.
+  Its scripts, and any third-party script the page loads, can read the field,
+  send the value anywhere or show it on the page. Type secrets only into sites
+  you trust.
 
 ## Untrusted page content
 

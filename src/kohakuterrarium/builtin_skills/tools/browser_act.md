@@ -93,5 +93,7 @@ draggable rows, hover areas) and prefer refs otherwise.
 A `type` action with `secret` types the value of a configured secret; the
 value never appears in results. Each secret lists the origins it may be typed
 into: a field on any other origin, a cross-origin frame included, fails with
-`refused: secret <name> may be typed only into ...`. Screenshots and
-`browser_eval` can still see what a page shows.
+`refused: secret <name> may be typed only into ...`. A secret is set in one
+step (input and change events, no key events); add `slowly` for a field that
+needs keystrokes. Screenshots and `browser_eval` can still see what a page
+shows.
