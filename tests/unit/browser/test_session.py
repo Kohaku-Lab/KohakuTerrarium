@@ -1072,7 +1072,12 @@ class TestAct:
                 await session.act(
                     [
                         {"kind": "click", "ref": "e2"},
-                        {"kind": "type", "ref": "e3", "secret": "shop_pw", "slowly": True},
+                        {
+                            "kind": "type",
+                            "ref": "e3",
+                            "secret": "shop_pw",
+                            "slowly": True,
+                        },
                     ]
                 )
             after_refusal = list(page.calls)

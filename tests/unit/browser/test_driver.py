@@ -908,9 +908,7 @@ async def test_a_checked_type_goes_only_to_the_judged_element(live, site):
     )
     assert url == site.url("/form") and seen == [url]
     assert CHECKED in await field_values(page)
-    refused = await page.type_checked(
-        name, "refused-x", lambda u: False, timeout=5
-    )
+    refused = await page.type_checked(name, "refused-x", lambda u: False, timeout=5)
     assert refused == url and "refused-x" not in await field_values(page)
     area = ref_of(
         (await live.navigate(site.url("/fields-area"))).text, "textbox", "Notes"
