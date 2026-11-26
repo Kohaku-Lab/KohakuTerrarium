@@ -159,7 +159,17 @@ def _may_run(hold: int | None, pid: int) -> bool:
         return False
     except OSError:
         return True
-    return True
+    return not _awaiting_reaping(pid)
+
+
+def _awaiting_reaping(pid: int) -> bool:
+    """Whether ``pid`` has exited and only waits to be reaped (a Linux zombie)."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            fields = stat.read().rpartition(b")")[2].split()
+    except OSError:
+        return False
+    return bool(fields) and fields[0] in (b"Z", b"X")
 
 
 def _kill_held(hold: int | None, pid: int) -> None:

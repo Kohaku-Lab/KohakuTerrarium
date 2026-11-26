@@ -178,6 +178,31 @@ def test_running_follows_every_held_process_until_it_ends():
         kill_tree(child)
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux /proc")
+@pytest.mark.parametrize("pidfd", [True, False])
+def test_a_held_process_awaiting_its_reaping_no_longer_runs(monkeypatch, pidfd):
+    if pidfd and not hasattr(os, "pidfd_open"):
+        pytest.skip("this Python has no os.pidfd_open")
+    if not pidfd:
+        monkeypatch.setattr(processes_module, "_hold", lambda pid: None)
+    sleeper = subprocess.Popen(SLEEPER)
+    try:
+        held = BrowserProcesses([sleeper.pid])
+        assert held.running()
+        os.kill(sleeper.pid, signal.SIGKILL)
+        deadline = time.monotonic() + 10
+        while held.running() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        waiting = os.waitid(os.P_PID, sleeper.pid, os.WEXITED | os.WNOWAIT)
+        assert waiting.si_pid == sleeper.pid, "it was reaped before judging"
+        assert not held.running(), "a zombie was counted as running"
+        held.release()
+    finally:
+        if sleeper.poll() is None:
+            sleeper.kill()
+        sleeper.wait(10)
+
+
 def test_a_second_kill_reaches_no_process(monkeypatch):
     sleeper = subprocess.Popen(
         SLEEPER, **({} if sys.platform == "win32" else {"start_new_session": True})
