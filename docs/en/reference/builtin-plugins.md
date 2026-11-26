@@ -296,6 +296,12 @@ for the life of the plugin instance; it is not persisted. Any other
 outcome (deny, cancellation, no answer within `timeout_s`, a bus error)
 raises `PluginBlockError`, so the agent sees the rejection as a tool failure.
 
+One exception lets a gated call through without asking: when the plugin has
+no host agent to show the prompt on. That is the case before its `on_load`
+has run, and in a host that loads plugins without an agent, such as the MCP
+tool server. A fork's tool policy is stricter: with no output router on the
+parent it denies the call.
+
 The web UI and TUI render the approval as an inline prompt on the
 output stream; CLI surfaces it via the same output bus and replies
 through the input loop. Headless deployments without a user surface

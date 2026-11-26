@@ -197,6 +197,11 @@ host-loop 檢查，因此仍需 `compact.auto` 才能自動壓縮。兩種情況
 `timeout_s` 內沒有回應、bus 錯誤）都會拋 `PluginBlockError`，讓 agent
 把它當成普通工具失敗處理。
 
+例外只有一種：外掛沒有可以顯示提示的宿主 agent 時，受管的呼叫會不經詢問
+直接放行。這發生在它的 `on_load` 執行之前，以及不帶 agent 載入外掛的宿主
+（例如 MCP 工具伺服器）裡。fork 的工具策略比較嚴格：父 agent 沒有 output
+router 時會拒絕該呼叫。
+
 網頁 UI 與 TUI 把批准渲染成輸出流上的內聯 prompt；CLI 也透過同一個
 output bus 出場，並經由 input loop 回覆。沒有使用者介面的無頭部署應該
 關掉 permgate 或設 `timeout_s`，讓沒人回應的呼叫被拒絕，而不是一直等。
