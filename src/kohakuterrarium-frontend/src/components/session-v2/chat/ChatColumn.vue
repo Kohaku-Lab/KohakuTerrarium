@@ -1,12 +1,12 @@
 <template>
-  <div class="kt-v2-chatcol h-full min-h-0 flex flex-col relative" :class="{ 'ring-2 ring-inset ring-iolite/30': dragOver }" :style="reserveRight ? { paddingRight: '23.5rem' } : null" @dragenter="onDragEnter" @dragleave="onDragLeave" @dragover="onDragOver" @drop="onDrop">
+  <div ref="columnEl" class="kt-v2-chatcol h-full min-h-0 flex flex-col relative" :class="{ 'ring-2 ring-inset ring-iolite/30': dragOver }" :style="[reserveRight ? { paddingRight: '23.5rem' } : null, composerFootprint]" @dragenter="onDragEnter" @dragleave="onDragLeave" @dragover="onDragOver" @drop="onDrop">
     <SideConversationHost :side="composer.sideConversation" />
     <ConversationStrip v-if="strip" :narrow="narrow" />
     <div v-if="empty" class="flex-1 min-h-0 flex flex-col items-center justify-end pb-6 px-4">
       <ChatEmptyHero :tab-key="tabKey" />
     </div>
     <ChatTranscriptSection v-else class="kt-conversation-host kt-v2-transcript flex-1 min-h-0" :class="narrow ? 'kt-v2-transcript--narrow' : ''" :messages="viewport.windowMessages.value" :message-offset="viewport.windowStart.value" :total-count="viewport.messages.value.length" :previous-message="viewport.windowStart.value > 0 ? viewport.messages.value[viewport.windowStart.value - 1] : null" :empty-title="it('chat.noMessagesYet')" :empty-subtitle="it('chat.getStarted')" :processing="showProcessing" :processing-label="processingLabel" :reconnecting="chat.wsStatus === 'reconnecting'" :reconnect-label="it('chat.disconnected')" :partial="!!chat.tokenUsage[tabKey]?.partial" :partial-label="t('transcript.partial')" :has-newer="!!pageState?.hasNewer" :newer-label="t('transcript.newer')" :reset-required="!!pageState?.resetRequired" :reset-label="t('transcript.reset')" :history-blocked="viewport.historyBlocked.value" :history-blocked-label="it('chat.loadEarlierGenerating')" :can-load-earlier="!viewport.historyBlocked.value && (viewport.windowStart.value > 0 || viewport.hasOlderHistory.value)" :earlier-count="viewport.windowStart.value" :earlier-label="viewport.windowStart.value ? it('chat.showEarlier', { count: viewport.windowStart.value }) : it('sessionViewer.trace.turn.loadMore')" :render-message="renderMessage" @load-earlier="viewport.loadEarlier" @reload="reloadHistory" @scroll="viewport.handlers.onScroll" @viewport-ready="viewport.handlers.onViewportReady" @wheel="viewport.handlers.onWheel" @keydown="viewport.handlers.onKeydown" @touchstart="viewport.handlers.onTouchStart" @touchmove="viewport.handlers.onTouchMove" />
-    <div class="shrink-0 px-4" :class="empty ? '' : 'pb-4 pt-2'">
+    <div ref="composerAreaEl" class="shrink-0 px-4" :class="empty ? '' : 'pb-4 pt-2'" data-test="v2-composer-area">
       <div class="mx-auto w-full" :class="narrow ? '' : 'kt-v2-read'">
         <div v-if="historyError" class="mb-1.5 flex items-center gap-2 text-xs text-coral" role="alert">
           <span class="flex-1 min-w-0 truncate">{{ historyError }}</span>
@@ -31,6 +31,7 @@ import { toolArgsProgressLabel } from "@/components/chat/toolArgsProgress"
 import ChatComposerBar from "@/components/session-v2/chat/ChatComposerBar.vue"
 import ChatEmptyHero from "@/components/session-v2/chat/ChatEmptyHero.vue"
 import ConversationStrip from "@/components/session-v2/chat/ConversationStrip.vue"
+import { useBottomFootprint } from "@/components/session-v2/chat/useBottomFootprint"
 import { useComposerSend } from "@/components/session-v2/chat/useComposerSend"
 import { useFileDropHint } from "@/components/session-v2/chat/useFileDropHint"
 import { useTranscriptViewport } from "@/components/session-v2/chat/useTranscriptViewport"
@@ -68,6 +69,10 @@ watch(
 
 const viewport = useTranscriptViewport({ chat, tabKey, instanceId, positions: ctx.column.scrollPositions })
 const composer = useComposerSend({ chat, tabKey, instance: ctx.instance, attachments: ctx.column.attachments, onSent: () => viewport.followAfterSend() })
+
+const columnEl = ref(null)
+const composerAreaEl = ref(null)
+const composerFootprint = useBottomFootprint(columnEl, composerAreaEl, "--kt-v2-composer-height")
 
 const pageState = computed(() => (tabKey.value ? chat.historyPageByTab?.[tabKey.value] : null))
 const empty = computed(() => chat._historyLoaded && viewport.messages.value.length === 0 && !viewport.processing.value && !pageState.value?.hasOlder)
@@ -189,6 +194,12 @@ onUnmounted(unlisten)
   max-width: var(--kt-v2-read-width);
   margin-inline: auto;
   padding-inline: 1rem;
+}
+/* The tail clears the part of a floating dock that rises above the composer (both footprints are measured from the column bottom); without a dock this is the shared 1rem. */
+.kt-v2-transcript :deep(.kt-transcript-viewport) {
+  --kt-v2-tail-clearance: max(1rem, calc(var(--kt-dock-clearance, 0px) - var(--kt-v2-composer-height, 0px) + 0.5rem));
+  padding-bottom: var(--kt-v2-tail-clearance);
+  scroll-padding-bottom: var(--kt-v2-tail-clearance);
 }
 .kt-v2-transcript--narrow :deep(.kt-conversation-list) {
   max-width: none;
