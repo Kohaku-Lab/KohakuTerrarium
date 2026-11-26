@@ -86,9 +86,14 @@ class MirrorTool(BaseTool):
     network_access = False                # True：目的主機由別處決定
 ```
 
-- `url_arguments`：值可以是一個 URL 或 URL 列表；沒有 scheme 的值以
+- `url_arguments`：值可以是一個 URL 或 URL 列表。值會先去掉前後的空白與
+  控制字元；不以 `http://` 或 `https://`（不分大小寫）開頭的值以
   `https://` 檢查。每個主機都要通過白名單，`network=deny` 時拒絕呼叫。
-  設有白名單時，無法解析出主機的值（例如 `http://[::1`）也會拒絕呼叫。
+  設有白名單時，無法解析出主機的值（例如 `http://[::1`，或路徑前出現
+  反斜線）也會拒絕呼叫；沒有白名單時 sandbox 不驗證 URL。主機比對不分
+  大小寫，其餘按原樣：
+  `münchen.de` 與 `xn--mnchen-3ya.de` 是不同條目，`example.com` 與
+  `example.com.` 也是。
 - `network_hosts`：每個主機以 `https://<host>/` 檢查；無法解析的主機同樣
   拒絕。
 - `network_access`：宣告工具在執行時才決定要連的主機。`network=deny` 時
