@@ -145,6 +145,48 @@ def test_app_pages_are_left_alone(browser):
     assert window.scripts == [] and window.loaded_urls == []
 
 
+@pytest.mark.parametrize(
+    "current,expected",
+    [
+        ("http://127.0.0.1:8001/api/sessions/s/artifacts/exports/x/pose.jpg", True),
+        ("http://127.0.0.1:8001/api/sessions/s/artifacts/a.zip?x=1", True),
+        ("http://127.0.0.1:8001/ws/logs", True),
+        ("http://127.0.0.1:8001/", False),
+        ("http://127.0.0.1:8001/sessions/abc", False),
+        ("http://127.0.0.1:8001/apidocs", False),
+        ("http://127.0.0.1:9999/api/x", False),
+        ("https://example.test/api/x", False),
+        ("about:blank", False),
+        (None, False),
+    ],
+)
+def test_backend_resource_detection_needs_the_app_origin_and_prefix(current, expected):
+    assert links.is_backend_resource(current, HOME) is expected
+
+
+def test_nothing_is_a_backend_resource_before_the_home_url_is_known():
+    assert links.is_backend_resource("http://127.0.0.1:8001/api/x", None) is False
+
+
+@pytest.mark.parametrize("history_back,reloads", [(True, []), (False, [HOME])])
+def test_loaded_artifact_page_returns_to_the_app_without_the_browser(
+    browser, history_back, reloads
+):
+    window = _Window(
+        "http://127.0.0.1:8001/api/sessions/s/artifacts/exports/x/pose-overview.jpg",
+        history_back=history_back,
+    )
+    app = links.AppLinks(window)
+    app.attach()
+    app.set_home(HOME)
+
+    window.events.loaded.handlers[0]()
+
+    assert browser == []
+    assert "history.back" in window.scripts[0]
+    assert window.loaded_urls == reloads
+
+
 def test_unreadable_current_url_is_ignored(browser):
     window = _Window(HOME)
 
