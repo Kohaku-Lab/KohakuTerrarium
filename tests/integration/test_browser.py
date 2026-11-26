@@ -38,6 +38,7 @@ from tests.helpers.browser_site import (
     process_alive,
     suspend_process,
 )
+from tests.helpers.waiting import finish_within
 
 pytestmark = [pytest.mark.xdist_group("browser"), pytest.mark.timeout(120)]
 
@@ -94,10 +95,7 @@ class StepLLM(ScriptedLLM):
 
 async def within(awaitable, what: str, limit: float = LIMIT_S):
     """Await ``awaitable``, failing the test when it takes longer than ``limit``."""
-    try:
-        return await asyncio.wait_for(awaitable, limit)
-    except asyncio.TimeoutError:
-        pytest.fail(f"{what} did not finish within {limit:g} s")
+    return await finish_within(awaitable, what, limit)
 
 
 class Creature:

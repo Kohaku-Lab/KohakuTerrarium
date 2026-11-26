@@ -53,6 +53,7 @@ from tests.helpers.browser_site import (
     process_alive,
     suspend_process,
 )
+from tests.helpers.waiting import finish_within
 
 # One worker runs this module and tests/integration/test_browser.py, one after the other.
 pytestmark = pytest.mark.xdist_group("browser")
@@ -127,10 +128,7 @@ navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.re
 
 async def within(awaitable, what: str, limit: float = LIMIT_S):
     """Await ``awaitable``, failing the test when it takes longer than ``limit``."""
-    try:
-        return await asyncio.wait_for(awaitable, limit)
-    except asyncio.TimeoutError:
-        pytest.fail(f"{what} did not finish within {limit:g} s")
+    return await finish_within(awaitable, what, limit)
 
 
 class Bounded:
