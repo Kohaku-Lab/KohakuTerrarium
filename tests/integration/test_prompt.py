@@ -295,8 +295,25 @@ class TestPromptIntegration:
             assert "returns no result and gives you no extra turn" in system_prompt
             assert "server, watcher, or daemon" in system_prompt
             assert "controller round" not in system_prompt
-            # Sub-agent isolation is stated here once, never per schema.
+            # The builtin ``fork`` sub-agent and ``bash`` are both visible.
+            assert agent.registry.list_subagents() == ["fork"]
             assert "context-isolated" in system_prompt
+            assert "`run_in_background` start the same way." in system_prompt
+
+            # 1e. Turning the only background-capable tool off drops its
+            # parts and keeps the sub-agent parts; turning it on restores them.
+            before = agent.get_system_prompt()
+            agent.set_tool_enabled("bash", False)
+            off = agent.get_system_prompt()
+            assert "Sub-agents run in the background" in off
+            assert "context-isolated" in off
+            assert "Tools that accept `run_in_background`" not in off
+            assert "server, watcher, or daemon" not in off
+            agent.set_tool_enabled("bash", True)
+            after = agent.get_system_prompt()
+            assert after.split("## Execution model")[1] == (
+                before.split("## Execution model")[1]
+            )
 
             # 1d. The custom plugin's contribution is present, and placed
             # after the tool list (runtime plugin prose sits between tool
@@ -444,6 +461,10 @@ class TestPromptIntegration:
             # The native execution-model override replaced the default prose.
             assert "NATIVE-EXEC-OVERRIDE: be terse." in sp
             assert "Tools are called via the API's native function" not in sp
+            assert "## Execution model" not in sp
+            # The override is literal prose: part gates never edit it.
+            native_agent.set_tool_enabled("read", False)
+            assert "NATIVE-EXEC-OVERRIDE: be terse." in native_agent.get_system_prompt()
         finally:
             await native_agent.stop()
 

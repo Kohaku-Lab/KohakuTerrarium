@@ -1215,7 +1215,7 @@ prompts:
   - name: git-safety
     path: prompts/git-safety.md
 framework_hints:
-  framework.execution_model.dynamic: "..."
+  framework.execution_model: "..."
 llm_presets:
   - name: my_preset
 python_dependencies:

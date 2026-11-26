@@ -121,6 +121,10 @@ class TestPromptBudget:
             payload = prompt + json.dumps([s.parameters for s in schemas])
             assert payload.count("context-isolated") == 1
             assert "continue the previous task" in prompt
+            # Sub-agents and background-capable tools are both present, so
+            # the execution model carries every part.
+            assert "start the same way" in prompt
+            assert "server, watcher, or daemon" in prompt
 
             for schema in schemas:
                 blob = json.dumps(schema.parameters)

@@ -89,7 +89,7 @@ prompts:
     path: prompts/git-safety.md
 
 framework_hints:
-  framework.execution_model.dynamic: |
+  framework.execution_model: |
     Use background work aggressively, but never duplicate it.
 
 llm_presets:

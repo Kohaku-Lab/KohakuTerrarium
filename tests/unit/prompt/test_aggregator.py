@@ -6,7 +6,7 @@ gate is asserted in both directions: present when true, absent when false.
 """
 
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.tools.gate import renderer_visibility
+from kohakuterrarium.core.tools.gate import enabled_visibility, renderer_visibility
 from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolConfig
 from kohakuterrarium.modules.tool.base import ToolResult
@@ -189,7 +189,9 @@ class TestAlwaysOnSections:
 
     def test_execution_model_present_for_every_format(self):
         for fmt in ("native", "bracket", "xml"):
-            out = aggregate_system_prompt("base", _registry(), tool_format=fmt)
+            out = aggregate_system_prompt(
+                "base", _registry(_tool("read", "Read")), tool_format=fmt
+            )
             assert "## Execution model" in out
 
     def test_hints_suppressed_wholesale(self):
@@ -211,6 +213,175 @@ class TestAlwaysOnSections:
         )
         assert "## Available Functions" not in out
         assert "## Tool guidance" not in out
+
+
+def _background_tool(name, desc):
+    """A tool that declares ``supports_background``."""
+    tool = _tool(name, desc)
+    type(tool).supports_background = True
+    return tool
+
+
+RESULTS = "Tool results are delivered after your response ends"
+SUBAGENT_DISPATCH = "Sub-agents run in the background by default"
+TOOL_BACKGROUND_SOLO = "Tools that accept `run_in_background` start in the background"
+TOOL_BACKGROUND_WITH_SUBAGENTS = (
+    "Tools that accept `run_in_background` start the same way."
+)
+BACKGROUND_WORK = "Starting background work returns no result"
+DAEMON = "server, watcher, or daemon"
+ISOLATION = "Sub-agent calls are context-isolated"
+NATIVE_DISCIPLINE = "Call only the tools available to you."
+
+
+def _execution_model(out):
+    """The ``## Execution model`` section of ``out``, or ``""`` when absent."""
+    if "## Execution model" not in out:
+        return ""
+    return out.split("## Execution model", 1)[1].split("\n## ", 1)[0]
+
+
+class TestExecutionModelGate:
+    """Each part of ``## Execution model`` exists only while its subject does."""
+
+    def test_absent_without_any_callable(self):
+        for registry in (None, _registry()):
+            for fmt in ("native", "bracket"):
+                out = aggregate_system_prompt("base", registry, tool_format=fmt)
+                assert "## Execution model" not in out
+                assert "run_in_background" not in out
+                assert "Sub-agent" not in out
+
+    def test_plain_tools_get_only_the_always_true_lines(self):
+        out = aggregate_system_prompt("base", _registry(_tool("read", "Read")))
+        section = _execution_model(out)
+        assert RESULTS in section and NATIVE_DISCIPLINE in section
+        for absent in (SUBAGENT_DISPATCH, BACKGROUND_WORK, DAEMON, ISOLATION):
+            assert absent not in out
+        assert "run_in_background" not in out
+
+    def test_subagents_only(self):
+        reg = _registry(_tool("read", "Read"), subagents=["explore"])
+        section = _execution_model(aggregate_system_prompt("base", reg))
+        for present in (RESULTS, SUBAGENT_DISPATCH, BACKGROUND_WORK, ISOLATION):
+            assert present in section
+        assert "continue the previous task" in section
+        assert "Tools that accept" not in section
+        assert DAEMON not in section
+
+    def test_background_tool_only(self):
+        reg = _registry(_tool("read", "Read"), _background_tool("bash", "Shell"))
+        section = _execution_model(aggregate_system_prompt("base", reg))
+        for present in (RESULTS, TOOL_BACKGROUND_SOLO, BACKGROUND_WORK, DAEMON):
+            assert present in section
+        assert "start the same way" not in section
+        assert SUBAGENT_DISPATCH not in section and ISOLATION not in section
+
+    def test_both_render_the_canonical_block(self):
+        reg = _registry(_background_tool("bash", "Shell"), subagents=["explore"])
+        section = _execution_model(aggregate_system_prompt("base", reg))
+        for present in (
+            RESULTS,
+            SUBAGENT_DISPATCH,
+            TOOL_BACKGROUND_WITH_SUBAGENTS,
+            BACKGROUND_WORK,
+            DAEMON,
+            ISOLATION,
+            NATIVE_DISCIPLINE,
+        ):
+            assert present in section
+        order = [
+            section.index(part)
+            for part in (RESULTS, SUBAGENT_DISPATCH, BACKGROUND_WORK, ISOLATION)
+        ]
+        assert order == sorted(order)
+
+    def test_text_formats_close_with_their_call_discipline(self):
+        reg = _registry(_tool("read", "Read"))
+        section = _execution_model(
+            aggregate_system_prompt("base", reg, tool_format="bracket")
+        )
+        assert "function-call block and nothing else" in section
+        assert NATIVE_DISCIPLINE not in section
+
+    def test_hidden_background_tool_drops_its_parts(self):
+        reg = _registry(_tool("read", "Read"), _background_tool("bash", "Shell"))
+        out = aggregate_system_prompt(
+            "base", reg, visibility=ToolVisibility(allowed_tools=frozenset({"read"}))
+        )
+        assert RESULTS in out
+        assert "run_in_background" not in out
+        assert BACKGROUND_WORK not in out and DAEMON not in out
+
+    def test_hidden_subagent_drops_its_parts(self):
+        reg = _registry(_tool("read", "Read"), subagents=["explore"])
+        out = aggregate_system_prompt(
+            "base", reg, visibility=ToolVisibility(allowed_subagents=frozenset())
+        )
+        assert RESULTS in out
+        assert SUBAGENT_DISPATCH not in out and ISOLATION not in out
+        assert BACKGROUND_WORK not in out
+
+    def test_turned_off_background_tool_drops_its_parts(self):
+        reg = _registry(_tool("read", "Read"), _background_tool("bash", "Shell"))
+        reg.set_tool_enabled("bash", False)
+        off = aggregate_system_prompt("base", reg, visibility=enabled_visibility(reg))
+        assert RESULTS in off and BACKGROUND_WORK not in off
+        reg.set_tool_enabled("bash", True)
+        on = aggregate_system_prompt("base", reg, visibility=enabled_visibility(reg))
+        assert BACKGROUND_WORK in on
+
+    def test_only_hidden_callables_means_no_section(self):
+        reg = _registry(_background_tool("bash", "Shell"), subagents=["explore"])
+        out = aggregate_system_prompt(
+            "base",
+            reg,
+            visibility=ToolVisibility(
+                allowed_tools=frozenset(), allowed_subagents=frozenset()
+            ),
+        )
+        assert "## Execution model" not in out
+
+    def test_provider_native_background_tool_is_not_background_capable(self):
+        tool = _background_tool("web_search", "Search")
+        type(tool).is_provider_native = True
+        out = aggregate_system_prompt("base", _registry(tool))
+        assert RESULTS in out and "run_in_background" not in out
+
+
+class TestExecutionModelOverride:
+    """An override replaces the block's content; the section gate still applies."""
+
+    OVERRIDE = {"framework.execution_model": "MY-EXEC {literal} prose"}
+
+    def test_override_is_emitted_verbatim_when_a_callable_exists(self):
+        reg = _registry(_tool("read", "Read"))
+        out = aggregate_system_prompt(
+            "base", reg, framework_hint_overrides=self.OVERRIDE
+        )
+        assert "MY-EXEC {literal} prose" in out
+        assert RESULTS not in out and "## Execution model" not in out
+
+    def test_override_is_not_split_by_part_gates(self):
+        override = {"framework.execution_model": "Sub-agents and run_in_background."}
+        out = aggregate_system_prompt(
+            "base", _registry(_tool("read", "Read")), framework_hint_overrides=override
+        )
+        assert "Sub-agents and run_in_background." in out
+
+    def test_override_is_absent_without_any_callable(self):
+        for registry in (None, _registry()):
+            out = aggregate_system_prompt(
+                "base", registry, framework_hint_overrides=self.OVERRIDE
+            )
+            assert "MY-EXEC" not in out
+
+    def test_empty_override_omits_the_section(self):
+        reg = _registry(_background_tool("bash", "Shell"), subagents=["explore"])
+        out = aggregate_system_prompt(
+            "base", reg, framework_hint_overrides={"framework.execution_model": ""}
+        )
+        assert "## Execution model" not in out and RESULTS not in out
 
 
 class TestToolGuidance:
