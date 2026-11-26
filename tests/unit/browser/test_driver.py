@@ -162,6 +162,15 @@ def ref_of(text: str, role: str, name: str) -> str:
     return match.group(1)
 
 
+def can_hold() -> bool:
+    """Whether this platform and Python give ``BrowserProcesses`` an OS hold on a pid."""
+    probe = BrowserProcesses([os.getpid()])
+    try:
+        return probe.held()
+    finally:
+        probe.release()
+
+
 def fake_playwright(
     monkeypatch, events: list, *, start_s: float = 0.0, stop_hangs: bool = False
 ) -> None:
@@ -300,10 +309,13 @@ class TestWithoutBrowser:
         try:
             handle._held = BrowserProcesses([browser.pid])
             await handle.kill()
-            assert order == [("tree", browser.pid), ("tree", driver.pid)]
+            expected = [("tree", browser.pid), ("tree", driver.pid)]
+            if not can_hold():
+                expected.append(("driver kill", driver.pid))
+            assert order == expected
             assert browser.wait(10) is not None and driver.wait(10) is not None
             await handle.kill()
-            assert len(order) == 2, "a second kill repeated the first"
+            assert len(order) == len(expected), "a second kill repeated the first"
         finally:
             for process in (browser, driver):
                 if process.poll() is None:
@@ -523,6 +535,8 @@ class TestWithoutBrowser:
         handle._manager = SimpleNamespace(
             _client=SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
         )
+        if held and not can_hold():
+            pytest.skip("this Python can hold no process (no pidfd)")
         if not held:
             monkeypatch.setattr(processes_module, "_hold", lambda pid: None)
         try:
