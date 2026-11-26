@@ -1347,7 +1347,11 @@ class TestAct:
         await session.act([{"kind": "click", "ref": "e2"}])
         assert time.perf_counter() - started < 0.5
 
-    async def test_an_announced_window_that_never_comes_is_bounded(self, made):
+    async def test_an_announced_window_that_never_comes_is_bounded(
+        self, made, monkeypatch
+    ):
+        assert WINDOW_WAIT_S == 10.0
+        monkeypatch.setattr(lifecycle_module, "WINDOW_WAIT_S", 1.0)
         session, driver = made
         await session.snapshot()
         browser = driver.browser
@@ -1357,8 +1361,8 @@ class TestAct:
         started = time.perf_counter()
         result = await session.act([{"kind": "click", "ref": "e2"}])
         elapsed = time.perf_counter() - started
-        assert WINDOW_WAIT_S - 0.1 < elapsed < WINDOW_WAIT_S + 1.0
-        assert "A new tab was requested but did not open" in result.text
+        assert 0.9 < elapsed < 2.0
+        assert "A new tab was requested but did not open within 1 s" in result.text
         browser.page.handlers.pop("click")
         started = time.perf_counter()
         await session.act([{"kind": "click", "ref": "e2"}])

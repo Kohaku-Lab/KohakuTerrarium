@@ -215,7 +215,7 @@ the same role and name. Take a new snapshot and use the new refs.
 
 - **Tabs** have stable ids (`t1`, `t2`, …). A tab a click opens becomes the
   active tab, and the action's result says so and shows its text. When Chromium has announced a new window, the action waits up to
-  3 seconds for it to open before returning. At most 20 tabs are open at
+  10 seconds for it to open before returning. At most 20 tabs are open at
   once: `browser_tabs` refuses to open another and asks you to close one
   first, and tabs a page opens beyond the limit (or that a `profile_dir`
   restores at launch) are closed and reported.

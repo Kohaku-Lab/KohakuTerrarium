@@ -158,7 +158,7 @@ How it behaves:
   its opener: one an agent tab opened (a timer firing between agent calls)
   becomes a tab as it would without the read; one the read's page opened, or
   one with no opener (`noopener`), is closed and never becomes a tab. So is a
-  window the read's page announced that arrives within 3 s of a successful
+  window the read's page announced that arrives within 10 s of a successful
   read.
 
 ## Ending browsers
