@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from kohakuterrarium.browser.launch import LaunchPlan
+from kohakuterrarium.browser.profiles import Exiting
 
 DOCUMENT_ID_JS = "() => performance.timeOrigin"
 FRAME_DOCUMENT_ID_JS = "el => el.ownerDocument.defaultView.performance.timeOrigin"
@@ -245,6 +246,13 @@ class PageDriver(Protocol):
 class EventSink(Protocol):
     """Callbacks a driver delivers on the event loop; each must return quickly."""
 
+    def launch_started(self, processes: Exiting) -> None:
+        """From now on the launch may start browser processes; ``processes`` tells when all ended.
+
+        Delivered at most once per launch, before its first browser process
+        can start; a launch that fails without it started none.
+        """
+
     def page_opened(self, page: PageDriver) -> None: ...
 
     def page_closed(self, page: PageDriver) -> None: ...
@@ -303,4 +311,9 @@ class Driver(Protocol):
     """Starts browsers."""
 
     async def launch(self, plan: LaunchPlan, sink: EventSink) -> BrowserDriver:
-        """Start a browser per ``plan`` with one open page; clean up fully on failure."""
+        """Start a browser per ``plan`` with one open page; clean up fully on failure.
+
+        A failed or cancelled launch ends, by force if need be, the browser
+        processes it started; the object it gave ``sink.launch_started``
+        reports when they have.
+        """

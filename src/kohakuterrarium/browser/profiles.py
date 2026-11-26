@@ -31,7 +31,7 @@ class ProfileClaim:
         self._dropped = False
 
     def held_by(self, browser: Exiting) -> None:
-        """The launch started ``browser``; the profile stays claimed until it exits."""
+        """The launch may have started ``browser``; the profile stays claimed until it exits."""
         self.browser = browser
 
     def drop(self) -> None:

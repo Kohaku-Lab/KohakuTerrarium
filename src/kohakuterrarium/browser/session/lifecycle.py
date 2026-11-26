@@ -286,7 +286,7 @@ class SessionLifecycleMixin:
                 self.options, stack.proxy.url, bundled_only=stack.bundled_only
             )
             stack.browser = await asyncio.wait_for(
-                self._driver.launch(plan, LaunchSink(self, generation)),
+                self._driver.launch(plan, LaunchSink(self, generation, claim)),
                 plan.timeout_s + CALL_MARGIN_S,
             )
             if claim is not None:
@@ -342,7 +342,7 @@ class SessionLifecycleMixin:
         await self._stage(stack.proxy.close, "proxy")
         self._live_stacks.discard(stack)
         if stack.claim is not None:
-            if browser is None:
+            if stack.claim.browser is None:
                 stack.claim.drop()
             else:
                 forget_if_released(stack.claim)

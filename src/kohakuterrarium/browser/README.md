@@ -154,6 +154,27 @@ How it behaves:
   window the read's page announced that arrives within 3 s of a successful
   read.
 
+## Ending browsers
+
+Two Chromium processes on one persistent profile corrupt it, so a profile is
+claimed per launch (`profiles`) and freed only when the browsers that ran on
+it are known to have ended. The driver hands the claim its browser handle
+(`EventSink.launch_started`) before Chromium can start, not when the launch
+returns, so a launch that fails or is cancelled part-way keeps the profile
+claimed. The handle counts as exited on evidence only: every process it holds
+(recorded right after a persistent launch opens, before anything else can
+fail) has ended; Playwright's own close returned (it waits for the browser);
+or the Playwright driver exited with status 0, which it does only after ending
+every browser it started (its exit handler kills those that did not close).
+A driver that was killed or crashed proves nothing. A failed launch closes
+what it opened, stops the driver, and kills what is still not known gone. A
+launch that started nothing frees the profile as soon as its driver stops.
+
+What stays unconfirmable: a browser that hung before its processes could be
+read, whose driver then had to be killed. On Windows the driver's tree kill
+ends it, but nothing can show that, so the profile stays refused until the
+process restarts.
+
 ## Layers
 
 The **runtime layer** knows browsers, networks and pages; it never formats

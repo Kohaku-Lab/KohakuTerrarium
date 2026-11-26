@@ -330,6 +330,75 @@ class TestWithoutBrowser:
                 hung.kill()
                 hung.wait(10)
 
+    @pytest.mark.parametrize("layout", ["_client", "_connection"])
+    def test_only_a_clean_driver_exit_confirms_unheld_browsers_ended(self, layout):
+        handle, _ = self.fake_browser()
+        proc = SimpleNamespace(pid=7000, returncode=None)
+        transport = SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
+        handle._manager = SimpleNamespace(**{layout: transport})
+        assert not handle.exited(), "the driver still runs"
+        proc.returncode = 1
+        assert not handle.exited(), "a killed or crashed driver confirms nothing"
+        proc.returncode = 0
+        assert handle.exited(), "a driver ends every browser it started before it exits"
+
+    async def test_a_failed_launch_reports_its_processes_only_once_any_may_start(
+        self, monkeypatch
+    ):
+        class Error(Exception):
+            pass
+
+        proc = SimpleNamespace(pid=7000, returncode=None, kill=lambda: None)
+        stops: list[bool] = []
+
+        class Manager:
+            fail = True
+
+            async def start(self):
+                if Manager.fail:
+                    raise Error("no driver")
+                self._client = SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
+
+                async def stop():
+                    stops.append(True)
+                    proc.returncode = 0
+
+                return SimpleNamespace(stop=stop)
+
+        api = SimpleNamespace(Error=Error, async_playwright=Manager)
+        monkeypatch.setattr(driver_module, "load_playwright", lambda: api)
+        monkeypatch.setattr(driver_module, "check_event_loop", lambda: None)
+        started = []
+        sink = SimpleNamespace(launch_started=started.append)
+        plan = SimpleNamespace(persistent=True, timeout_s=1.0)
+        with pytest.raises(Error, match="no driver"):
+            await PlaywrightDriver().launch(plan, sink)
+        assert started == [], "nothing could have started"
+
+        async def no_candidate(self, api, playwright, plan):
+            raise BrowserUnavailableError("no usable Chromium was found")
+
+        monkeypatch.setattr(PlaywrightDriver, "_open", no_candidate)
+        Manager.fail = False
+        with pytest.raises(BrowserUnavailableError):
+            await PlaywrightDriver().launch(plan, sink)
+        assert len(started) == 1 and stops == [True]
+        assert started[0].exited(), "the driver stopped cleanly, so its browsers ended"
+
+    def test_a_clean_driver_exit_does_not_overrule_held_processes(self):
+        handle, _ = self.fake_browser()
+        proc = SimpleNamespace(pid=7000, returncode=0)
+        handle._manager = SimpleNamespace(
+            _client=SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
+        )
+        running = [True]
+        handle._held = SimpleNamespace(
+            pids=[100], running=lambda: running[0], release=lambda: None
+        )
+        assert not handle.exited()
+        running[0] = False
+        assert handle.exited()
+
     async def test_launch_processes_are_recorded_without_failing_the_launch(self):
         handle, _ = self.fake_browser()
 
@@ -1349,5 +1418,94 @@ async def test_a_forced_kill_ends_a_hung_browser_and_all_its_processes(
                 break
             await asyncio.sleep(0.1)
         assert survivors == [], f"alive 20 s after a forced kill: {survivors} of {pids}"
+    finally:
+        await session.close()
+
+
+async def gone_within(pids: list[int], seconds: float) -> list[int]:
+    """The ``pids`` still alive after waiting up to ``seconds`` for them to end."""
+    survivors = list(pids)
+    deadline = time.monotonic() + seconds
+    while survivors and time.monotonic() < deadline:
+        await asyncio.sleep(0.1)
+        survivors = [pid for pid in survivors if process_alive(pid)]
+    return survivors
+
+
+@LIVE
+async def test_a_launch_that_fails_after_chromium_started_leaves_its_profile_usable(
+    site, browser_env, downloads, tmp_path, monkeypatch
+):
+    started: list[int] = []
+    stops: list = []
+    real_open = PlaywrightDriver._open
+
+    async def refuse(*_args, **_kwargs):
+        raise RuntimeError("refused by the test")
+
+    async def opened(self, api, playwright, plan):
+        browser, context = await real_open(self, api, playwright, plan)
+        cdp = await context.browser.new_browser_cdp_session()
+        info = await cdp.send("SystemInfo.getProcessInfo")
+        await cdp.detach()
+        started.extend(int(p["id"]) for p in info["processInfo"])
+        stops.append(playwright.stop)
+        context.close = playwright.stop = refuse
+        return browser, context
+
+    def broken_attach(self, sink):
+        raise RuntimeError("attach failed")
+
+    monkeypatch.setattr(PlaywrightDriver, "_open", opened)
+    monkeypatch.setattr(PlaywrightBrowser, "attach", broken_attach)
+    profile = str(tmp_path / "profile")
+    session = Bounded(
+        BrowserSession(
+            BrowserOptions.from_mapping(
+                {"allow_loopback": True, "action_timeout_s": 5, "profile_dir": profile}
+            ),
+            downloads_dir=downloads,
+        )
+    )
+    try:
+        try:
+            await session.navigate(site.url("/form"))
+        except BrowserUnavailableError as exc:
+            pytest.skip(f"no Chromium for Playwright: {exc}")
+        except RuntimeError as exc:
+            assert "attach failed" in str(exc)
+        else:
+            pytest.fail("the launch did not fail")
+        monkeypatch.undo()
+        assert started, "Chromium never started"
+        survivors = await gone_within(started, 15.0)
+        assert survivors == [], f"Chromium left running on the profile: {survivors}"
+        page = await session.navigate(site.url("/form"))
+        assert "Form" in page.text
+        assert set(await session.process_ids()).isdisjoint(started)
+    finally:
+        await session.close()
+        for stop in stops:
+            await within(stop(), "stopping the abandoned driver")
+        for pid in started:
+            if process_alive(pid):
+                kill_process(pid)
+
+
+@LIVE
+async def test_a_launch_that_started_no_browser_frees_its_profile_at_once(
+    browser_env, downloads, tmp_path, monkeypatch
+):
+    pytest.importorskip("playwright.async_api")
+    monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.0)
+    profile = str(tmp_path / "profile")
+    options = {"profile_dir": profile, "executable_path": str(tmp_path / "none.exe")}
+    session = Bounded(
+        BrowserSession(BrowserOptions.from_mapping(options), downloads_dir=downloads)
+    )
+    try:
+        with pytest.raises(BrowserUnavailableError, match="no usable Chromium"):
+            await session.snapshot()
+        (await profiles_module.claim_profile(profile)).drop()
     finally:
         await session.close()

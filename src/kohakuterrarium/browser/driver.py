@@ -602,10 +602,19 @@ class PlaywrightPage:
 
 
 class PlaywrightBrowser:
-    """A launched Playwright browser and its one context, behind ``BrowserDriver``."""
+    """A launched Playwright browser and its one context, behind ``BrowserDriver``.
+
+    Made before the launch starts anything, so a launch that fails part-way
+    can tell when what it started has exited (``exited``).
+    """
 
     def __init__(
-        self, api: Any, manager: Any, playwright: Any, browser: Any, context: Any
+        self,
+        api: Any,
+        manager: Any,
+        playwright: Any = None,
+        browser: Any = None,
+        context: Any = None,
     ) -> None:
         self.api = api
         self._manager = manager
@@ -752,6 +761,23 @@ class PlaywrightBrowser:
         self._closing = True
         await self._playwright.stop()
 
+    async def abandon(self) -> None:
+        """Undo a launch that failed or was cancelled part-way; never raises.
+
+        Closes what Playwright opened and stops its driver, then kills what is
+        not known to have exited by then.
+        """
+        if self._playwright is None:
+            _kill_driver(self._manager)
+            return
+        if self._context is not None:
+            await _quietly(self.close_context())
+        if self._browser is not None:
+            await _quietly(self.close_browser())
+        await _quietly(self.stop())
+        if not self.exited():
+            self.kill()
+
     def kill(self) -> None:
         """End the browser processes held since launch with their trees, then the driver."""
         self._closing = True
@@ -766,13 +792,16 @@ class PlaywrightBrowser:
 
         With processes held since launch, when none of them runs any more;
         with none held, when Playwright's own close of the browser returned
-        (it waits for the browser process to exit).
+        (it waits for the browser process to exit) or the Playwright driver
+        exited with status 0 (before that it ends every browser it started).
         """
         if not self._exited:
             if self._held.pids:
                 self._exited = not self._held.running()
             else:
-                self._exited = self._closed_cleanly
+                self._exited = self._closed_cleanly or _driver_exited_cleanly(
+                    self._manager
+                )
             if self._exited:
                 self._held.release()
         return self._exited
@@ -804,9 +833,15 @@ class PlaywrightBrowser:
 
 
 def _driver_process(manager: Any) -> Any:
-    connection = getattr(manager, "_connection", None)
-    transport = getattr(connection, "_transport", None)
+    """The Playwright driver's ``asyncio`` process, under either client layout."""
+    owner = getattr(manager, "_client", None) or getattr(manager, "_connection", None)
+    transport = getattr(owner, "_transport", None)
     return getattr(transport, "_proc", None)
+
+
+def _driver_exited_cleanly(manager: Any) -> bool:
+    process = _driver_process(manager)
+    return process is not None and process.returncode == 0
 
 
 def _driver_pid(manager: Any) -> int | None:
@@ -831,21 +866,26 @@ class PlaywrightDriver:
     """Starts Chromium through Playwright per a :class:`LaunchPlan`."""
 
     async def launch(self, plan: LaunchPlan, sink: EventSink) -> PlaywrightBrowser:
+        """Start Chromium; a persistent profile's processes are held before anything else runs."""
         check_event_loop()
         api = load_playwright()
-        manager = api.async_playwright()
-        playwright = browser = context = None
+        handle = PlaywrightBrowser(api, api.async_playwright())
         try:
-            playwright = await manager.start()
-            browser, context = await self._open(api, playwright, plan)
-            handle = PlaywrightBrowser(api, manager, playwright, browser, context)
+            handle._playwright = await handle._manager.start()
+            sink.launch_started(handle)
+            browser, context = await self._open(api, handle._playwright, plan)
+            handle._browser, handle._context = browser, context
+            if plan.persistent:
+                await handle.record_processes(PROCESS_READ_TIMEOUT_S)
             handle.attach(sink)
-            if not context.pages:
+            opened = not context.pages
+            if opened:
                 await handle.new_page(plan.timeout_s)
-            await handle.record_processes(PROCESS_READ_TIMEOUT_S)
+            if opened or not handle._held.pids:
+                await handle.record_processes(PROCESS_READ_TIMEOUT_S)
             return handle
         except BaseException:
-            await _cleanup(manager, playwright, browser, context)
+            await handle.abandon()
             raise
 
     async def _open(
@@ -893,15 +933,3 @@ async def _quietly(operation: Awaitable[Any]) -> None:
         await asyncio.wait_for(operation, CLEANUP_TIMEOUT_S)
     except Exception as exc:
         logger.debug("Browser cleanup step failed", error=type(exc).__name__)
-
-
-async def _cleanup(manager: Any, playwright: Any, browser: Any, context: Any) -> None:
-    """Undo a launch that failed or was cancelled part-way; never raises."""
-    if context is not None:
-        await _quietly(context.close())
-    if browser is not None:
-        await _quietly(browser.close())
-    if playwright is not None:
-        await _quietly(playwright.stop())
-    else:
-        _kill_driver(manager)

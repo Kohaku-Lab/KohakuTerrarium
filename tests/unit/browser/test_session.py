@@ -482,6 +482,83 @@ class TestTimeoutsAndCancellation:
             dead.alive = False
         assert driver.alive() == []
 
+    async def test_a_failed_launch_keeps_the_profile_while_its_browser_may_run(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.2)
+        profile = str(tmp_path / "profile")
+        session, driver = make(tmp_path, profile_dir=profile)
+        try:
+            driver.fail = BrowserLaunchError("the page could not be opened")
+            driver.survives_kill = True
+            with pytest.raises(BrowserLaunchError):
+                await session.snapshot()
+            leftover = driver.browser
+            assert leftover.killed and leftover.alive
+            with pytest.raises(BrowserUnavailableError, match="could not be confirmed"):
+                await profiles_module.claim_profile(profile)
+            with pytest.raises(BrowserUnavailableError, match="could not be confirmed"):
+                await session.snapshot()
+            assert len(driver.plans) == 1
+            leftover.alive = False
+            driver.fail, driver.survives_kill = None, False
+            assert (await session.snapshot()).text.startswith("[t1]")
+            assert len(driver.plans) == 2
+        finally:
+            await session.close()
+        assert driver.alive() == []
+
+    async def test_a_launch_that_started_nothing_frees_the_profile_at_once(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.0)
+        profile = str(tmp_path / "profile")
+        session, driver = make(tmp_path, profile_dir=profile)
+        try:
+            driver.fail_before_start = BrowserUnavailableError("no usable Chromium")
+            with pytest.raises(BrowserUnavailableError, match="no usable Chromium"):
+                await session.snapshot()
+            (await profiles_module.claim_profile(profile)).drop()
+            driver.fail_before_start = None
+            assert (await session.snapshot()).text.startswith("[t1]")
+        finally:
+            await session.close()
+        assert driver.alive() == []
+
+    @pytest.mark.parametrize("end", ["timeout", "close"])
+    async def test_a_cut_short_launch_keeps_the_profile_while_its_browser_may_run(
+        self, tmp_path, monkeypatch, end
+    ):
+        monkeypatch.setattr(profiles_module, "RELEASE_WAIT_S", 0.2)
+        real = lifecycle_module.plan_launch
+        monkeypatch.setattr(
+            lifecycle_module,
+            "plan_launch",
+            lambda options, proxy, **kwargs: dataclasses.replace(
+                real(options, proxy, **kwargs), timeout_s=0.05
+            ),
+        )
+        profile = str(tmp_path / "profile")
+        session, driver = make(tmp_path, profile_dir=profile)
+        driver.block = asyncio.Event()
+        driver.survives_kill = True
+        call = asyncio.create_task(session.snapshot())
+        await driver.started.wait()
+        if end == "close":
+            await session.close()
+            with pytest.raises(BrowserClosedError):
+                await call
+        else:
+            with pytest.raises(BrowserLaunchError, match="took longer"):
+                await call
+        leftover = driver.browser
+        assert leftover.killed and leftover.alive
+        with pytest.raises(BrowserUnavailableError, match="could not be confirmed"):
+            await profiles_module.claim_profile(profile)
+        leftover.alive = False
+        (await profiles_module.claim_profile(profile)).drop()
+        await session.close()
+
     async def test_a_timeout_on_a_browser_that_answers_keeps_the_browser(self, made):
         session, driver = made
         await session.snapshot()

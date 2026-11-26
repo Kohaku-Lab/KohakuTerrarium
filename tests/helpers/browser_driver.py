@@ -413,7 +413,7 @@ class ScriptedBrowser:
         self.connected = True
         self.dead = False
         self.killed = False
-        self.survives_kill = False
+        self.survives_kill = driver.survives_kill
         self.unresponsive = False
         self.probes = 0
         self.stages: list[str] = []
@@ -534,8 +534,11 @@ class ScriptedBrowser:
 class ScriptedDriver:
     """Launches scripted browsers; ``setup(browser)`` prepares each new one.
 
-    ``fail`` makes launches raise; ``block`` (an ``asyncio.Event``) holds a
-    launch half-way until set, with a browser process already alive.
+    ``fail`` makes launches raise after starting a browser process (which
+    the launch then kills); ``fail_before_start`` makes them raise before
+    starting any; ``block`` (an ``asyncio.Event``) holds a launch half-way
+    until set, with a browser process already alive; ``survives_kill`` is
+    given to each new browser.
     """
 
     def __init__(self, setup=None) -> None:
@@ -543,7 +546,9 @@ class ScriptedDriver:
         self.plans: list[LaunchPlan] = []
         self.browsers: list[ScriptedBrowser] = []
         self.fail: BaseException | None = None
+        self.fail_before_start: BaseException | None = None
         self.block: asyncio.Event | None = None
+        self.survives_kill = False
         self.started = asyncio.Event()
 
     @property
@@ -557,8 +562,11 @@ class ScriptedDriver:
 
     async def launch(self, plan: LaunchPlan, sink: Any) -> ScriptedBrowser:
         self.plans.append(plan)
+        if self.fail_before_start is not None:
+            raise self.fail_before_start
         browser = ScriptedBrowser(self, plan, sink)
         self.browsers.append(browser)
+        sink.launch_started(browser)
         self.started.set()
         try:
             if self.block is not None:

@@ -251,8 +251,10 @@ so logins do not survive a restart.
 
 With `profile_dir`, a browser starts only once every browser that ran on that
 profile in this process is known to have exited: the processes it was started
-with have ended, or its own close finished. A killed browser usually ends
-within moments. When it cannot be confirmed gone within 5 seconds, the call
+with have ended, its own close finished, or Playwright's driver exited cleanly
+(it ends its browsers first). That includes a browser whose start failed or
+timed out part-way: the failed start closes what it started and kills it if
+the close does not finish. A killed browser usually ends within moments. When it cannot be confirmed gone within 5 seconds, the call
 fails with an error naming the profile instead of starting a second browser on
 it (two Chromium processes on one profile corrupt it), and a later call tries
 again. This covers a restart inside the session, an options change and
@@ -714,9 +716,12 @@ kt run examples/agent-apps/web_tester --llm <your preset>
 - **"the browser session is closed".** The creature stopped or the plugin was
   disabled. Enable the plugin again; the next call starts a fresh browser.
 - **"the browser profile … is in use by a browser that could not be confirmed
-  to have exited".** A browser on that `profile_dir` was killed and its
-  processes have not ended yet. Try again shortly; if it keeps failing, end the
-  Chromium processes still using that profile directory.
+  to have exited".** A browser on that `profile_dir` was killed, or failed to
+  start part-way, and its processes have not ended yet. Try again shortly; if it
+  keeps failing, end the Chromium processes still using that profile directory.
+  A browser that hung while starting, before its processes could be listed, is
+  killed but never confirmed gone: the profile then stays refused until the
+  process that ran it restarts.
 
 ## See also
 
