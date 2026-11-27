@@ -42,6 +42,12 @@ from kohakuterrarium.llm.profiles.backends import (
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.grok.auth import GrokTokens
 from kohakuterrarium.llm.antigravity.auth import AgyCredentials
+from kohakuterrarium.llm.discovery import DiscoveredModel
+from kohakuterrarium.llm.presets.drafts import (
+    draft_kind,
+    draft_with_matches,
+    matching_presets,
+)
 from kohakuterrarium.llm.presets.store import (
     get_child_models,
     get_subagent_models,
@@ -135,6 +141,15 @@ def _resolve_preset(
     if preset.provider and provider is None:
         return None
 
+    return _profile_with_backend(preset, provider, selections)
+
+
+def _profile_with_backend(
+    preset: LLMPreset,
+    provider: LLMBackend | None,
+    selections: dict[str, str] | None = None,
+) -> LLMProfile:
+    """Build profile fields; inventory may show presets whose backend is missing."""
     normalized = normalize_variation_selections(selections or {}, preset)
     resolved_dict = apply_variation_groups(
         preset.to_dict(), preset.variation_groups, normalized
@@ -169,13 +184,12 @@ def _resolve_preset(
 
 
 def load_profiles() -> dict[tuple[str, str], LLMProfile]:
+    """Return the user preset inventory including unavailable providers."""
     backends = load_backends()
-    profiles: dict[tuple[str, str], LLMProfile] = {}
-    for key, preset in load_presets().items():
-        resolved = _resolve_preset(preset, backends)
-        if resolved is not None:
-            profiles[key] = resolved
-    return profiles
+    return {
+        key: _profile_with_backend(preset, backends.get(preset.provider))
+        for key, preset in load_presets().items()
+    }
 
 
 # The first available provider supplies the implicit default model — this is
@@ -260,22 +274,32 @@ class PresetAlreadyExists(ValueError):
 
 @profile_transaction()
 def create_preset(
-    preset: LLMPreset, *, reuse_model: bool = False
+    preset: LLMPreset | DiscoveredModel,
+    *,
+    provider: str = "",
+    reuse_model: bool = False,
 ) -> tuple[LLMPreset, bool]:
-    definitions = _all_preset_definitions()
-    if reuse_model:
-        matches = [
-            p
-            for (owner, _), p in definitions.items()
-            if owner == preset.provider and p.model == preset.model
-        ]
+    """Create a named preset, or reuse the configured match for a discovered model."""
+    if isinstance(preset, DiscoveredModel) or reuse_model:
+        saved = load_presets()
+        catalog = get_all_presets()
+        if isinstance(preset, DiscoveredModel):
+            model_id = preset.id
+            kind = draft_kind(load_backends().get(provider))
+            draft, matches = draft_with_matches(provider, preset, kind, catalog, saved)
+            preset = LLMPreset(**{"max_context": 128000, "max_output": 16384, **draft})
+        else:
+            provider, model_id = preset.provider, preset.model
+            matches = matching_presets(provider, model_id, catalog, saved)
+        if len(matches) > 1:
+            choices = ", ".join(f"{provider}/{name}" for name in matches)
+            raise ValueError(f"Choose a saved preset for {model_id}: {choices}")
         if matches:
-            user = load_presets()
-            return (
-                next((p for p in matches if (p.provider, p.name) in user), matches[0]),
-                False,
-            )
-    if _get_preset_definition(preset.name, preset.provider, definitions=definitions):
+            key = (provider, matches[0])
+            if key in saved:
+                return saved[key], False
+            return _preset_from_data(matches[0], catalog[key], provider), False
+    if _get_preset_definition(preset.name, preset.provider):
         raise PresetAlreadyExists(
             "A preset with this name already exists. Choose another name or open the existing preset."
         )
@@ -650,7 +674,7 @@ def _is_available(
 def list_all() -> list[dict[str, Any]]:
     """List resolved presets, with user entries overriding exact built-in keys."""
     result: list[dict[str, Any]] = []
-    definitions = _all_preset_definitions()
+    saved = load_presets()
     backends = load_backends()
     availability: dict[str, bool] = {}
 
@@ -683,20 +707,21 @@ def list_all() -> list[dict[str, Any]]:
             "selected_variations": dict(profile.selected_variations or {}),
         }
 
-    seen: set[tuple[str, str]] = set()
-    for (provider, name), preset in load_presets().items():
-        profile = _resolve_preset(preset, backends)
-        if profile is not None:
-            seen.add((provider, name))
-            result.append(_entry(profile, definitions.get((provider, name)), "user"))
+    for (provider, _), preset in saved.items():
+        backend = backends.get(provider)
+        profile = _profile_with_backend(preset, backend)
+        entry = _entry(profile, preset, "user")
+        if backend is None:
+            entry.update(provider_missing=True, available=False)
+        result.append(entry)
 
     for (provider, name), data in get_all_presets().items():
-        if (provider, name) in seen:
+        if (provider, name) in saved:
             continue
-        profile = _resolve_preset(_preset_from_data(name, data, provider), backends)
-        if profile is None:
-            continue
-        result.append(_entry(profile, definitions.get((provider, name)), "preset"))
+        preset = _preset_from_data(name, data, provider)
+        profile = _resolve_preset(preset, backends)
+        if profile is not None:
+            result.append(_entry(profile, preset, "preset"))
 
     default = _default_model(_available)
     default_provider, default_bare = _split_provider_prefix(default)

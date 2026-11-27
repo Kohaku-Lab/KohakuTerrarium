@@ -168,6 +168,117 @@ describe("shared ModelSwitcher host context", () => {
     })
   })
 
+  it("opens on manual presets and preserves an explicit source across shared-gateway providers", async () => {
+    const id = "fly/slurm/inkling2-finetuned"
+    const models = [
+      { provider: "inkling", name: "inkling2-fly", model: id, source: "user", available: true },
+      { provider: "kimi", name: "kimi-local", model: "k3", source: "user", available: true },
+    ]
+    const context = makeContext({ hostKey: ref("manual-default"), models })
+    context.currentModel.value = "inkling/inkling2-fly"
+    const discoverModels = vi.fn(async () => {
+      throw new Error("offline")
+    })
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: models.map((p) => ({ name: p.provider, available: true, model_discovery: true })),
+      }),
+      discoverModels,
+    }
+    const w = mountShared(context)
+    await flushPromises()
+    await openDrawer(w)
+    expect(w.get('[aria-label="Saved presets"]').text()).toContain("inkling2-fly")
+    expect(discoverModels).not.toHaveBeenCalled()
+    await buttonByText(w, "Provider models").trigger("click")
+    await buttonByText(w, "kimi").trigger("click")
+    await flushPromises()
+    expect(w.get('[aria-label="Provider models"]').text()).toContain("Could not load")
+    await buttonByText(w, "Saved presets").trigger("click")
+    expect(w.get(".model-row").text()).toContain("kimi-local")
+    await buttonByText(w, "Switch").trigger("click")
+    await flushPromises()
+    expect(context.switchModel).toHaveBeenCalledWith({
+      target: "beta",
+      selector: "kimi/kimi-local",
+    })
+    w.unmount()
+  })
+
+  it("uses the user's same-name override and explicitly selects between shared-model aliases", async () => {
+    const manual = (name, model) => ({
+      provider: "p",
+      source: "user",
+      available: true,
+      name,
+      model,
+      max_context: 262144,
+    })
+    const context = makeContext({
+      hostKey: ref("manual-conflict"),
+      models: [manual("sol", "local/model"), manual("A", "shared"), manual("B", "shared")],
+    })
+    context.currentModel.value = "p/sol"
+    const saveProfile = vi.fn()
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "p", model_discovery: true, available: true }],
+      }),
+      discoverModels: async () => ({
+        models: ["sol", "shared"].map((id) => ({
+          id,
+          name: id,
+          preset: { name: id, model: id, provider: "p" },
+          context_window: 1000000,
+        })),
+      }),
+      saveProfile,
+    }
+    const w = mountShared(context)
+    await flushPromises()
+    await openDrawer(w)
+    await buttonByText(w, "Provider models").trigger("click")
+    await flushPromises()
+    await w.findAll(".model-row")[0].trigger("click")
+    expect(w.get(".model-row.is-active").text()).toContain("local/model")
+    expect(w.get("code").text()).toBe("p/sol")
+    expect(w.get('[data-test="model-context-input"]').attributes("modelvalue")).toBe("262144")
+    expect(w.find('[data-test="model-context-note"]').text()).not.toContain("1M")
+    await w.findAll(".model-row")[1].trigger("click")
+    expect(w.get("code").text()).toBe("—")
+    await buttonByText(w, "B").trigger("click")
+    expect(w.get(".model-row.is-active").text()).toContain("Bshared")
+    await buttonByText(w, "Switch").trigger("click")
+    await flushPromises()
+    expect(context.switchModel).toHaveBeenCalledWith({ target: "beta", selector: "p/B" })
+    expect(saveProfile).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it("displays an orphaned preset with its model and blocks a switch", async () => {
+    const context = makeContext({
+      hostKey: ref("missing-provider"),
+      models: [
+        {
+          provider: "gone",
+          name: "kept",
+          model: "real",
+          source: "user",
+          available: false,
+          provider_missing: true,
+        },
+      ],
+    })
+    context.currentModel.value = ""
+    const w = mountShared(context)
+    await flushPromises()
+    await openDrawer(w)
+    expect(w.get(".model-row").text()).toContain("Provider missing")
+    await buttonByText(w, "Switch").trigger("click")
+    expect(context.switchModel).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
   it("refreshes only the selected provider, drops stale results and keeps presets usable offline", async () => {
     const context = makeContext({ hostKey: ref("catalog-race") })
     const refreshPresets = vi.spyOn(context.inventory, "refresh")

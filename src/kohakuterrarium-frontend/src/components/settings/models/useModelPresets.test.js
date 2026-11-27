@@ -57,8 +57,22 @@ describe("useModelPresets", () => {
     expect(models.editing.value).toEqual(existing)
     expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
     models.startDiscovered({ provider: "qwen", name: "custom", model: "different" })
-    expect(models.editing.value.name).toBe("custom-custom")
-    expect(models.mode.value).toBe("new")
+    expect(models.editing.value).toMatchObject({
+      provider: "qwen",
+      name: "custom",
+      model: "new",
+      max_context: 12000,
+    })
+    expect(models.mode.value).toBe("edit")
+  })
+
+  it("keeps known presets on an inventory refresh failure", async () => {
+    configAPI.getModels.mockResolvedValueOnce([user]).mockRejectedValueOnce(new Error("offline"))
+    const models = useModelPresets()
+    await models.load()
+    await models.load()
+    expect(models.presets.value).toEqual([user])
+    expect(ElMessage.error).toHaveBeenCalledWith("offline")
   })
 
   it("sets the default with the provider-qualified id and refreshes the open preset", async () => {

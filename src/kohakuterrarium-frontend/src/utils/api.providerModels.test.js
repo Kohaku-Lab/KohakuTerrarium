@@ -42,6 +42,8 @@ describe("provider model discovery requests", () => {
     ["removeKey", (name) => settingsAPI.removeKey(name)],
     ["saveBackend", (name) => settingsAPI.saveBackend({ name, backend_type: "openai" })],
     ["deleteBackend", (name) => settingsAPI.deleteBackend(name)],
+    ["saveProfile", (provider) => settingsAPI.saveProfile({ provider, name: "fast" })],
+    ["deleteProfile", (provider) => settingsAPI.deleteProfile("fast", provider)],
     ["codexLogin", () => settingsAPI.codexLogin()],
   ])("drops the cached catalog after %s", async (method, write) => {
     await loadProviderModels(settingsAPI, "qwen")

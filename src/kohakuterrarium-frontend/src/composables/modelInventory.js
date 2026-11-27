@@ -39,7 +39,8 @@ async function load(key, fetchModels, cache) {
   bucket.inFlight = fetchModels(key)
     .then((data) => {
       if (requestId !== bucket.requestId) return bucket.models.value
-      bucket.models.value = Array.isArray(data) ? data : []
+      if (!Array.isArray(data)) throw new Error("Invalid saved preset list.")
+      bucket.models.value = data
       bucket.hasLoaded.value = true
       bucket.fetchedAt = Date.now()
       return bucket.models.value

@@ -27,7 +27,7 @@
       </div>
     </div>
 
-    <DiscoveryPicker v-model="discoveryOpen" :backends="backends" @pick="models.startDiscovered" @configure="(name) => emit('configure', name)" />
+    <DiscoveryPicker v-model="discoveryOpen" :backends="backends" :presets="models.presets.value" @pick="models.startDiscovered" @existing="models.openExisting" @configure="(name) => emit('configure', name)" />
     <ExistingPicker v-model="pickerOpen" :presets="models.presets.value" :backends="backends" @pick="({ preset, provider }) => models.startFrom(preset, provider)" />
   </div>
 </template>

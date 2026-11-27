@@ -1,8 +1,8 @@
 """Preset drafts for the models a provider's catalog reports.
 
 A draft is the field set the Settings and CLI catalog pickers save as a new
-preset. It mirrors an existing preset for the same provider and model, else
-inherits the nearest same-family built-in preset, else turns the reported
+preset. A matching user name takes precedence, then a unique model alias, else it
+mirrors an existing built-in or inherits its nearest sibling, or turns the reported
 reasoning levels into the backend's own reasoning group. A package backend's
 suggested fields win over all of that.
 """
@@ -237,33 +237,45 @@ def _mirror(provider: str, name: str, data: dict[str, Any]) -> dict[str, Any]:
     return {"provider": provider, "name": name, "model": data.get("model", "")} | fields
 
 
-def _existing(
+def _draft_name(model_id: str) -> str:
+    return re.sub(r"[/@]", "-", model_id)
+
+
+def matching_presets(
     provider: str, model_id: str, catalog: dict, saved: dict
-) -> dict[str, Any] | None:
-    for (owner, name), preset in saved.items():
-        if owner == provider and preset.model == model_id:
-            return _mirror(provider, name, preset.to_dict())
-    for (owner, name), data in catalog.items():
-        if owner == provider and data.get("model") == model_id:
-            return _mirror(provider, name, data)
-    return None
+) -> list[str]:
+    """Find saved names for one provider row, preserving user alias ambiguity."""
+    name = _draft_name(model_id)
+    if (provider, name) in saved:
+        return [name]
+    aliases = sorted(
+        name
+        for (owner, name), p in saved.items()
+        if owner == provider and p.model == model_id
+    )
+    if aliases:
+        return aliases
+    for key, data in catalog.items():
+        if key[0] == provider and key not in saved and data.get("model") == model_id:
+            return [key[1]]
+    return []
 
 
-def draft_preset(
-    provider: str,
-    model: Any,
-    kind: str,
-    catalog: dict[tuple[str, str], dict[str, Any]],
-    saved: dict[tuple[str, str], LLMPreset] | None = None,
-) -> dict[str, Any]:
-    """The draft for one discovered model; ``model`` is a ``DiscoveredModel``."""
-    existing = _existing(provider, model.id, catalog, saved or {})
-    if existing is not None:
-        existing.setdefault("context_window", model.max_context)
-        return {k: v for k, v in existing.items() if v is not None}
+def draft_with_matches(
+    provider: str, model: Any, kind: str, catalog: dict, saved: dict
+) -> tuple[dict[str, Any], list[str]]:
+    """Build a draft together with the existing names the picker can offer."""
+    matches = matching_presets(provider, model.id, catalog, saved)
+    if len(matches) == 1:
+        key = (provider, matches[0])
+        data = saved[key].to_dict() if key in saved else catalog[key]
+        existing = _mirror(provider, matches[0], data)
+        if data.get("model") == model.id:
+            existing.setdefault("context_window", model.max_context)
+        return {k: v for k, v in existing.items() if v is not None}, matches
     fields: dict[str, Any] = {
         "provider": provider,
-        "name": re.sub(r"[/@]", "-", model.id),
+        "name": _draft_name(model.id),
         "model": model.id,
     }
     levels = tuple(model.reasoning_levels or ())
@@ -296,7 +308,17 @@ def draft_preset(
         fields |= _kind_reasoning(kind, levels)
     limits["context_window"] = model.max_context
     fields |= {key: value for key, value in limits.items() if value}
-    return fold_preset_fields(fields | _package_fields(provider, model, fields))
+    return (
+        fold_preset_fields(fields | _package_fields(provider, model, fields)),
+        matches,
+    )
+
+
+def draft_preset(
+    provider: str, model: Any, kind: str, catalog: dict, saved: dict | None = None
+) -> dict[str, Any]:
+    """The draft for one model in the provider catalog."""
+    return draft_with_matches(provider, model, kind, catalog, saved or {})[0]
 
 
 def suggest_drafts(provider: str, models: list[Any]) -> list[dict[str, Any]]:
@@ -309,18 +331,20 @@ def suggest_drafts(provider: str, models: list[Any]) -> list[dict[str, Any]]:
 
 def catalog_rows(provider: str, models: list[Any]) -> list[dict[str, Any]]:
     """Discovery rows for the Settings picker: model metadata plus its draft."""
-    known = {
-        (owner, data.get("model")) for (owner, _), data in get_all_presets().items()
-    }
-    known |= {(owner, preset.model) for (owner, _), preset in load_presets().items()}
-    drafts = suggest_drafts(provider, models)
-    return [
-        {
+    kind = draft_kind(load_backends().get(provider))
+    catalog = get_all_presets()
+    saved = load_presets()
+    rows = []
+    for model in models:
+        draft, matches = draft_with_matches(provider, model, kind, catalog, saved)
+        row = {
             **asdict(model),
             "reasoning_levels": list(model.reasoning_levels or ()),
             "context_window": model.max_context,
-            "has_preset": (provider, model.id) in known,
+            "has_preset": bool(matches),
             "preset": draft,
         }
-        for model, draft in zip(models, drafts)
-    ]
+        if len(matches) > 1:
+            row["preset_choices"] = matches
+        rows.append(row)
+    return rows

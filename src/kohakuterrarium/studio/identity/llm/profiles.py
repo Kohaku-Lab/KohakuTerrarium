@@ -7,7 +7,7 @@ canonical profile identity is ``(provider, name)``.
 
 from typing import Any
 
-from kohakuterrarium.llm.discovery import DiscoveredModel, suggested_presets
+from kohakuterrarium.llm.discovery import DiscoveredModel
 from kohakuterrarium.llm.profiles.resolve import (
     create_preset,
     LLMPreset,
@@ -47,6 +47,11 @@ def list_profiles_payload() -> list[dict[str, Any]]:
                 presets[key].variation_groups if key in presets else {}
             ),
             "selected_variations": p.selected_variations or {},
+            **(
+                {"provider_missing": True, "available": False}
+                if not p.backend_type
+                else {}
+            ),
         }
         for key, p in profiles.items()
     ]
@@ -129,12 +134,7 @@ def save_discovered_model(
     provider: str, model: DiscoveredModel
 ) -> tuple[LLMPreset, bool]:
     """Reuse a scoped preset, or create a new one with the discovered defaults."""
-    (draft,) = suggested_presets(provider, [model])
-    # Match the editable preset form defaults when the catalog omits limits.
-    return create_preset(
-        LLMPreset(**{"max_context": 128000, "max_output": 16384, **draft}),
-        reuse_model=True,
-    )
+    return create_preset(model, provider=provider)
 
 
 def remove_profile(name: str, provider: str = "") -> bool:

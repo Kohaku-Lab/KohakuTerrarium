@@ -1244,6 +1244,7 @@ export const settingsAPI = {
   },
   async saveProfile(profile) {
     const { data } = await api.post("/settings/profiles", profile)
+    invalidateProviderModels(profile.provider)
     return data
   },
   async deleteProfile(name, provider) {
@@ -1252,6 +1253,7 @@ export const settingsAPI = {
     }
     const target = `/settings/profiles/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`
     const { data } = await api.delete(target)
+    invalidateProviderModels(provider)
     return data
   },
   async getDefaultModel() {

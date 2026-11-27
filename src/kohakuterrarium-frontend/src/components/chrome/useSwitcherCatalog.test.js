@@ -30,7 +30,7 @@ function setup(names = ["mimo", "qwen"]) {
   const open = ref(false)
   const provider = ref(names[0])
   const scope = effectScope()
-  const catalog = scope.run(() => useSwitcherCatalog(api, open, provider))
+  const catalog = scope.run(() => useSwitcherCatalog(api, open, provider, ref([])))
   return { api, pending, open, provider, catalog, scope }
 }
 
