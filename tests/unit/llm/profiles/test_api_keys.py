@@ -116,6 +116,22 @@ class TestResolutionOrder:
         monkeypatch.setenv("MYCUSTOM", "custom-key")
         assert get_api_key("MYCUSTOM") == "custom-key"
 
+    def test_backend_key_stored_under_its_env_var_name(self, keys_file, monkeypatch):
+        monkeypatch.delenv("SHARED_ROUTER_KEY", raising=False)
+        save_api_key("SHARED_ROUTER_KEY", "router-secret")
+        assert ak.backend_api_key("glm", "SHARED_ROUTER_KEY") == "router-secret"
+        assert ak.backend_api_key("glm", "") == ""
+        save_api_key("glm", "own-secret")
+        assert ak.backend_api_key("glm", "SHARED_ROUTER_KEY") == "own-secret"
+
+    def test_stored_env_named_key_wins_over_the_environment(
+        self, keys_file, monkeypatch
+    ):
+        monkeypatch.setenv("SHARED_ROUTER_KEY", "from-env")
+        assert ak.backend_api_key("glm", "SHARED_ROUTER_KEY") == "from-env"
+        save_api_key("SHARED_ROUTER_KEY", "from-file")
+        assert ak.backend_api_key("glm", "SHARED_ROUTER_KEY") == "from-file"
+
     def test_not_found_anywhere_returns_empty(self, keys_file):
         assert get_api_key("nonexistent") == ""
 
