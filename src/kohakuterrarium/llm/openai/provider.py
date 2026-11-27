@@ -332,7 +332,8 @@ class OpenAIProvider(BaseLLMProvider):
                     "x-opencode-session": self.prompt_cache_key or self._go_session,
                 }
             }
-        if not self.prompt_cache_key:
+        # Gemini's OpenAI-compatible endpoint rejects unknown request fields.
+        if not self.prompt_cache_key or is_gemini_endpoint(self.base_url):
             return {}
         return {"prompt_cache_key": self.prompt_cache_key}
 
