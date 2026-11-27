@@ -15,7 +15,12 @@ export function useSwitcherCatalog(inventory, open, provider) {
   const providers = ref([])
   const entry = shallowRef(null)
   const rows = computed(() =>
-    bindProviderPresets(entry.value?.rows.value || [], presets.value, provider.value),
+    bindProviderPresets(
+      entry.value?.rows.value || [],
+      presets.value,
+      provider.value,
+      hasLoaded?.value,
+    ),
   )
   const busy = computed(() => Boolean(entry.value?.loading.value && !entry.value.hasLoaded.value))
   const error = computed(() =>
@@ -107,6 +112,7 @@ export function useSwitcherCatalog(inventory, open, provider) {
     refresh() {
       if (providersError.value) retryProviders.value++
       else refreshIndex.value++
+      return entry.value?.inFlight
     },
   }
 }

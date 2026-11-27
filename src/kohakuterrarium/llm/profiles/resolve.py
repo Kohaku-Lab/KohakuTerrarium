@@ -293,7 +293,9 @@ def create_preset(
             matches = matching_presets(provider, model_id, catalog, saved)
         if len(matches) > 1:
             choices = ", ".join(f"{provider}/{name}" for name in matches)
-            raise ValueError(f"Choose a saved preset for {model_id}: {choices}")
+            raise PresetAlreadyExists(
+                f"Choose a saved preset for {model_id}: {choices}"
+            )
         if matches:
             key = (provider, matches[0])
             if key in saved:

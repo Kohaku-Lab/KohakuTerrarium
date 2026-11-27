@@ -53,9 +53,10 @@
               <template v-if="showCatalog">
                 <div v-if="!catalogBackend.available && filteredCatalog.length" class="text-warm-500 text-[11px] p-2">Configure this provider in Settings to switch models.</div>
                 <template v-for="row in filteredCatalog.slice(0, catalogLimit)" :key="row.id">
-                  <button type="button" class="model-row" :class="{ 'is-active': selectedId === row.id }" @click="selectedId = row.id">
+                  <button type="button" class="model-row" :class="{ 'is-active': selectedId === row.id }" @click="row.stalePreset ? refreshCatalogSelection() : (selectedId = row.id)">
                     <span class="font-medium text-[12px] truncate">{{ row.preset?.model && row.preset.model !== row.id ? row.preset.name : row.name || row.id }}</span>
-                    <span v-if="row.preset?.model && row.preset.model !== row.id" class="text-[10px] text-warm-400 font-mono truncate">{{ row.preset.model }}</span>
+                    <span v-if="row.stalePreset" class="text-[10px] text-warm-500">Refresh saved preset</span>
+                    <span v-else-if="row.preset?.model && row.preset.model !== row.id" class="text-[10px] text-warm-400 font-mono truncate">{{ row.preset.model }}</span>
                     <span v-else-if="row.name && row.name !== row.id" class="text-[10px] text-warm-400 font-mono truncate">{{ row.id }}</span>
                   </button>
                   <div v-if="selectedId === row.id && row.preset_choices?.length" class="px-2 py-1.5 flex items-center flex-wrap gap-1">
@@ -464,9 +465,15 @@ function reconcileDraft() {
   }
 }
 
+async function refreshCatalogSelection() {
+  selectedId.value = ""
+  await Promise.all([refreshModels(), catalog.refresh()])
+}
+
 async function refreshInventory() {
   if (showCatalog.value) {
-    catalog.refresh()
+    if (catalog.selected.value?.stalePreset) await refreshCatalogSelection()
+    else catalog.refresh()
     return
   }
   if (providersError.value) catalog.refresh()
@@ -479,6 +486,24 @@ function onPickTarget(target) {
   ctx.selectTarget(target)
 }
 
+async function saveCatalogSelection(row) {
+  // Keep this catalog selection while the refresh adds the first saved preset.
+  showSaved.value = false
+  const owner = selectionVersion
+  try {
+    await ctx.inventory.catalog.saveProfile({ ...row.preset, create_only: true, catalog_model_id: row.id })
+  } catch (err) {
+    if (owner !== selectionVersion) return false
+    if (err?.response?.status !== 409) throw err
+    ElMessage.warning("Saved presets changed. Choose a preset again to switch.")
+    await refreshCatalogSelection()
+    return false
+  }
+  if (owner !== selectionVersion) return false
+  await refreshModels()
+  return owner === selectionVersion
+}
+
 async function applySelection() {
   const modelName = draftSelector.value
   if (!canPickModel.value || applying.value || !modelName || isCurrent(modelName) || contextInvalid.value || draftPresetData.value?.provider_missing || (showCatalog.value && !catalogBackend.value.available)) return
@@ -486,15 +511,7 @@ async function applySelection() {
   const wasTerrarium = isTerrarium.value
   applying.value = true
   try {
-    if (needsSave.value) {
-      // Keep this catalog selection while the refresh adds the first saved preset.
-      showSaved.value = false
-      const owner = selectionVersion
-      await ctx.inventory.catalog.saveProfile({ ...catalog.selected.value.preset, create_only: true })
-      if (owner !== selectionVersion) return
-      await refreshModels()
-      if (owner !== selectionVersion) return
-    }
+    if (needsSave.value && !(await saveCatalogSelection(catalog.selected.value))) return
     // The host context owns the route/session/target resolution and state
     // update; it returns the canonical ``provider/name[@variations]`` the
     // backend accepted so the pill matches what ``/model`` would show.

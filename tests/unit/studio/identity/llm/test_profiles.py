@@ -163,6 +163,65 @@ class TestContextWindowOnSave:
         assert stored.variation_groups == preset.variation_groups
 
 
+async def test_stale_catalog_create_requires_a_new_choice_and_preserves_aliases():
+    model = DiscoveredModel("fly/raw")
+    (row,) = catalog_rows("qwen", [model])
+    assert not row["has_preset"]
+    stale = ProfileRequest(
+        **row["preset"], create_only=True, catalog_model_id=row["id"]
+    )
+
+    # A different client creates a manual alias after the switcher loaded.
+    for name, limit in (("personal", 262144), ("short", 32000)):
+        await create_profile(
+            ProfileRequest(
+                name=name,
+                model=model.id,
+                provider="qwen",
+                max_context=limit,
+                create_only=True,
+            )
+        )
+        before = load_yaml_store()
+        with pytest.raises(HTTPException) as error:
+            await create_profile(stale)
+        assert error.value.status_code == 409
+        assert load_yaml_store() == before
+    (current,) = catalog_rows("qwen", [model])
+    assert current["preset_choices"] == ["personal", "short"]
+
+
+async def test_catalog_create_accepts_unmatched_models_only_in_the_named_provider():
+    save_profile_record("elsewhere", "fly/raw", "anthropic")
+    (row,) = catalog_rows("qwen", [DiscoveredModel("fly/raw")])
+    req = ProfileRequest(**row["preset"], create_only=True, catalog_model_id=row["id"])
+    assert (await create_profile(req))["name"] == "fly-raw"
+    with pytest.raises(HTTPException) as duplicate:
+        await create_profile(req)
+    assert duplicate.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "create_only,model_id", [(False, "fly/raw"), (True, "other"), (True, "")]
+)
+async def test_invalid_catalog_guard_never_modifies_an_existing_preset(
+    create_only, model_id
+):
+    save_profile_record("mine", "fly/raw", "qwen", max_context=262144)
+    before = load_yaml_store()
+    req = ProfileRequest(
+        name="mine",
+        model="fly/raw",
+        provider="qwen",
+        create_only=create_only,
+        catalog_model_id=model_id,
+    )
+    with pytest.raises(HTTPException) as invalid:
+        await create_profile(req)
+    assert invalid.value.status_code == 400
+    assert load_yaml_store() == before
+
+
 def test_catalog_name_collision_reuses_the_users_actual_route_without_writing():
     save_profile_record("fly-model", "private-route", "qwen", max_context=262144)
     save_profile_record("alias", "fly/model", "qwen")

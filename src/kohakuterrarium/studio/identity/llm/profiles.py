@@ -11,6 +11,7 @@ from kohakuterrarium.llm.discovery import DiscoveredModel
 from kohakuterrarium.llm.profiles.resolve import (
     create_preset,
     LLMPreset,
+    PresetAlreadyExists,
     _get_preset_definition,
     delete_profile,
     get_default_model,
@@ -95,17 +96,25 @@ def save_profile_record(
     context_aliases: dict[str, int] | None = None,
     *,
     create_only: bool = False,
+    catalog_model_id: str | None = None,
 ) -> LLMPreset:
     """Validate and persist a preset, raising ``ValueError`` for bad input.
 
     An omitted ``context_window`` keeps the one the stored or built-in preset has;
     so do its context aliases and a legacy ``context`` group it was folded from.
+    A create-only catalog save conflicts if another client saved a matching alias.
     """
     if not name or not model or not provider:
         raise ValueError("Name, model, and provider are required")
+    if catalog_model_id is not None and (
+        not create_only or not catalog_model_id.strip() or catalog_model_id != model
+    ):
+        raise ValueError(
+            "A catalog save requires create_only and its original model ID"
+        )
     if provider not in load_backends():
         raise ValueError(f"Provider not found: {provider}")
-    stored = _get_preset_definition(name, provider)
+    stored = None if create_only else _get_preset_definition(name, provider)
     if context_window is None:
         context_window = stored.context_window if stored else None
     preset = LLMPreset(
@@ -125,7 +134,14 @@ def save_profile_record(
     )
     preset.inherit_context_fold(stored)
     if create_only:
-        return create_preset(preset)[0]
+        result, created = create_preset(
+            preset, reuse_model=catalog_model_id is not None
+        )
+        if not created:
+            raise PresetAlreadyExists(
+                "A matching preset now exists. Refresh and choose the saved preset."
+            )
+        return result
     save_profile(preset)
     return preset
 

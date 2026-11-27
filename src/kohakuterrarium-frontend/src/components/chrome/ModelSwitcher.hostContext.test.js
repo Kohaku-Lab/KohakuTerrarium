@@ -161,7 +161,11 @@ describe("shared ModelSwitcher host context", () => {
     expect(api.saveProfile).not.toHaveBeenCalled()
     await buttonByText(wrapper, "Save & switch").trigger("click")
     await flushPromises()
-    expect(api.saveProfile).toHaveBeenCalledWith({ ...preset, create_only: true })
+    expect(api.saveProfile).toHaveBeenCalledWith({
+      ...preset,
+      create_only: true,
+      catalog_model_id: preset.model,
+    })
     expect(context.switchModel).toHaveBeenCalledWith({
       target: "beta",
       selector: "deepseek/deepseek-flash",
@@ -187,7 +191,11 @@ describe("shared ModelSwitcher host context", () => {
     await wrapper.get('[aria-label="Provider models"] .model-row').trigger("click")
     await buttonByText(wrapper, "Save & switch").trigger("click")
     await flushPromises()
-    expect(saveProfile).toHaveBeenCalledExactlyOnceWith({ ...preset, create_only: true })
+    expect(saveProfile).toHaveBeenCalledExactlyOnceWith({
+      ...preset,
+      create_only: true,
+      catalog_model_id: preset.model,
+    })
     expect(context.inventory.models.value).toEqual(options.models)
     expect(context.switchModel).toHaveBeenCalledExactlyOnceWith({
       target: "beta",
@@ -195,6 +203,90 @@ describe("shared ModelSwitcher host context", () => {
     })
     await openDrawer(wrapper)
     expect(wrapper.get('[aria-label="Saved presets"] .model-row').text()).toContain("first")
+    wrapper.unmount()
+  })
+
+  it("refreshes both lists after a concurrent save, then waits for an explicit switch", async () => {
+    const state = { hostKey: ref("catalog-conflict"), models: [] }
+    const context = makeContext(state)
+    const preset = { provider: "codex", name: "new", model: "new" }
+    const existing = {
+      ...preset,
+      name: "my-new",
+      max_context: 10000,
+      source: "user",
+      available: true,
+    }
+    const discoverModels = vi.fn(async () => ({
+      models: [{ id: "new", preset: state.models[0] || preset, has_preset: !!state.models.length }],
+    }))
+    const saveProfile = vi.fn(async () => {
+      state.models = [existing]
+      throw { response: { status: 409, data: { detail: "Preset changed" } } }
+    })
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", available: true, model_discovery: true }],
+      }),
+      discoverModels,
+      saveProfile,
+    }
+    const wrapper = mountShared(context)
+    await openDrawer(wrapper)
+    await wrapper.get(".model-row").trigger("click")
+    await buttonByText(wrapper, "Save & switch").trigger("click")
+    await flushPromises()
+    expect(saveProfile).toHaveBeenCalledExactlyOnceWith({
+      ...preset,
+      create_only: true,
+      catalog_model_id: "new",
+    })
+    expect(discoverModels.mock.calls).toEqual([["codex"], ["codex", { refresh: true }]])
+    expect(context.inventory.models.value).toEqual([existing])
+    expect(context.switchModel).not.toHaveBeenCalled()
+    expect(wrapper.get("code").text()).toBe("—")
+    await wrapper.get(".model-row").trigger("click")
+    expect(wrapper.get("code").text()).toBe("codex/my-new")
+    await buttonByText(wrapper, "Switch").trigger("click")
+    await flushPromises()
+    expect(context.switchModel).toHaveBeenCalledExactlyOnceWith({
+      target: "beta",
+      selector: "codex/my-new",
+    })
+    expect(saveProfile).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it("refreshes a cached deleted alias before offering to save its model again", async () => {
+    const state = { hostKey: ref("deleted-catalog-alias"), models: [] }
+    const context = makeContext(state)
+    const fresh = { provider: "codex", name: "model", model: "model" }
+    const stale = { ...fresh, name: "deleted", max_context: 10000 }
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", available: true, model_discovery: true }],
+      }),
+      discoverModels: vi
+        .fn()
+        .mockResolvedValueOnce({ models: [{ id: "model", preset: stale, has_preset: true }] })
+        .mockResolvedValueOnce({ models: [{ id: "model", preset: fresh, has_preset: false }] }),
+      saveProfile: vi.fn(),
+    }
+    const wrapper = mountShared(context)
+    await openDrawer(wrapper)
+    expect(wrapper.get(".model-row").text()).toContain("Refresh saved preset")
+    await wrapper.get(".model-row").trigger("click")
+    await flushPromises()
+    expect(context.inventory.catalog.discoverModels.mock.calls).toEqual([
+      ["codex"],
+      ["codex", { refresh: true }],
+    ])
+    expect(wrapper.get("code").text()).toBe("—")
+    await wrapper.get(".model-row").trigger("click")
+    expect(wrapper.get("code").text()).toBe("codex/model")
+    expect(buttonByText(wrapper, "Save & switch")).toBeDefined()
+    expect(context.inventory.catalog.saveProfile).not.toHaveBeenCalled()
+    expect(context.switchModel).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

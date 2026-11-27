@@ -1,4 +1,4 @@
-import { computed, ref } from "vue"
+import { computed, onScopeDispose, ref } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import {
@@ -28,7 +28,13 @@ export function useModelPresets() {
   )
 
   let loadVersion = 0
+  let disposed = false
+  onScopeDispose(() => {
+    disposed = true
+    loadVersion++
+  }, true)
   async function load() {
+    if (disposed) return
     const version = ++loadVersion
     try {
       const data = await configAPI.getModels()
@@ -104,9 +110,8 @@ export function useModelPresets() {
 
   async function save(payload) {
     try {
-      await settingsAPI.saveProfile(
-        mode.value === "new" ? { ...payload, create_only: true } : payload,
-      )
+      const createOnly = mode.value === "new" || presetKey(payload) !== selectedKey.value
+      await settingsAPI.saveProfile(createOnly ? { ...payload, create_only: true } : payload)
       ElMessage.success(t("settings.models.saved", { name: payload.name }))
       selectedKey.value = `${payload.provider}/${payload.name}`
       await load()
@@ -146,6 +151,7 @@ export function useModelPresets() {
     } catch {
       return
     }
+    if (disposed) return
     try {
       await settingsAPI.deleteProfile(preset.name, preset.provider)
       ElMessage.success(t("settings.models.deleted", { name: preset.name }))

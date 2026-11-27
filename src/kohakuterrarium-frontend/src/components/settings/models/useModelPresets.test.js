@@ -129,6 +129,22 @@ describe("useModelPresets", () => {
     expect(ElMessage.error).toHaveBeenCalledWith("boom")
   })
 
+  it("requires a free destination name when changing the provider of a saved preset", async () => {
+    const models = useModelPresets()
+    models.select(user)
+    const destination = { name: user.name, provider: "other", model: "custom-model" }
+    settingsAPI.saveProfile.mockRejectedValueOnce(new Error("name already exists"))
+
+    await models.save(destination)
+    expect(settingsAPI.saveProfile).toHaveBeenCalledWith({ ...destination, create_only: true })
+    expect(models.selectedKey.value).toBe("openai/fast")
+    expect(ElMessage.error).toHaveBeenCalledWith("name already exists")
+
+    const sameProvider = { ...destination, provider: user.provider }
+    await models.save(sameProvider)
+    expect(settingsAPI.saveProfile).toHaveBeenLastCalledWith(sameProvider)
+  })
+
   it("deletes through the provider-qualified route and closes the editor", async () => {
     configAPI.getModels.mockResolvedValue([user])
     settingsAPI.deleteProfile.mockResolvedValue({})
