@@ -35,6 +35,7 @@ from kohakuterrarium.llm.openai.helpers import (
     is_gemini_endpoint,
     log_token_usage,
     merge_reasoning_detail_stream,
+    move_tool_result_images,
     normalize_stateful_assistant_fields,
     pack_reasoning_fields,
     restore_tool_call_extra,
@@ -303,6 +304,7 @@ class OpenAIProvider(BaseLLMProvider):
         messages = resolve_message_image_urls(messages)
         if is_gemini_endpoint(self.base_url):
             messages = restore_tool_call_extra(messages)
+            messages = move_tool_result_images(messages)
         messages = strip_internal_message_fields(messages)
         messages = strip_kt_extras(messages)
         messages = normalize_stateful_assistant_fields(messages)
