@@ -140,6 +140,7 @@ async def resume_cluster(
     workspace_overrides: dict[str, str] | None = None,
     member_workspace_overrides: dict[str, dict[str, str]] | None = None,
     member_pwd_overrides: dict[str, str] | None = None,
+    member_image_repair_confirmations: dict[str, str] | None = None,
     resolve_session_path: Callable[[str, Path], Path | None],
     worker_workspace_preflight: Callable[..., Awaitable[dict[str, Any]]],
     push_and_resume_member: Callable[..., Awaitable[tuple]],
@@ -197,7 +198,9 @@ async def resume_cluster(
         )
     known_member_ids = set(member_ids)
     unknown_override_ids = (
-        set(member_workspace_overrides or {}) | set(member_pwd_overrides or {})
+        set(member_workspace_overrides or {})
+        | set(member_pwd_overrides or {})
+        | set(member_image_repair_confirmations or {})
     ) - known_member_ids
     if unknown_override_ids:
         raise HTTPException(
@@ -248,6 +251,10 @@ async def resume_cluster(
                 on_node=member.on_node,
                 pwd_override=member_pwds[member.sid],
                 workspace_overrides=member_overrides[member.sid],
+                image_repair_confirmation=(member_image_repair_confirmations or {}).get(
+                    member.sid
+                ),
+                member_id=member.sid,
             )
             resumed[member.sid] = (new_sid, new_meta, member.on_node)
             remote_paths[member.sid] = remote_session_path

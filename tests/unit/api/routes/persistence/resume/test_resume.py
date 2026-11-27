@@ -164,6 +164,7 @@ class TestHostResume:
             saved_path,
             pwd_override=None,
             workspace_overrides=None,
+            **image_options,
         ):
             nonlocal calls
             calls += 1
@@ -267,6 +268,7 @@ class TestHostResume:
             path,
             pwd_override=None,
             workspace_overrides=None,
+            **image_options,
         ):
             resumed.append((service, path))
             return _session(sid=f"sess-{path.parent.name}")
@@ -452,7 +454,11 @@ class TestHostResume:
             return service
 
         async def fake_resume(
-            actual_service, target, pwd_override=None, workspace_overrides=None
+            actual_service,
+            target,
+            pwd_override=None,
+            workspace_overrides=None,
+            **image_options,
         ):
             events.append(
                 (
@@ -564,7 +570,7 @@ class TestHostResume:
         )
 
         async def fake_resume(
-            engine, path, pwd_override=None, workspace_overrides=None
+            engine, path, pwd_override=None, workspace_overrides=None, **image_options
         ):
             return _session()
 
@@ -584,7 +590,7 @@ class TestHostResume:
         )
 
         async def fake_resume(
-            engine, path, pwd_override=None, workspace_overrides=None
+            engine, path, pwd_override=None, workspace_overrides=None, **image_options
         ):
             return _session(
                 creatures=[
@@ -606,7 +612,9 @@ class TestHostResume:
             lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
-        async def boom(engine, path, pwd_override=None, workspace_overrides=None):
+        async def boom(
+            engine, path, pwd_override=None, workspace_overrides=None, **image_options
+        ):
             raise FileNotFoundError("no such file")
 
         monkeypatch.setattr(resume_mod, "studio_resume", boom)
@@ -621,7 +629,9 @@ class TestHostResume:
             lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
-        async def boom(engine, path, pwd_override=None, workspace_overrides=None):
+        async def boom(
+            engine, path, pwd_override=None, workspace_overrides=None, **image_options
+        ):
             raise ValueError("bad payload")
 
         monkeypatch.setattr(resume_mod, "studio_resume", boom)
@@ -639,7 +649,7 @@ class TestHostResume:
         called_with = {}
 
         async def fake_resume(
-            engine, path, pwd_override=None, workspace_overrides=None
+            engine, path, pwd_override=None, workspace_overrides=None, **image_options
         ):
             called_with["path"] = path
             called_with["pwd_override"] = pwd_override
@@ -665,7 +675,7 @@ class TestHostResume:
         called_with = {}
 
         async def fake_resume(
-            engine, path, pwd_override=None, workspace_overrides=None
+            engine, path, pwd_override=None, workspace_overrides=None, **image_options
         ):
             called_with["pwd_override"] = pwd_override
             return _session()

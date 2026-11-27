@@ -82,17 +82,20 @@ async def test_cancel_after_transfer_deletes_staged_store(monkeypatch, tmp_path)
             on_node="w1",
         )
 
-    assert transferred == [(host, "w1", "config://", "resume/saved.kohakutr", path)]
+    (upload,) = transferred
+    rel = upload[3]
+    assert rel.startswith("resume/") and rel.endswith("-saved.kohakutr")
+    assert upload == (host, "w1", "config://", rel, path)
     assert host.calls == [
         (
             "terrarium.files",
             "stat",
-            {"scope": "config://", "path": "resume/saved.kohakutr"},
+            {"scope": "config://", "path": rel},
         ),
         (
             "terrarium.files",
             "delete",
-            {"scope": "config://", "path": "resume/saved.kohakutr"},
+            {"scope": "config://", "path": rel},
         ),
     ]
 

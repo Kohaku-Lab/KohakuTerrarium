@@ -22,6 +22,8 @@ async def push_and_resume_member(
     on_node: str,
     pwd_override: str | None = None,
     workspace_overrides: dict[str, str] | None = None,
+    image_repair_confirmation: str | None = None,
+    member_id: str | None = None,
 ) -> tuple[str, dict, bool | None, str, list[dict[str, Any]]]:
     """Transfer one saved store and return its adopted worker identity."""
     mirror = getattr(request.app.state, "session_mirror", None)
@@ -31,9 +33,9 @@ async def push_and_resume_member(
         except Exception:  # pragma: no cover - defensive
             pass
 
-    rel = f"resume/{path.name}"
-    worker_path = ""
     resume_token = uuid4().hex
+    rel = f"resume/{resume_token}-{path.name}"
+    worker_path = ""
     transferred = False
     resumed_sid = ""
     try:
@@ -79,6 +81,8 @@ async def push_and_resume_member(
                 "path": worker_path,
                 "pwd_override": pwd_override,
                 "workspace_overrides": workspace_overrides,
+                "missing_images": "error",
+                "image_repair_confirmation": image_repair_confirmation,
                 "resume_token": resume_token,
             },
             timeout=60.0,
@@ -87,6 +91,12 @@ async def push_and_resume_member(
             raise HTTPException(
                 status_code=502,
                 detail=f"worker {on_node!r} returned an invalid resume response",
+            )
+        image_report = worker_response.get("missing_resume_images")
+        if isinstance(image_report, dict):
+            raise HTTPException(
+                status_code=409,
+                detail={**image_report, "node": on_node, "member_id": member_id},
             )
         if "error" in worker_response:
             error = worker_response["error"]
@@ -151,7 +161,7 @@ async def push_and_resume_member(
                 pass
         elif transferred and worker_path:
             try:
-                await host.request(
+                cleanup = await host.request(
                     to_node=on_node,
                     namespace="terrarium.session",
                     type="rollback_resume",
@@ -161,8 +171,14 @@ async def push_and_resume_member(
                     },
                     timeout=30.0,
                 )
-            except BaseException:
-                pass
+                if not isinstance(cleanup, dict) or cleanup.get("ok") is not True:
+                    raise RuntimeError("worker did not confirm deletion")
+            except Exception as cleanup_error:
+                if isinstance(exc, HTTPException) and exc.status_code == 409:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"worker {on_node!r} could not clean up the staged resume",
+                    ) from cleanup_error
         elif transferred:
             try:
                 await host.request(

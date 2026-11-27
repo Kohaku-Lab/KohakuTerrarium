@@ -19,6 +19,7 @@ from kohakuterrarium.session.occupancy.mutation import (
     run_admitted_mutation,
 )
 from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.resume.images import MissingResumeImagesError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY, parse_manifest
@@ -435,12 +436,17 @@ class TerrariumSessionAdapter:
             )
         if not local.exists():
             raise FileNotFoundError(f"no .kohakutr at {str(local)!r}")
-        sid = await self._engine.adopt_session(
-            local,
-            pwd=body.get("pwd_override"),
-            workspace_overrides=workspace_overrides,
-            llm=body.get("llm"),
-        )
+        try:
+            sid = await self._engine.adopt_session(
+                local,
+                pwd=body.get("pwd_override"),
+                workspace_overrides=workspace_overrides,
+                llm=body.get("llm"),
+                missing_images=body.get("missing_images", "warn"),
+                image_repair_confirmation=body.get("image_repair_confirmation"),
+            )
+        except MissingResumeImagesError as exc:
+            return {"missing_resume_images": exc.report.detail()}
         if isinstance(resume_token, str):
             self._remember_resume_token(resume_token, sid, local)
         store = getattr(self._engine, "_session_stores", {}).get(sid)

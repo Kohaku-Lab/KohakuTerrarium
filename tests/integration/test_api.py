@@ -2317,6 +2317,37 @@ class TestApiIntegration:
         assert "second turn please" not in str(historical.json())
         assert client.delete("/api/sessions/retired-source").status_code == 200
 
+        assert client.delete(f"/api/sessions/active/{resumed_id}").status_code == 200
+        image_url = (tmp_path / "missing-photo.png").as_uri()
+        saved_store = SessionStore(target_path, writer_lock=True)
+        try:
+            saved_store.append_event(
+                "alice",
+                "user_message",
+                {"content": [{"type": "image_url", "image_url": {"url": image_url}}]},
+                turn_index=3,
+                branch_id=1,
+                parent_branch_path=[(1, 1), (2, 1)],
+            )
+            saved_store.append_event(
+                "alice", "processing_end", {}, turn_index=3, branch_id=1
+            )
+        finally:
+            saved_store.close(update_status=False)
+        resume_url = f"/api/sessions/{saved_name}/resume"
+        blocked = client.post(resume_url)
+        assert blocked.status_code == 409, blocked.text
+        issue = blocked.json()["detail"]
+        assert issue["code"] == "missing_resume_images"
+        assert issue["total"] == issue["files"] == issue["repairable"] == 1
+        assert issue["examples"][0]["url"] == image_url
+        assert client.get("/api/sessions/active").json() == []
+        accepted = client.post(
+            resume_url, json={"image_repair_confirmation": issue["confirmation"]}
+        )
+        assert accepted.status_code == 200, accepted.text
+        resumed_id = accepted.json()["instance_id"]
+
         # Resuming a session that does not exist on disk → 404.
         resp = client.post("/api/sessions/no-such-session/resume")
         assert resp.status_code == 404

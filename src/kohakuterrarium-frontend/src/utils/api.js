@@ -901,6 +901,10 @@ export const sessionAPI = {
     if (opts.memberPwdOverrides) {
       body.member_pwd_overrides = opts.memberPwdOverrides
     }
+    if (opts.imageRepairConfirmation) body.image_repair_confirmation = opts.imageRepairConfirmation
+    if (Object.keys(opts.memberImageRepairConfirmations || {}).length) {
+      body.member_image_repair_confirmations = opts.memberImageRepairConfirmations
+    }
     const { data } = await api.post(`/sessions/${sessionName}/resume`, body)
     return data
   },

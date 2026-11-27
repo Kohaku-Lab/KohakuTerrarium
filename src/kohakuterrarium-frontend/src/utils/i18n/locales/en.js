@@ -62,6 +62,18 @@ export default {
   "common.cached": "Cached",
   "common.cancel": "Cancel",
   "common.back": "Back",
+  "resumeImages.title": "Historical images unavailable",
+  "resumeImages.summary":
+    "{total} unavailable references: {files} original files and {artifacts} session artifacts. {repairable} can be replaced with notes.",
+  "resumeImages.worker": "Checked on worker: {node}",
+  "resumeImages.turn": "Turn {turn_index}",
+  "resumeImages.more": "{count} more not shown.",
+  "resumeImages.replaceHelp":
+    "Restore the files and retry to keep the images. Replacing them changes what the model sees in this branch, not the original session events.",
+  "resumeImages.restoreHelp":
+    "Some references cannot safely be replaced. Restore the unavailable files, then retry.",
+  "resumeImages.retry": "Retry",
+  "resumeImages.replace": "Replace with notes and resume",
   "workspaceResume.title": "Workspace unavailable",
   "workspaceResume.body":
     "The saved workspace is unavailable. Choose an existing folder to replace only this missing workspace group, view the saved history, or cancel without resuming.",

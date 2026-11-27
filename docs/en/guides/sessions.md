@@ -641,17 +641,27 @@ No `.kohakutr` is created. This also disables compaction's ability to recover pr
 
 ## Troubleshooting
 
-- **An old missing image blocks every request.** Run `/repair-images` to inspect
-  missing local `file://` images in completed turns older than the current turn.
-  Confirm using the displayed `/repair-images --apply <confirmation>` command
-  (or the web confirmation). Each selected image becomes a text note explaining
-  that its contents are unavailable. The repair saves only the active branch's
-  context; recorded events and sibling branches remain intact. Retry your message
-  afterwards. A changed context or file set requires a fresh preview. Current,
-  interrupted, unfinished, and unidentified turns remain protected, as do session
-  artifacts, remote URLs, and files that fail for reasons other than absence.
-  Restore or reattach those images instead. No surviving file is migrated or read
-  into a new snapshot. Repair requires an idle creature with a persisted session.
+- **Resume reports unavailable historical images.** The app and terminal check
+  local `file://` references and session artifact references before opening the
+  conversation. Restore the files and retry to keep the images, or confirm
+  replacement with text notes when all reported references can safely be replaced.
+  Lab workers inspect their own filesystem. Terminal scripts can select
+  `--missing-images=ignore|warn|error`; Python callers can pass the equivalent
+  `missing_images=` to `Terrarium.resume`, `adopt_session`, or `Studio.resume`.
+  Python defaults to `warn`: it leaves history unchanged and may still fail at
+  the next model request if that request needs an unavailable image. `ignore`
+  skips inspection; `error` raises `MissingResumeImagesError` before adopting the
+  session. The exception carries a `report` with counts and individual references.
+  `inspect_resume_images(path)` can also return the report without starting an agent.
+  Both are available in `kohakuterrarium.session.resume.images`.
+- **An image disappears after resume.** Run `/repair-images` on an idle creature
+  with a persisted session, then confirm the preview with
+  `/repair-images --apply <confirmation>` (or the web confirmation). This only
+  replaces missing originals or session artifacts in identifiable, completed older
+  turns. A changed context or file set requires a fresh preview. Repair saves the
+  active branch's context; recorded events and sibling branches remain intact.
+  Restore or reattach images from interrupted, unfinished, or unidentified turns
+  rather than replacing them automatically.
 - **Compaction runs forever / OOMs.** The compact model is the same heavy controller model. Set `compact_model` to something cheap (`gpt-4o-mini`, `claude-haiku`).
 - **Resume errors with `tool not registered`.** The creature config changed (a tool was removed) but the conversation still references it. Manually edit `config.yaml` to re-add the tool, or start a fresh session.
 - **`kt resume` can't find a session I just saw.** Sessions are resolved by prefix against filenames in `~/.kohakuterrarium/sessions/`. If you renamed the file or moved it, pass the full path.

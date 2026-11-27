@@ -40,6 +40,7 @@ import { defineStore } from "pinia"
 
 import { acquireScope, releaseScope } from "@/composables/useScope"
 import { attachAPI } from "@/utils/api"
+import { resumeWithImageChoices } from "@/utils/resumeImages"
 import { resumedTabMeta } from "@/utils/resumedTab"
 import { parseTabId } from "@/utils/tabsUrl"
 import {
@@ -631,14 +632,18 @@ export const useTabsStore = defineStore("tabs", {
           return null
         }
         if (prepared.action !== "resume") return null
-        const result = await sessionAPI.resume(sessionName, {
-          onNode,
-          members: prepared.members,
-          workspaceOverrides: prepared.workspaceOverrides,
-          memberWorkspaceOverrides: prepared.memberWorkspaceOverrides,
-          memberPwdOverrides: prepared.memberPwdOverrides,
-          pwd: prepared.pwd,
-        })
+        const result = await resumeWithImageChoices((imageOptions) =>
+          sessionAPI.resume(sessionName, {
+            onNode,
+            members: prepared.members,
+            workspaceOverrides: prepared.workspaceOverrides,
+            memberWorkspaceOverrides: prepared.memberWorkspaceOverrides,
+            memberPwdOverrides: prepared.memberPwdOverrides,
+            pwd: prepared.pwd,
+            ...imageOptions,
+          }),
+        )
+        if (!result) return null
         id = result.instance_id
         resumeMeta = resumedTabMeta(result, sessionName)
       } else {

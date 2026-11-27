@@ -65,6 +65,17 @@ export default {
   "common.available": "可用",
   "common.cached": "已缓存",
   "common.cancel": "取消",
+  "resumeImages.title": "历史图片不可用",
+  "resumeImages.summary":
+    "有 {total} 个图片引用不可用：原始文件 {files} 个、会话副本 {artifacts} 个。其中 {repairable} 个可替换为文字说明。",
+  "resumeImages.worker": "检查所在的工作节点：{node}",
+  "resumeImages.turn": "第 {turn_index} 轮",
+  "resumeImages.more": "另有 {count} 个未显示。",
+  "resumeImages.replaceHelp":
+    "若要保留图片，请恢复文件后重试。替换只会改变模型在当前分支看到的内容，不会改写原始事件。",
+  "resumeImages.restoreHelp": "部分引用无法安全替换。请恢复不可用的文件后重试。",
+  "resumeImages.retry": "重试",
+  "resumeImages.replace": "替换为文字说明并继续",
   "workspaceResume.title": "工作目录不可用",
   "workspaceResume.body":
     "已保存的工作目录不可用。请选择现有目录，仅替换当前失效的目录组；也可只查看历史或取消恢复。",

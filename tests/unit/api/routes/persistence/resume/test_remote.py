@@ -280,7 +280,8 @@ class TestRemoteWritePath:
         resume_calls = [c for c in host.calls if c["namespace"] == "terrarium.session"]
         assert resume_calls[0]["body"]["pwd_override"] == "/new/dir"
         assert resume_calls[0]["body"]["scope"] == "config://"
-        assert resume_calls[0]["body"]["rel"] == "resume/x.kohakutr"
+        body = resume_calls[0]["body"]
+        assert body["rel"] == f"resume/{body['resume_token']}-x.kohakutr"
 
     def test_agent_response_preserves_legacy_type_name_and_fallback(
         self, monkeypatch, tmp_path
@@ -396,7 +397,7 @@ class TestRemoteWritePath:
                 "namespace": "terrarium.session",
                 "type": "rollback_resume",
                 "body": {
-                    "session_path": "C:/worker-config/resume/x.kohakutr",
+                    "session_path": f"C:/worker-config/resume/{resume_token}-x.kohakutr",
                     "resume_token": resume_token,
                 },
             }
@@ -472,7 +473,8 @@ class TestRemoteWritePath:
         assert any(
             call["namespace"] == "terrarium.files"
             and call["type"] == "delete"
-            and call["body"] == {"scope": "config://", "path": "resume/x.kohakutr"}
+            and call["body"]["scope"] == "config://"
+            and call["body"]["path"].endswith("-x.kohakutr")
             for call in host.calls
         )
 
@@ -869,7 +871,7 @@ class TestClusterResume:
                 "type": "rollback_resume",
                 "to": "w2",
                 "body": {
-                    "session_path": "C:/worker-config/resume/sid-b.kohakutr",
+                    "session_path": f"C:/worker-config/resume/{failed_resume_token}-sid-b.kohakutr",
                     "resume_token": failed_resume_token,
                 },
             },

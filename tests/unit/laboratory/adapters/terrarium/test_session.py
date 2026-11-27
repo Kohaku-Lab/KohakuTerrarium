@@ -55,6 +55,7 @@ class _FakeEngine:
         pwd=None,
         workspace_overrides=None,
         llm=None,
+        **image_options,
     ):
         self._adopt_calls.append(
             {

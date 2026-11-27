@@ -14,6 +14,17 @@ export default {
   "common.available": "可用",
   "common.cached": "已快取",
   "common.cancel": "取消",
+  "resumeImages.title": "歷史圖片無法使用",
+  "resumeImages.summary":
+    "有 {total} 個圖片引用無法使用：原始檔案 {files} 個、工作階段副本 {artifacts} 個。其中 {repairable} 個可替換成文字註記。",
+  "resumeImages.worker": "檢查所在的工作節點：{node}",
+  "resumeImages.turn": "第 {turn_index} 輪",
+  "resumeImages.more": "另有 {count} 個未顯示。",
+  "resumeImages.replaceHelp":
+    "若要保留圖片，請補回檔案後重試。替換只會改變模型在這個分支看到的內容，不會改寫原始事件。",
+  "resumeImages.restoreHelp": "部分引用無法安全替換。請補回無法使用的檔案後重試。",
+  "resumeImages.retry": "重試",
+  "resumeImages.replace": "換成文字註記並繼續",
   "workspaceResume.title": "工作目錄無法使用",
   "workspaceResume.body":
     "已儲存的工作目錄無法使用。請選擇現有目錄，只替換目前失效的目錄群組；也可只查看歷史或取消恢復。",

@@ -45,6 +45,8 @@ def resume_intent(body: Any) -> str:
             flat(body.workspace_overrides),
             nested,
             flat(body.member_pwd_overrides),
+            body.image_repair_confirmation,
+            flat(body.member_image_repair_confirmations),
         )
     )
 

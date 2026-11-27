@@ -18,6 +18,7 @@
     <ToastCenter />
     <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
     <WorkspaceResumeDialog />
+    <ResumeImagesDialog />
     <AdminTokenModal />
     <LoginPromptModal />
   </div>
@@ -38,6 +39,7 @@ import HostPickerModal from "@/components/host-picker/HostPickerModal.vue"
 import DeepLinkInstallDialog from "@/components/shell/DeepLinkInstallDialog.vue"
 import DesktopOpenHost from "@/components/shell/DesktopOpenHost.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
+import ResumeImagesDialog from "@/components/shell/modals/ResumeImagesDialog.vue"
 import WorkspaceResumeDialog from "@/components/shell/modals/WorkspaceResumeDialog.vue"
 import OverlayLayer from "@/ext/OverlayLayer.vue"
 import { useDesktopPublisher } from "@/ext/desktopContext"

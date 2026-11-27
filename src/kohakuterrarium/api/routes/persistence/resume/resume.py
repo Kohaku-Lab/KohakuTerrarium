@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.deps import (
     get_service_factory,
@@ -54,6 +54,7 @@ from kohakuterrarium.api.routes.persistence.resume.response import (
     build_single_remote_response as _build_single_remote_response,
 )
 from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.resume.images import MissingResumeImagesError
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.studio.persistence.resume import resume_session as studio_resume
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY, parse_manifest
@@ -249,6 +250,8 @@ class ResumeRequest(BaseModel):
     # Cluster form: member session id -> that node's targeted replacements.
     member_workspace_overrides: dict[str, dict[str, str]] | None = None
     member_pwd_overrides: dict[str, str] | None = None
+    image_repair_confirmation: str | None = Field(default=None, max_length=24)
+    member_image_repair_confirmations: dict[str, str] | None = None
 
 
 @router.post("/{session_name}/resume")
@@ -346,7 +349,11 @@ async def _resume_session(
                 path,
                 pwd_override=req.pwd,
                 workspace_overrides=req.workspace_overrides,
+                missing_images="error",
+                image_repair_confirmation=req.image_repair_confirmation,
             )
+        except MissingResumeImagesError as exc:
+            raise HTTPException(status_code=409, detail=exc.report.detail()) from exc
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -413,6 +420,7 @@ async def _resume_session(
             workspace_overrides=req.workspace_overrides,
             member_workspace_overrides=req.member_workspace_overrides,
             member_pwd_overrides=req.member_pwd_overrides,
+            member_image_repair_confirmations=req.member_image_repair_confirmations,
         )
 
     await _worker_workspace_preflight(
@@ -435,6 +443,7 @@ async def _resume_session(
         on_node=on_node,
         pwd_override=req.pwd,
         workspace_overrides=req.workspace_overrides,
+        image_repair_confirmation=req.image_repair_confirmation,
     )
     try:
         mirror_snapshot = await asyncio.to_thread(
