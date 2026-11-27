@@ -104,6 +104,29 @@ async def test_go_session_identity_on_stream_complete_and_fork():
         assert headers[2] == headers[3] and headers[2] != headers[0]
 
 
+@pytest.mark.parametrize(
+    ("base_url", "sent"),
+    [
+        ("https://generativelanguage.googleapis.com/v1beta/openai/", False),
+        ("https://compatible.example/v1", True),
+    ],
+)
+async def test_cache_routing_key_stays_out_of_gemini_requests(base_url, sent):
+    bodies = []
+
+    async def respond(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        return _success(body.get("stream", False))
+
+    async with OpenAIProvider(api_key="k", model="test", base_url=base_url) as provider:
+        await _attach_transport(provider, respond)
+        provider.prompt_cache_key = "saved-session"
+        assert await _turn(provider, False) == "ok"
+        assert await _turn(provider, True) == "ok"
+    assert [("prompt_cache_key" in body) for body in bodies] == [sent, sent]
+
+
 class TestContentRejection:
     @pytest.mark.parametrize("streaming", [False, True])
     @pytest.mark.parametrize("filename", ["missing.png", "invalid_image.png"])
