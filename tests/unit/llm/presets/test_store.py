@@ -136,6 +136,86 @@ class TestLoadPresets:
         assert path.read_bytes() == original
         assert ("openai", "manual") in load_presets()
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "presets:\n  openai:\n    hand-a: {model: a}\n  openai:\n    hand-b: {model: b}\n",
+            "presets: {openai: {hand-b: {model: a}, hand-b: {model: b}}}",
+            "presets: {openai: {hand-b: {model: b, extra_body: {flag: a, flag: b}}}}",
+            "presets: {openai: {hand-b: {model: b, extra_body: {true: a, yes: b}}}}",
+        ],
+    )
+    def test_duplicate_keys_refuse_inventory_and_rewrite(self, tmp_path, content):
+        path = tmp_path / "llm_profiles.yaml"
+        path.write_bytes(content.encode())
+        for action in (list_all, lambda: set_default_model("openai/hand-b")):
+            with pytest.raises(ConfigError, match="Duplicate mapping key .*line"):
+                action()
+        assert path.read_bytes() == content.encode()
+
+    def test_invalid_typed_yaml_key_still_reports_a_config_error(self, tmp_path):
+        path = tmp_path / "llm_profiles.yaml"
+        original = b"presets: {!!seq invalid: value}"
+        path.write_bytes(original)
+        with pytest.raises(ConfigError, match="Cannot read llm_profiles.yaml"):
+            set_default_model("openai/example")
+        assert path.read_bytes() == original
+
+    def test_yaml_merges_allow_explicit_overrides_and_multiple_anchors(self, tmp_path):
+        path = tmp_path / "llm_profiles.yaml"
+        path.write_text(
+            "presets:\n  openai:\n"
+            "    first: &first {model: a, max_context: 10000}\n"
+            "    second: &second {<<: *first, model: b, temperature: 0.25}\n"
+            "    shared: {<<: [*second, *first], model: c}\n",
+            encoding="utf-8",
+        )
+        set_default_model("openai/shared")
+        presets = load_presets()
+        assert {k: p.model for k, p in presets.items()} == {
+            ("openai", "first"): "a",
+            ("openai", "second"): "b",
+            ("openai", "shared"): "c",
+        }
+        shared = presets[("openai", "shared")]
+        assert (shared.max_context, shared.temperature) == (10000, 0.25)
+
+    def test_ambiguous_legacy_entry_does_not_erase_nested_preset(self, tmp_path):
+        path = tmp_path / "llm_profiles.yaml"
+        data = {
+            "presets": {
+                "openai": {
+                    "model": "legacy",
+                    "provider": "openai",
+                    "manual": {"model": "mine"},
+                }
+            }
+        }
+        save_yaml_store(data)
+        original = path.read_bytes()
+        with pytest.raises(ConfigError, match="presets.openai.manual"):
+            set_default_model("openai/openai")
+        assert path.read_bytes() == original
+
+    def test_model_keys_inside_legacy_preset_fields_survive_migration(self):
+        extra = {"model": "sent-upstream", "custom": {"model": "another"}}
+        variations = {"style": {"chat": {"model": "other-model"}}}
+        save_yaml_store(
+            {
+                "profiles": {
+                    "old": {
+                        "model": "m",
+                        "provider": "openai",
+                        "extra_body": extra,
+                        "variation_groups": variations,
+                    }
+                }
+            }
+        )
+        set_default_model("openai/old")
+        saved = load_presets()[("openai", "old")]
+        assert (saved.extra_body, saved.variation_groups) == (extra, variations)
+
     def test_nested_layout_loaded_with_provider_name_keys(self):
         save_yaml_store(
             {"presets": {"openai": {"my-gpt": {"model": "gpt-4o", "max_context": 100}}}}

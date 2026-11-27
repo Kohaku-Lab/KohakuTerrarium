@@ -69,6 +69,19 @@ def _presets_from_section(
         # A string model is a legacy preset. A mapping named "model" can
         # itself be a user preset inside a current-format provider bucket.
         if isinstance(entry.get("model"), str):
+            # An inline transport may share a key with a provider bucket.
+            # A sibling preset cannot be folded into the flat record.
+            if editing_profiles():
+                for name, value in entry.items():
+                    if name in {
+                        "extra_body",
+                        "variation_groups",
+                        "retry_policy",
+                        "context_aliases",
+                    }:
+                        continue
+                    if isinstance(value, dict) and isinstance(value.get("model"), str):
+                        _unreadable_entry(f"{section}.{key}.{name}")
             inferred = _legacy_provider_from_data(entry)
             preset = preset_from_data(
                 key, entry, inferred if inferred in CATALOG_ENDPOINTS else ""

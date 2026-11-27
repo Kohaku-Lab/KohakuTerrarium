@@ -9,6 +9,7 @@ transport. Legacy ``codex-oauth`` values normalize to ``codex``.
 import os
 import tempfile
 import time
+from collections.abc import Hashable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
@@ -106,12 +107,42 @@ def load_yaml_store() -> dict[str, Any]:
     return _read_yaml_store(strict=False)
 
 
+class _ProfileLoader(yaml.SafeLoader):
+    """Check explicit keys before YAML merges flatten inherited keys into the mapping."""
+
+    def compose_mapping_node(self, anchor):
+        node = super().compose_mapping_node(anchor)
+        seen = set()
+        merge_key = object()
+        for key, _ in node.value:
+            if not isinstance(key, yaml.ScalarNode):
+                continue  # SafeLoader rejects non-hashable mapping keys.
+            if key.tag == "tag:yaml.org,2002:merge":
+                name = merge_key
+            elif key.tag == "tag:yaml.org,2002:value":
+                name = key.value  # SafeLoader treats this special key as a string.
+            else:
+                name = self.construct_object(key)
+                if not isinstance(name, Hashable):
+                    continue  # SafeLoader reports the invalid typed key during construction.
+            if name in seen:
+                raise ConfigError(
+                    f"Duplicate mapping key in llm_profiles.yaml on line {key.start_mark.line + 1}."
+                )
+            seen.add(name)
+        return node
+
+
 def _read_yaml_store(*, strict: bool) -> dict[str, Any]:
     path = _profiles_path()
     try:
         # Release the handle before parsing so a Windows writer can replace it.
         content = path.read_text(encoding="utf-8")
-        data = yaml.safe_load(content)
+        data = (
+            yaml.load(content, Loader=_ProfileLoader)
+            if strict
+            else yaml.safe_load(content)
+        )
         if data is None:
             return {}
         if not isinstance(data, dict):
@@ -119,6 +150,8 @@ def _read_yaml_store(*, strict: bool) -> dict[str, Any]:
         return data
     except FileNotFoundError:
         return {}
+    except ConfigError:
+        raise
     except (OSError, yaml.YAMLError, ValueError) as e:
         if strict:
             raise ConfigError(
