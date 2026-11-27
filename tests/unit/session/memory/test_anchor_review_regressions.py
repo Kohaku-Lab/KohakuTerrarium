@@ -152,7 +152,7 @@ async def test_peer_hits_receive_anchors_without_indexing_unrelated_agents(
         )
         assert window.error is None
         assert "SEARCHABLE_BOB_PEER" in window.output
-        assert observed.count("bob") == 1
+        assert observed.count("bob") == 0
         assert observed.count("carol") == 0
 
         again = await tool.execute(
@@ -164,7 +164,7 @@ async def test_peer_hits_receive_anchors_without_indexing_unrelated_agents(
             context=context,
         )
         assert again.error is None and _anchor_from(again.output)
-        assert observed.count("bob") == 1
+        assert observed.count("bob") == 0
 
         # Certification is process-local, but cannot remain true after the
         # peer's physical event frontier advances in the same live Store.
@@ -180,7 +180,7 @@ async def test_peer_hits_receive_anchors_without_indexing_unrelated_agents(
             context=context,
         )
         assert refreshed.error is None and _anchor_from(refreshed.output)
-        assert observed.count("bob") == 2
+        assert observed.count("bob") == 0
         assert observed.count("carol") == 0
     finally:
         _close(reopened, context)
@@ -224,8 +224,12 @@ async def test_peer_certification_failure_retains_ordinary_search(
     path = tmp_path / "peer-fault.kohakutr"
     store = SessionStore(path)
     store.init_meta("s", "agent", "", str(tmp_path), ["alice", "bob"])
-    store.append_event("alice", "user_input", {"content": "ALICE_VALID_LOCAL"})
-    store.append_event("bob", "user_input", {"content": "BOB_VALID_OLD_INDEX"})
+    store.append_event(
+        "alice", "user_input", {"content": "COMMON_PROBE ALICE_VALID_LOCAL"}
+    )
+    store.append_event(
+        "bob", "user_input", {"content": "COMMON_PROBE BOB_VALID_OLD_INDEX"}
+    )
     original_index = SessionMemory(str(path))
     try:
         for name in ("alice", "bob"):
@@ -236,22 +240,31 @@ async def test_peer_certification_failure_retains_ordinary_search(
 
     reopened = SessionStore(path)
     context = _ctx(reopened, "alice")
-    original = LiveSessionMemory._index_keywords
+    original = reopened._event_rows
 
-    def fail_peer_refresh(self, names):
-        if "bob" in names:
+    def fail_peer_read(agent, *args, **kwargs):
+        if agent == "bob":
             raise RuntimeError("peer namespace became unreadable")
-        return original(self, names)
+        return original(agent, *args, **kwargs)
 
-    monkeypatch.setattr(LiveSessionMemory, "_index_keywords", fail_peer_refresh)
+    monkeypatch.setattr(reopened, "_event_rows", fail_peer_read)
     try:
         result = await SearchMemoryTool().execute(
-            {"query": "BOB_VALID_OLD_INDEX", "mode": "fts"}, context=context
+            {"query": "COMMON_PROBE", "mode": "fts"}, context=context
         )
         assert result.error is None, result.error
         assert "BOB_VALID_OLD_INDEX" in result.output
-        assert "Anchors unavailable (UNVERIFIABLE_SOURCE)" in result.output
-        assert not re.search(r"^anchor:", result.output, re.M)
+        assert "ALICE_VALID_LOCAL" in result.output
+        assert (
+            "Anchors unavailable for some hits (UNVERIFIABLE_SOURCE)" in result.output
+        )
+        anchor = _anchor_from(result.output)
+        window = await SearchMemoryTool().execute(
+            {"anchor": anchor, "before": 0, "after": 0}, context=context
+        )
+        assert window.error is None
+        assert "ALICE_VALID_LOCAL" in window.output
+        assert "BOB_VALID_OLD_INDEX" not in window.output
     finally:
         _close(reopened, context)
 

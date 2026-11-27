@@ -1,6 +1,10 @@
-"""Session-wide Memory index rebuild with guarded vector choices and publication."""
+"""Session-wide Memory index maintenance and recovery."""
 
 import hashlib
+import sqlite3
+import subprocess
+import sys
+from contextlib import closing
 from pathlib import Path
 
 import numpy as np
@@ -49,16 +53,25 @@ def _hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _events(path):
+    store = SessionStore.open_readonly(path)
+    try:
+        return store.get_all_events()
+    finally:
+        store.close(update_status=False)
+
+
 def test_cli_rebuilds_all_agents_without_agent_flag(tmp_path, capsys):
     path = tmp_path / "legacy.kohakutr"
     _seed(path)
-    original = _hash(path)
+    original = _events(path)
     args = _build_parser().parse_args(["memory", "rebuild", str(path)])
     assert COMMANDS[args.command](args) == 0
     output = capsys.readouterr().out
     assert "across 2 agents" in output
     backup = next(tmp_path.glob("*.before-memory-rebuild-*.bak"))
-    assert _hash(backup) == original
+    assert _events(backup) == _events(path) == original
+    assert inspect_index(backup).fts_rows == 2
 
     memory = SessionMemory(str(path))
     try:
@@ -88,7 +101,6 @@ def test_existing_vectors_require_explicit_choice_no_writes(tmp_path, capsys):
 def test_discard_vectors_removes_old_derived_format_but_retains_backup(tmp_path):
     path = tmp_path / "all-branch-old.kohakutr"
     _seed(path, vectors=True)
-    original = _hash(path)
     memory = SessionMemory(str(path))
     try:
         cursor = memory._state["alice:cursor:keywords"]
@@ -110,11 +122,13 @@ def test_discard_vectors_removes_old_derived_format_but_retains_backup(tmp_path)
         )
     finally:
         memory.close()
-    original = _hash(path)
+    original = _events(path)
     result = rebuild_session_memory(path, vectors="drop")
     assert result.events == 2
     assert result.fts_rows == 2 and result.vector_rows == 0
-    assert _hash(result.backup) == original
+    assert _events(result.backup) == _events(path) == original
+    old = inspect_index(result.backup)
+    assert old.fts_rows == 3 and old.vector_rows == ((4, 2),)
     assert inspect_index(path).vector_rows == ((4, 0),)
     store = SessionStore(path)
     memory = SessionMemory(str(path))
@@ -145,25 +159,47 @@ def test_vector_rebuild_from_exact_sources_preserves_semantic_search(tmp_path):
         memory.close()
 
 
-def test_failed_build_keeps_original_and_cleans_staging(tmp_path, monkeypatch):
-    import kohakuterrarium.session.memory.rebuild as module
-
+def test_interrupted_keyword_rebuild_keeps_authority_and_recovers(
+    tmp_path, monkeypatch
+):
     path = tmp_path / "interrupted.kohakutr"
-    _seed(path, vectors=True)
-    original = _hash(path)
+    _seed(path)
+    original = _events(path)
+    finish = SessionMemory._finish_batch
 
-    def injected(*args, **kwargs):
-        raise RuntimeError("injected stage build error")
+    def interrupted(self, agent, kind, batch):
+        if agent == "bob" and kind == "keywords":
+            raise RuntimeError("injected index update failure")
+        return finish(self, agent, kind, batch)
 
-    monkeypatch.setattr(module, "_rebuild_staging", injected)
-    with pytest.raises(RuntimeError, match="stage build error"):
-        rebuild_session_memory(path, vectors="drop")
-    assert _hash(path) == original
-    assert not list(tmp_path.glob("*.memory-rebuild-*.kohakutr"))
-    assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+    with monkeypatch.context() as m:
+        m.setattr(SessionMemory, "_finish_batch", interrupted)
+        with pytest.raises(RebuildRefused, match="injected index update failure"):
+            rebuild_session_memory(path)
+
+    backup = next(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+    assert _events(backup) == _events(path) == original
+    assert inspect_index(backup).fts_rows == 2
+    memory = SessionMemory(str(path))
+    try:
+        assert memory.search("SOURCE_ALICE_MEMORY", mode="fts")
+        assert not memory.search("SOURCE_BOB_MEMORY", mode="fts")
+        assert memory._state.get("bob:cursor:keywords:pending")
+    finally:
+        memory.close()
+
+    result = rebuild_session_memory(path)
+    assert result.fts_rows == 2
+    assert _events(path) == original
+    memory = SessionMemory(str(path))
+    try:
+        assert memory.search("SOURCE_BOB_MEMORY", mode="fts")
+        assert not memory._state.get("bob:cursor:keywords:pending")
+    finally:
+        memory.close()
 
 
-def test_refuses_active_store_and_unverifiable_event_order(tmp_path):
+def test_refuses_active_store_and_unreadable_event(tmp_path):
     path = tmp_path / "active.kohakutr"
     _seed(path)
     active = SessionStore(path)
@@ -174,35 +210,39 @@ def test_refuses_active_store_and_unverifiable_event_order(tmp_path):
         active.close(update_status=False)
 
     store = SessionStore(path)
-    store.append_event(
-        "alice", "user_input", {"event_id": 1, "content": "DUPLICATE_ID"}
-    )
+    store.events["alice:e000001"] = "not an event"
     store.close(update_status=False)
     original = _hash(path)
-    with pytest.raises(RebuildRefused, match="Cannot certify"):
+    with pytest.raises(RebuildRefused, match="Cannot read or project"):
         rebuild_session_memory(path)
     assert _hash(path) == original
 
 
-def test_failed_atomic_replace_preserves_original_and_verified_backup(
-    tmp_path, monkeypatch
-):
-    import kohakuterrarium.session.memory.rebuild as module
+def test_vector_encoder_failure_preserves_old_rows_and_allows_retry(tmp_path):
+    class FailingEmbedder(_Embedder):
+        def encode(self, texts):
+            raise RuntimeError("encoder unavailable")
 
-    path = tmp_path / "atomic-refusal.kohakutr"
-    _seed(path)
-    original = _hash(path)
+    path = tmp_path / "encoder-failure.kohakutr"
+    _seed(path, vectors=True)
+    original = _events(path)
+    with pytest.raises(RebuildRefused, match="encoder unavailable"):
+        rebuild_session_memory(path, vectors="rebuild", embedder=FailingEmbedder())
+    assert _events(path) == original
+    assert inspect_index(path).vector_rows == ((4, 2),)
+    backup = next(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+    assert _events(backup) == original
+    assert inspect_index(backup).vector_rows == ((4, 2),)
+    index = SessionMemory(str(path), _Embedder())
+    try:
+        assert index.search("SOURCE_ALICE_MEMORY", mode="fts")
+        assert not index.search("SOURCE_ALICE_MEMORY", mode="semantic")
+    finally:
+        index.close()
 
-    def fail_replace(*args):
-        raise PermissionError("injected replacement denial")
-
-    monkeypatch.setattr(module.os, "replace", fail_replace)
-    with pytest.raises(PermissionError, match="replacement denial"):
-        rebuild_session_memory(path)
-    assert _hash(path) == original
-    backups = list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
-    assert len(backups) == 1 and _hash(backups[0]) == original
-    assert not list(tmp_path.glob("*.memory-rebuild-*.kohakutr"))
+    result = rebuild_session_memory(path, vectors="rebuild", embedder=_Embedder())
+    assert result.fts_rows == result.vector_rows == 2
+    assert _events(path) == original
 
 
 def test_no_vector_auto_rebuild_preserves_saved_embedding_preferences(tmp_path):
@@ -257,31 +297,28 @@ def test_existing_offline_embedding_builder_produces_physical_source_refs(
         memory.close()
 
 
-def test_corrupt_backup_prevents_publication(tmp_path, monkeypatch):
+def test_failed_backup_prevents_index_mutation(tmp_path, monkeypatch):
     import kohakuterrarium.session.memory.rebuild as module
 
     path = tmp_path / "backup-failure.kohakutr"
     _seed(path)
     original = _hash(path)
-    real_copy = module.shutil.copy2
 
-    def copy_corrupt(src, dst, *args, **kwargs):
-        if str(dst).endswith(".bak"):
-            Path(dst).write_bytes(b"NOT_A_DATABASE_BACKUP")
-            return dst
-        return real_copy(src, dst, *args, **kwargs)
+    def fail_backup(*args):
+        raise RebuildRefused("Backup verification failed")
 
-    monkeypatch.setattr(module.shutil, "copy2", copy_corrupt)
+    monkeypatch.setattr(module, "_backup", fail_backup)
     with pytest.raises(RebuildRefused, match="Backup verification failed"):
         rebuild_session_memory(path)
     assert _hash(path) == original
-    assert not list(tmp_path.glob("*.memory-rebuild-*.kohakutr"))
+    assert inspect_index(path).fts_rows == 2
 
 
 def test_zero_wal_readonly_sidecars_are_recoverable_on_next_rebuild(tmp_path):
     """A failed previous read-only model probe must not wedge future rebuilds."""
     path = tmp_path / "stale-readonly.kohakutr"
     _seed(path, vectors=True)
+    original = _events(path)
     baseline = _hash(path)
 
     # Read-only SessionStore uses the shared WAL and can leave -shm and an
@@ -302,8 +339,8 @@ def test_zero_wal_readonly_sidecars_are_recoverable_on_next_rebuild(tmp_path):
     assert _hash(path) == baseline
     result = rebuild_session_memory(path, vectors="rebuild", embedder=_Embedder())
     assert result.fts_rows == result.vector_rows == 2
-    assert _hash(result.backup) == baseline
-    assert not shm.exists() and not wal.exists()
+    assert _events(result.backup) == _events(path) == original
+    assert inspect_index(result.backup).vector_rows == ((4, 2),)
 
 
 def test_failing_model_load_then_successful_retry_never_leaves_source_sidecars(
@@ -358,26 +395,32 @@ def test_active_readonly_store_cannot_be_mistaken_for_idle_sidecars(tmp_path):
         with pytest.raises(RebuildRefused, match="currently open"):
             rebuild_session_memory(path)
         assert _hash(path) == original
-        # An active reader must never be forcibly detached to satisfy the
-        # rebuild's publisher, even though its WAL has no pending frames.
+        # An active reader must not share the offline inventory connection.
         assert shm.exists()
     finally:
         reader.close(update_status=False)
 
 
-def test_uncheckpointed_wal_is_not_discarded_during_rebuild(tmp_path):
-    path = tmp_path / "uncheckpointed.kohakutr"
+def test_committed_wal_data_is_preserved_by_native_rebuild_and_backup(tmp_path):
+    path = tmp_path / "committed-wal.kohakutr"
     _seed(path)
-    original = _hash(path)
-    wal = Path(str(path) + "-wal")
-    wal.write_bytes(b"SIMULATED_PENDING_WAL_FRAMES")
-    try:
-        with pytest.raises(RebuildRefused, match="uncheckpointed"):
-            rebuild_session_memory(path)
-        assert _hash(path) == original
-        assert wal.read_bytes() == b"SIMULATED_PENDING_WAL_FRAMES"
-    finally:
-        wal.unlink(missing_ok=True)
+    code = (
+        "import os, sqlite3, sys; "
+        "db=sqlite3.connect(sys.argv[1]); "
+        "db.execute('PRAGMA journal_mode=WAL'); "
+        "db.execute('PRAGMA wal_autocheckpoint=0'); "
+        "db.execute('CREATE TABLE preserved_probe (value TEXT)'); "
+        "db.execute(\"INSERT INTO preserved_probe VALUES ('committed')\"); "
+        "db.commit(); os._exit(0)"
+    )
+    subprocess.run([sys.executable, "-c", code, str(path)], check=True)
+    assert Path(f"{path}-wal").stat().st_size > 0
+    result = rebuild_session_memory(path)
+    for file in (path, result.backup):
+        with closing(sqlite3.connect(file)) as db:
+            assert db.execute("SELECT value FROM preserved_probe").fetchone() == (
+                "committed",
+            )
 
 
 def test_standalone_memory_handles_block_rebuild_before_sqlite_cleanup(tmp_path):
@@ -401,34 +444,35 @@ def test_standalone_memory_handles_block_rebuild_before_sqlite_cleanup(tmp_path)
         index.close()
 
 
-def test_staged_build_holds_exclusive_native_occupancy(tmp_path, monkeypatch):
-    """Block new same-process raw SQLite copies until publication completes."""
-    import kohakuterrarium.session.memory.rebuild as module
-    from kohakuterrarium.session.occupancy.gate import (
-        REASON_FAST_ACTIVE,
-        resource_gate,
-    )
+def test_rebuild_uses_original_store_and_writer_lock(tmp_path, monkeypatch):
+    from kohakuterrarium.errors import SessionLockedError
+    from kohakuterrarium.session.occupancy.gate import resource_gate
+    from kohakuterrarium.session.store.lifecycle.lock import acquire_writer_lock
 
     path = tmp_path / "admitted-rebuild.kohakutr"
     _seed(path)
-    original = module._rebuild_staging
+    original = SessionMemory._index_keywords
+    observed = []
 
-    def observed_stage(*args, **kwargs):
+    def witness(self, *args, **kwargs):
+        assert Path(self._path) == path
         snapshot = resource_gate.snapshot(path)
-        assert snapshot.new_active == 1 and snapshot.legacy_active == 0
-        assert resource_gate.try_fast(path, eligible=True).reason == REASON_FAST_ACTIVE
-        return original(*args, **kwargs)
+        assert snapshot.legacy_active > 0 and snapshot.new_active == 0
+        with pytest.raises(SessionLockedError):
+            acquire_writer_lock(str(path))
+        observed.append(True)
+        return original(self, *args, **kwargs)
 
-    monkeypatch.setattr(module, "_rebuild_staging", observed_stage)
-    result = rebuild_session_memory(path)
-    assert result.fts_rows == 2
+    monkeypatch.setattr(SessionMemory, "_index_keywords", witness)
+    assert rebuild_session_memory(path).fts_rows == 2
+    assert observed
     assert not resource_gate.snapshot(path).registered
 
 
 def test_rebuild_must_not_publish_empty_fallback_for_unreadable_source(
     tmp_path, monkeypatch
 ):
-    import kohakuterrarium.session.memory.source_events as source_events
+    import kohakuterrarium.session.store.events.values as event_values
 
     path = tmp_path / "unreadable-events.kohakutr"
     _seed(path)
@@ -439,17 +483,18 @@ def test_rebuild_must_not_publish_empty_fallback_for_unreadable_source(
 
     # Normal Search intentionally falls back to the tolerant reader.
     # Rebuild must not inherit its empty-data result when physical keys exist.
-    monkeypatch.setattr(source_events, "read_values", unreadable_rows)
+    monkeypatch.setattr(event_values, "read_values", unreadable_rows)
     monkeypatch.setattr(SessionStore, "get_events", lambda self, agent: [])
     with pytest.raises(RebuildRefused, match="source|event|decode|certif"):
         rebuild_session_memory(path)
     assert _hash(path) == original
-    assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+    assert list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
 
 
 def test_strict_source_attestation_does_not_change_tolerant_search(
     tmp_path, monkeypatch
 ):
+    import kohakuterrarium.session.store.events.values as event_values
     import kohakuterrarium.session.memory.source_events as source_events
 
     path = tmp_path / "tolerant-vs-strict.kohakutr"
@@ -458,13 +503,17 @@ def test_strict_source_attestation_does_not_change_tolerant_search(
     try:
         expected = store.get_events("alice")
 
-        def fail_decode(*args, **kwargs):
-            raise RuntimeError("synthetic corrupt source values")
+        real_read = event_values.read_values
 
-        monkeypatch.setattr(source_events, "read_values", fail_decode)
+        def fail_decode(*args, **kwargs):
+            if kwargs.get("strict"):
+                raise RuntimeError("synthetic corrupt source values")
+            return real_read(*args, **kwargs)
+
+        monkeypatch.setattr(event_values, "read_values", fail_decode)
         tolerated = source_events.sourced_events(store, "alice")
         assert tolerated == expected
-        assert not hasattr(tolerated[0], "source_ref")
+        assert tolerated[0].source_ref == "alice:e000000"
         with pytest.raises(RuntimeError, match="corrupt source values"):
             source_events.sourced_events(store, "alice", strict=True)
     finally:
@@ -491,7 +540,7 @@ def test_rebuild_refuses_to_erase_indexed_agent_with_no_physical_events(tmp_path
         assert index._fts.count() == 2
     finally:
         index.close()
-    assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+    assert list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
 
 
 def test_rebuild_allows_genuinely_empty_unindexed_agent(tmp_path):
@@ -554,4 +603,89 @@ def test_rebuild_refuses_vector_only_index_when_agent_events_are_gone(tmp_path):
     with pytest.raises(RebuildRefused, match="Indexed Agent .*bob.*no physical source"):
         rebuild_session_memory(path, vectors="drop")
     assert _hash(path) == original
-    assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+    assert list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+
+
+def test_strict_physical_read_does_not_require_monotonic_logical_ids(tmp_path):
+    from kohakuterrarium.session.memory.source_events import sourced_events
+
+    path = tmp_path / "mirrored-source.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice", "user_input", {"event_id": 50, "content": "FIRST_PHYSICAL"}
+        )
+        store.append_event(
+            "alice", "text", {"event_id": 10, "content": "SECOND_PHYSICAL"}
+        )
+        events = sourced_events(store, "alice", strict=True)
+        assert [event["event_id"] for event in events] == [50, 10]
+        assert [event.source_ref for event in events] == [
+            "alice:e000000",
+            "alice:e000001",
+        ]
+    finally:
+        store.close(update_status=False)
+
+
+@pytest.mark.parametrize("family", ["alias", "referent"])
+def test_rebuild_preserves_existing_symlink_format_admission(tmp_path, family):
+    from kohakuterrarium.errors import SessionLockedError
+    from kohakuterrarium.session.store.lifecycle.lock import (
+        acquire_writer_lock,
+        release_writer_lock,
+    )
+    from kohakuterrarium.session.store.lifecycle.version import SessionFormatError
+
+    path = tmp_path / "actual.kohakutr"
+    _seed(path)
+    alias = tmp_path / "alias.kohakutr"
+    try:
+        alias.symlink_to(path)
+    except OSError:
+        pytest.skip("file symlinks unavailable")
+    future = Path(f"{alias if family == 'alias' else path}.v3")
+    future.write_bytes(b"future sentinel")
+    original = _events(path)
+    with pytest.raises(SessionFormatError, match="format v3"):
+        rebuild_session_memory(alias)
+    assert _events(path) == original
+    assert alias.is_symlink() and alias.samefile(path)
+    future.unlink()
+    for target in (alias, path):
+        held = acquire_writer_lock(str(target))
+        try:
+            with pytest.raises(SessionLockedError):
+                rebuild_session_memory(alias)
+        finally:
+            release_writer_lock(held)
+    result = rebuild_session_memory(alias)
+    assert result.fts_rows == 2
+    assert alias.is_symlink() and alias.samefile(path)
+    assert _events(path) == original
+
+
+def test_rebuild_accounts_for_inactive_vector_dimensions(tmp_path):
+    class OtherEmbedder(BaseEmbedder):
+        dimensions = 3
+
+        def encode(self, texts):
+            return np.ones((len(texts), 3), dtype=np.float32)
+
+    path = tmp_path / "inactive-vectors.kohakutr"
+    _seed(path, vectors=True)
+    store = SessionStore(path)
+    memory = SessionMemory(str(path), OtherEmbedder())
+    try:
+        for agent in ("alice", "bob"):
+            memory.index_events(agent, store.get_events(agent))
+    finally:
+        memory.close()
+        store.close(update_status=False)
+    assert inspect_index(path).vector_rows == ((3, 2), (4, 2))
+    with pytest.raises(RebuildRefused, match="Existing vectors"):
+        rebuild_session_memory(path)
+    result = rebuild_session_memory(path, vectors="drop")
+    assert inspect_index(result.backup).vector_rows == ((3, 2), (4, 2))
+    assert inspect_index(path).vector_rows == ((3, 0), (4, 0))

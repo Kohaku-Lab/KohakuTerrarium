@@ -148,9 +148,7 @@ def rebuild_memory_cli(
         print("Done. Search and Anchor metadata now use the current index format.")
         return 0
     except Exception as exc:
-        # Providers can raise ImportError and library-specific load failures.
-        # The lower-level rebuild cleans staging in its finally block; keep
-        # expected model/setup failures actionable instead of a CLI traceback.
+        # Report provider and index maintenance failures with retry guidance.
         print(f"Rebuild refused or incomplete: {exc}")
         print(
             "Check that the Session is closed and the embedding provider is "

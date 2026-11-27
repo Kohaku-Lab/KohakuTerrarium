@@ -79,6 +79,7 @@ def extract_batch(
     blocks = _extract_blocks(
         agent, events[count:], count, cursor=state, live_ids=live_ids
     )
+    blocks = [block for block in blocks if block.tool_name != "search_memory"]
     if start_from > count:
         blocks = [
             b

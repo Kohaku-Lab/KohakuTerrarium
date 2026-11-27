@@ -18,6 +18,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.lock import (
     acquire_writer_lock,
     release_writer_lock,
+    unique_lock_authorities as _unique_lock_authorities,
 )
 from kohakuterrarium.studio.persistence.delete_family import (
     detach_file_family,
@@ -315,17 +316,6 @@ def _drive_sidecars_for(path: Path) -> list[Path]:
 def _path_identity(path: Path) -> str:
     """Return the occupancy/lock identity for a session file path."""
     return os.path.normcase(str(coerce_fs_path(path).expanduser().resolve()))
-
-
-def _unique_lock_authorities(targets: list[Path], suffix: str) -> list[str]:
-    """Return listed targets deduplicated by their physical lock-file identities."""
-    identities = {
-        os.path.normcase(str(path.parent.resolve() / path.name)) for path in targets
-    }
-    by_lock = {}
-    for path in sorted(identities):
-        by_lock.setdefault(_path_identity(Path(path + suffix)), path)
-    return [by_lock[key] for key in sorted(by_lock)]
 
 
 def _enroll_delete_targets(stack: ExitStack, targets: list[Path]) -> None:

@@ -42,12 +42,14 @@ Searches the recorded event log of the current session.
 To inspect one search hit's context, call
 `search_memory(anchor=..., before=N, after=N, offset=N)` and follow the
 returned continuation Anchors. Navigation is restricted to the selected indexed
-branch; a legacy index must first be upgraded by the operator via
+branch; legacy hits without physical source references can be upgraded by the operator via
 `kt memory rebuild SESSION`, after closing its writers.
 Stale, invalid and unverifiable source references return explicit errors.
 
-- Search calls and their own tool-result echoes do not take up the ranked
-  results, although their recorded events remain intact.
+- Search calls and their own tool-result echoes do not enter new Memory
+  indexes and are filtered from existing indexes; recorded events remain intact.
+- A context scan may return fewer neighbors than requested, with
+  `has_before=unknown` or `has_after=unknown` when the scan budget is reached.
 - If candidate filtering hits a backend limit, available matches are returned
   with a **nonfatal incomplete-results warning**. Even with zero matches, this
   means no eligible hits were found *within the scanned candidate window*.

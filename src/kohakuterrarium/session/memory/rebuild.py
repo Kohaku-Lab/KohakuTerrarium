@@ -1,41 +1,35 @@
-"""Offline Session-wide Memory index rebuild with copy-then-replace publication.
-
-The source event log is never rewritten in place. Index work occurs in a
-temporary Session copy; the original database is backed up before atomic
-replacement. All writers must be stopped before starting this operation.
-"""
+"""Explicit offline maintenance of derived Session Memory indexes."""
 
 from __future__ import annotations
 
-import hashlib
-import os
 import re
-import shutil
 import sqlite3
-from contextlib import closing
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from kohakuvault import TextVault, VectorKVault
+from kohakuvault import VectorKVault
 
-from kohakuterrarium.session.memory.blocks import _anchor
+from kohakuterrarium.session.memory.blocks import extract_batch
 from kohakuterrarium.session.memory.embedding import (
     BaseEmbedder,
     NullEmbedder,
     create_embedder,
 )
 from kohakuterrarium.session.memory.index import SessionMemory
-from kohakuterrarium.session.memory.source_events import SourcedEvent, sourced_events
+from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.session.occupancy.gate import resource_gate
 from kohakuterrarium.session.occupancy.registry import live_store_for
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.lock import (
     acquire_writer_lock,
     release_writer_lock,
+    unique_lock_authorities,
 )
 from kohakuterrarium.session.store.lifecycle.version import require_writable_format
-from kohakuterrarium.session.vault.io import key_text, scan_keys
+from kohakuterrarium.session.vault.read import is_snapshot_target
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 _VECTOR_TABLE = re.compile(r"memory_vec_(\d+)d\Z")
 
@@ -65,315 +59,194 @@ class RebuildResult:
     backup: Path
 
 
-def _file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _database_uri(path: Path) -> str:
-    # The caller rejects non-empty WAL before inspecting. Immutable read
-    # prevents a read-only plan from creating -wal/-shm sidecars.
-    return path.resolve().as_uri() + "?mode=ro&immutable=1"
-
-
-def _reserve_source_occupancy(source: Path):
-    """Exclude every in-process native Store/Memory handle before SQLite opens.
-
-    The existing exclusive NEW gate also blocks new legacy enrollments for
-    the duration of a rebuild. A writer lock alone does not cover standalone
-    SessionMemory handles, which bypass the SessionStore registry.
-    """
-    admission = resource_gate.try_fast(source, eligible=True)
+@contextmanager
+def _offline_database(path: Path):
+    """Read inventory or make a backup with no concurrent native handles."""
+    if live_store_for(path) is not None:
+        raise RebuildRefused("Session is currently open; close it before rebuilding.")
+    admission = resource_gate.try_fast(path, eligible=True)
     if admission.lease is None:
         raise RebuildRefused(
-            "Session has active or uncertain native occupancy "
-            f"({admission.reason}); close all Store/Memory handles before rebuilding."
+            f"Session has active or uncertain native occupancy ({admission.reason}); "
+            "close Store/Memory handles before rebuilding."
         )
-    return admission.lease
+    db = None
+    released = False
+    try:
+        source = path.resolve(strict=True)
+        mode = "immutable=1" if is_snapshot_target(source, True) else "mode=ro"
+        db = sqlite3.connect(source.as_uri() + "?" + mode, uri=True, timeout=0)
+        yield db
+    finally:
+        try:
+            if db is not None:
+                db.close()
+            released = True
+        finally:
+            admission.lease.finish(source_released=released)
+
+
+def _inventory(db, size: int) -> IndexInventory:
+    names = {name for (name,) in db.execute("SELECT name FROM sqlite_master")}
+    fts_rows = (
+        int(db.execute("SELECT COUNT(*) FROM memory_fts_values").fetchone()[0])
+        if "memory_fts_values" in names
+        else 0
+    )
+    vectors = []
+    for name in sorted(names):
+        found = _VECTOR_TABLE.fullmatch(name)
+        if not found:
+            continue
+        shadow = name + "_rowids"
+        if shadow not in names:
+            raise RebuildRefused(f"Cannot account for vector table {name!r}.")
+        count = int(db.execute(f'SELECT COUNT(*) FROM "{shadow}"').fetchone()[0])
+        vectors.append((int(found.group(1)), count))
+    return IndexInventory(fts_rows, tuple(vectors), size)
 
 
 def inspect_index(path: Path) -> IndexInventory:
-    """Read index counts under a short-lived exclusive native lease."""
-    source = Path(path).resolve(strict=True)
-    lease = _reserve_source_occupancy(source)
+    """Inspect existing index counts without opening writable Vaults."""
+    source = coerce_fs_path(path)
+    with _offline_database(source) as db:
+        return _inventory(db, source.stat().st_size)
+
+
+def _backup(db, source: Path) -> Path:
+    """Create and validate a logical SQLite backup, including committed WAL data."""
+    path = source.with_name(
+        f"{source.name}.before-memory-rebuild-{uuid4().hex[:12]}.bak"
+    )
     try:
-        return _inspect_reserved_index(source)
-    finally:
-        lease.finish(source_released=True)
+        with closing(sqlite3.connect(path)) as writer:
+            db.backup(writer)
+            if writer.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                raise RebuildRefused("Backup verification failed.")
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path
 
 
-def _inspect_reserved_index(source: Path) -> IndexInventory:
-    """Inspect schema/counts only while native access to source is excluded."""
-    _reject_busy_source(source, allow_idle_sidecars=True)
-    with closing(sqlite3.connect(_database_uri(source), uri=True)) as db:
-        names = {name for (name,) in db.execute("SELECT name FROM sqlite_master")}
-        fts_rows = (
-            int(db.execute("SELECT COUNT(*) FROM memory_fts_values").fetchone()[0])
-            if "memory_fts_values" in names
-            else 0
-        )
-        vectors = []
-        for name in sorted(names):
-            found = _VECTOR_TABLE.fullmatch(name)
-            if not found:
-                continue
-            # vec0's row-id shadow is normal SQLite, accessible read-only
-            # without loading the virtual-table extension.
-            shadow = name + "_rowids"
-            if shadow not in names:
-                raise RebuildRefused(
-                    f"Vector table {name!r} has no row-id shadow; "
-                    "cannot safely discard unaccounted vectors."
-                )
-            count = int(db.execute(f'SELECT COUNT(*) FROM "{shadow}"').fetchone()[0])
-            vectors.append((int(found.group(1)), count))
-    return IndexInventory(fts_rows, tuple(vectors), source.stat().st_size)
-
-
-def _reject_busy_source(path: Path, *, allow_idle_sidecars: bool = False) -> None:
-    if live_store_for(path) is not None:
-        raise RebuildRefused(
-            "Session is currently open in this process; stop its agents."
-        )
-    wal = Path(str(path) + "-wal")
-    if wal.exists() and wal.stat().st_size:
-        raise RebuildRefused(
-            "Session has an uncheckpointed SQLite WAL; stop all writers and "
-            "close/checkpoint the Session before rebuilding."
-        )
-    if not allow_idle_sidecars and Path(str(path) + "-shm").exists():
-        raise RebuildRefused(
-            "Session still has an SQLite shared-memory sidecar; close "
-            "other readers and writers before rebuilding."
-        )
-
-
-def _retire_idle_sidecars(path: Path) -> None:
-    """Ask SQLite to retire abandoned read-only sidecars, never unlink them.
-
-    An old read-only SessionStore leaves an empty WAL and a -shm behind on
-    clean close. SQLite itself can reclaim these with a zero-frame TRUNCATE
-    checkpoint; the surrounding writer lock serializes cooperating writers.
-    If another connection still holds the shared-memory map, refuse safely
-    rather than bypass its lock or manually deleting its files.
-    """
-    wal = Path(str(path) + "-wal")
-    shm = Path(str(path) + "-shm")
-    _reject_busy_source(path, allow_idle_sidecars=True)
-    if not wal.exists() and not shm.exists():
+@contextmanager
+def _vector_table(memory: SessionMemory, dims: int):
+    if memory._vec is not None and memory._active_vector_dims == dims:
+        yield memory._vec
         return
+    vault = memory._resources.open(
+        VectorKVault, memory._path, table=f"memory_vec_{dims}d", dimensions=dims
+    )
     try:
-        with closing(
-            sqlite3.connect(
-                path.resolve().as_uri() + "?mode=rw",
-                uri=True,
-                timeout=0,
-                isolation_level=None,
-            )
-        ) as db:
-            result = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-            if result is None or result[0] or result[1] or result[2]:
+        yield vault
+    finally:
+        memory._resources.drop(vault)
+
+
+def _source_agents(
+    store, memory: SessionMemory, dims: tuple[int, ...]
+) -> tuple[str, ...]:
+    names = {
+        name
+        for name in store.load_meta().get("agents", ())
+        if isinstance(name, str) and name
+    }
+    physical = set()
+    for key in store._event_key_names():
+        prefix, sep, suffix = key.rpartition(":e")
+        if sep and prefix and suffix.isascii() and suffix.isdecimal():
+            physical.add(prefix)
+
+    def require_source(rows):
+        for _, meta in rows:
+            if (
+                isinstance(meta, dict)
+                and meta.get("agent")
+                and meta["agent"] not in physical
+            ):
                 raise RebuildRefused(
-                    "SQLite checkpoint is not idle; close other Session readers "
-                    "and writers before rebuilding."
+                    f"Indexed Agent {meta['agent']!r} has no physical source events; "
+                    "refusing to replace its Search index."
                 )
-    except sqlite3.Error as exc:
-        raise RebuildRefused(
-            "SQLite still has active connections; close the Session and retry."
-        ) from exc
-    _reject_busy_source(path)
-    if wal.exists() and wal.stat().st_size:
-        raise RebuildRefused("Unexpected uncheckpointed WAL after cleanup.")
-    if wal.exists() or shm.exists():
-        raise RebuildRefused(
-            "SQLite sidecars remained after checkpoint; other connections "
-            "may still be holding this Session open."
-        )
+
+    require_source(memory._index_rows("keywords"))
+    for dim in dims:
+        with _vector_table(memory, dim) as vault:
+            require_source(memory._index_rows(f"vectors:{dim}", vault))
+    return tuple(sorted(names | physical))
 
 
-def _strict_source_events(store, agent: str) -> list[SourcedEvent]:
-    """A destructive rebuild requires exact physical keys *and* decoded rows."""
-    try:
-        events = sourced_events(store, agent, strict=True)
-    except Exception as exc:
-        raise RebuildRefused(
-            f"Cannot certify physical source events for {agent!r}: {exc}"
-        ) from exc
-    if any(not isinstance(event, SourcedEvent) for event in events):
-        raise RebuildRefused(f"Cannot certify original physical source for {agent!r}.")
+def _prepare_events(store, names):
+    events = {}
+    for name in names:
+        try:
+            rows = sourced_events(store, name, strict=True)
+            extract_batch(name, rows)
+        except Exception as exc:
+            raise RebuildRefused(
+                f"Cannot read or project source events for {name!r}: {exc}"
+            ) from exc
+        events[name] = rows
     return events
 
 
-def _source_digest(store, names: tuple[str, ...]) -> tuple:
-    """Fingerprint exact physical events, not mutable index-ordinal positions."""
-    digest = hashlib.sha256()
-    total = 0
-    for name in names:
-        events = _strict_source_events(store, name)
-        for event in events:
-            digest.update(name.encode("utf-8"))
-            digest.update(event.source_ref.encode("utf-8"))
-            digest.update(_anchor(event).encode("ascii"))
-            total += 1
-    return total, digest.hexdigest()
+def _resolve_embedder(store, provider, model, dimensions, embedder):
+    if embedder is not None:
+        return embedder, None
+    saved = store.state.get("embedding_config")
+    config = dict(saved) if isinstance(saved, dict) else {}
+    for key, value in (
+        ("provider", provider),
+        ("model", model),
+        ("dimensions", dimensions),
+    ):
+        if value is not None:
+            config[key] = value
+    if not config.get("provider") or config["provider"] == "none":
+        raise RebuildRefused("Provide an embedding provider for vector rebuild.")
+    return create_embedder(config), config
 
 
-def _source_agents(store, memory) -> tuple[str, ...]:
-    """Rebuild all known indexed/registered event namespaces, not one Agent."""
-    meta = store.load_meta()
-    names = {x for x in meta.get("agents", ()) if isinstance(x, str) and x}
-    # Search may index attached agents that are absent from the Session header.
-    physical_agents = set()
-    for key in scan_keys(store.events):
-        text = key_text(key)
-        prefix, sep, suffix = text.rpartition(":e")
-        if sep and prefix and suffix.isascii() and suffix.isdecimal():
-            names.add(prefix)
-            physical_agents.add(prefix)
-    for row_id in memory._fts.keys(limit=memory._fts.count()):
-        _, row_meta = memory._fts.get_by_id(row_id)
-        if isinstance(row_meta, dict) and row_meta.get("agent"):
-            if row_meta["agent"] not in physical_agents:
-                # Search index replacement must not erase a previously indexed
-                # namespace solely because no source events remain. This does
-                # not assert that the original Session event log is complete.
-                raise RebuildRefused(
-                    f"Indexed Agent {row_meta['agent']!r} has no physical source "
-                    "events; refusing to replace its Search index."
-                )
-    # Semantic-only remnants still represent indexed Memory data, even if
-    # the corresponding FTS row was removed by an older partial operation.
-    if memory._vec is not None:
-        dims = memory._state.get("vec_dimensions")
-        reader = memory._resources.open(
-            TextVault, memory._path, table=f"memory_vec_{dims}d"
-        )
-        try:
-            for row_id in reader.keys(limit=reader.count()):
-                _, row_meta = memory._vec.get_by_id(row_id)
-                if isinstance(row_meta, dict) and row_meta.get("agent"):
-                    if row_meta["agent"] not in physical_agents:
-                        raise RebuildRefused(
-                            f"Indexed Agent {row_meta['agent']!r} has no physical "
-                            "source events; refusing to replace its Search index."
-                        )
-        finally:
-            memory._resources.drop(reader)
-    return tuple(sorted(names))
+def _rebuild_indexes(store, memory, events, dims, policy, embedder, config):
+    if policy == "rebuild":
+        memory._set_embedder(embedder)
+        if config:
+            store.state["embedding_config"] = config
+    elif policy == "drop":
+        store.state["embedding_config"] = {"provider": "none"}
 
+    active = memory._active_vector_dims if policy == "rebuild" else 0
+    for name in events:
+        memory._set_indexed_count(name, 0)
+        memory._state[f"{name}:cursor:keywords:pending"] = True
+        for dim in set(dims) | ({active} if active else set()):
+            memory._state[f"{name}:cursor:vectors:{dim}:pending"] = True
 
-def _clear_derived_indexes(memory, table_dims: tuple[int, ...], path: Path) -> None:
-    """Remove all old projection metadata/tables on the *staging copy only*."""
-    for row in memory._fts.keys(limit=memory._fts.count()):
-        memory._fts.delete(row)
-    for dims in table_dims:
-        reader = memory._resources.open(
-            TextVault, str(path), table=f"memory_vec_{dims}d"
-        )
-        try:
-            # Some old tables have different dimensions or are not the active
-            # vector table. Never rely on the one saved vec_dimensions key.
-            ids = reader.keys(limit=reader.count())
-        finally:
-            memory._resources.drop(reader)
-        if not ids:
-            continue
-        vault = (
-            memory._vec
-            if memory._vec is not None and memory._state.get("vec_dimensions") == dims
-            else memory._resources.open(
-                VectorKVault,
-                str(path),
-                table=f"memory_vec_{dims}d",
-                dimensions=dims,
-            )
-        )
-        try:
-            for row in ids:
-                vault.delete(row)
-            if vault.count():
-                raise RebuildRefused(
-                    f"Staged vector table memory_vec_{dims}d was not fully cleared."
-                )
-        finally:
-            if vault is not memory._vec:
-                memory._resources.drop(vault)
-    for key in list(memory._state.keys()):
-        memory._state.delete(key)
+    memory._clear_index(None, "keywords")
+    for name, rows in events.items():
+        memory._index_keywords(name, rows)
 
+    if active:
+        # Remove legacy rows without a known namespace, then rebuild using
+        # the ordinary pending/cursor protocol. Encoding precedes clearing.
+        kind = f"vectors:{active}"
+        for row, meta in memory._index_rows(kind):
+            if not isinstance(meta, dict) or meta.get("agent") not in events:
+                memory._vec.delete(row)
+        for name, rows in events.items():
+            batch, blocks = memory._vector_batch(name, rows)
+            vectors = embedder.encode([b.content for b in blocks]) if blocks else []
+            memory._commit_vectors(name, batch, len(rows), blocks, vectors)
 
-def _rebuild_staging(
-    stage: Path,
-    *,
-    policy: str,
-    inventory: IndexInventory,
-    embedder: BaseEmbedder | None,
-    embed_config: dict | None,
-) -> tuple[tuple[str, ...], int, int, int]:
-    store = SessionStore(stage)
-    try:
-        memory = SessionMemory(str(stage))
-        try:
-            names = _source_agents(store, memory)
-            baseline = _source_digest(store, names)
-            _clear_derived_indexes(
-                memory, tuple(dims for dims, _ in inventory.vector_rows), stage
-            )
-        finally:
-            memory.close()
+    for dim in dims:
+        if dim != active:
+            with _vector_table(memory, dim) as vault:
+                memory._clear_index(None, f"vectors:{dim}", vault)
 
-        if policy == "drop":
-            # A stale model config must not silently re-embed on next live
-            # semantic request after explicit FTS-only reconstruction.
-            store.state["embedding_config"] = {"provider": "none"}
-        elif policy == "rebuild" and embed_config:
-            store.state["embedding_config"] = dict(embed_config)
-
-        rebuilt = SessionMemory(str(stage), embedder if policy == "rebuild" else None)
-        try:
-            for name in names:
-                events = _strict_source_events(store, name)
-                rebuilt.index_events(name, events)
-            fts_count = rebuilt._fts.count()
-            vector_count = (
-                rebuilt._vec.count() if policy == "rebuild" and rebuilt._vec else 0
-            )
-            for row in rebuilt._fts.keys(limit=fts_count):
-                _, meta = rebuilt._fts.get_by_id(row)
-                if not meta.get("source_ref") or not meta.get("source_fingerprint"):
-                    raise RebuildRefused(
-                        "Rebuilt FTS row is missing physical provenance."
-                    )
-            if policy == "rebuild":
-                if rebuilt._vec is None or vector_count != fts_count:
-                    raise RebuildRefused("Rebuilt Vector and FTS block sets differ.")
-                dims = embedder.dimensions
-                reader = rebuilt._resources.open(
-                    TextVault, str(stage), table=f"memory_vec_{dims}d"
-                )
-                try:
-                    vector_ids = reader.keys(limit=reader.count())
-                finally:
-                    rebuilt._resources.drop(reader)
-                for row in vector_ids:
-                    _, meta = rebuilt._vec.get_by_id(row)
-                    if not meta.get("source_ref") or not meta.get("source_fingerprint"):
-                        raise RebuildRefused(
-                            "Rebuilt Vector row is missing physical provenance."
-                        )
-        finally:
-            rebuilt.close()
-        store.checkpoint()
-        if _source_digest(store, names) != baseline:
-            raise RebuildRefused(
-                "Source events changed in staged copy; publication aborted."
-            )
-        return names, baseline[0], fts_count, vector_count
-    finally:
-        store.close(update_status=False)
+    if not active:
+        memory._state.delete("vec_dimensions")
+    memory._state.delete("memory:index_manifest")
+    return memory._fts.count(), memory._vec.count() if active else 0
 
 
 def rebuild_session_memory(
@@ -385,134 +258,59 @@ def rebuild_session_memory(
     dimensions: int | None = None,
     embedder: BaseEmbedder | None = None,
 ) -> RebuildResult:
-    """Stage complete index rebuild; publish only after source verification.
-
-    Existing vector data requires an explicit rebuild/drop decision. 'auto'
-    applies to FTS-only Sessions without stored vectors.
-    """
-    source = Path(path).resolve(strict=True)
+    """Rebuild offline through the original Store; incomplete indexes can be retried."""
+    source = coerce_fs_path(path)
+    if not source.is_file():
+        raise FileNotFoundError(source)
     if vectors not in {"auto", "drop", "rebuild"}:
         raise ValueError("vectors must be auto, drop, or rebuild")
     if vectors != "rebuild" and any(
         item is not None for item in (provider, model, dimensions, embedder)
     ):
         raise ValueError("Embedding settings require --vectors rebuild")
-    _reject_busy_source(source, allow_idle_sidecars=True)
-    lock = acquire_writer_lock(str(source))
+
+    actual = source.resolve(strict=True)
+    guards = ExitStack()
+    backup = None
     try:
-        # Reuse SessionStore's existing archive-family admission, including
-        # future-version siblings. It reads native metadata under a *legacy*
-        # occupancy lease, so it must run BEFORE our exclusive NEW lease.
+        for authority in unique_lock_authorities([source, actual], ".lock"):
+            guards.callback(release_writer_lock, acquire_writer_lock(authority))
+        # The same admission used by Store opens, before creating a backup.
         require_writable_format(source)
-        lease = _reserve_source_occupancy(source)
-        try:
-            return _rebuild_reserved(
-                source,
-                vectors=vectors,
-                provider=provider,
-                model=model,
-                dimensions=dimensions,
-                embedder=embedder,
-            )
-        finally:
-            lease.finish(source_released=True)
-    finally:
-        release_writer_lock(lock)
-
-
-def _rebuild_reserved(
-    source: Path,
-    *,
-    vectors: str,
-    provider: str | None,
-    model: str | None,
-    dimensions: int | None,
-    embedder: BaseEmbedder | None,
-) -> RebuildResult:
-    """Rebuild with exclusive process-local native occupancy held throughout."""
-    _reject_busy_source(source, allow_idle_sidecars=True)
-    stage = source.with_name(f"{source.stem}.memory-rebuild-{uuid4().hex}.kohakutr")
-    try:
-        _reject_busy_source(source, allow_idle_sidecars=True)
-        clean_digest = _file_digest(source)
-        _retire_idle_sidecars(source)
-        if _file_digest(source) != clean_digest:
-            raise RebuildRefused(
-                "Source database changed during idle-sidecar cleanup; "
-                "stop other writers and verify the Session before retrying."
-            )
-        before = source.stat()
-        before_digest = clean_digest
-        inventory = _inspect_reserved_index(source)
-        if vectors == "auto" and inventory.vectors_present:
-            details = ", ".join(
-                f"{rows}x{dim}d" for dim, rows in inventory.vector_rows if rows
-            )
-            raise RebuildRefused(
-                f"Session contains {details} old vector rows. Choose "
-                "'--vectors rebuild' (model/API cost) or '--vectors drop' "
-                "(disable semantic index, original retained in backup)."
-            )
-        policy = "fts" if vectors == "auto" else vectors
-        config = None
-        # Read the saved embedding preference from the isolated copy, never
-        # the source. The old read-only open created a new -shm on the source
-        # even when the provider failed before staging could begin.
-        shutil.copy2(source, stage)
-        if policy == "rebuild":
-            if embedder is None:
-                store = SessionStore.open_readonly(stage)
-                try:
-                    saved = store.state.get("embedding_config")
-                finally:
-                    store.close(update_status=False)
-                config = dict(saved) if isinstance(saved, dict) else {}
-                if provider is not None:
-                    config["provider"] = provider
-                if model is not None:
-                    config["model"] = model
-                if dimensions is not None:
-                    config["dimensions"] = dimensions
-                if not config.get("provider") or config["provider"] == "none":
-                    raise RebuildRefused(
-                        "No usable saved embedding provider; provide --provider "
-                        "and optionally --model/--dimensions for vector rebuild."
-                    )
-                embedder = create_embedder(config)
-            if isinstance(embedder, NullEmbedder) or embedder.dimensions <= 0:
-                raise RebuildRefused("Vector rebuild needs a real embedding model.")
-        names, events, fts, vec = _rebuild_staging(
-            stage,
-            policy=policy,
-            inventory=inventory,
-            embedder=embedder,
-            embed_config=config,
-        )
-        for suffix in ("-wal", "-shm"):
-            if Path(str(stage) + suffix).exists():
+        with _offline_database(source) as db:
+            inventory = _inventory(db, source.stat().st_size)
+            if vectors == "auto" and inventory.vectors_present:
                 raise RebuildRefused(
-                    f"Staged SQLite {suffix} exists after clean close; "
-                    "cannot publish an incomplete file snapshot."
+                    "Existing vectors require --vectors rebuild (may incur model/API "
+                    "cost) or --vectors drop (disable semantic search)."
                 )
-        after = source.stat()
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            raise RebuildRefused(
-                "Source database changed during staging; original untouched."
+            backup = _backup(db, source)
+
+        policy = "fts" if vectors == "auto" else vectors
+        dims = tuple(dim for dim, _ in inventory.vector_rows)
+        with ExitStack() as stack:
+            store = SessionStore(actual)
+            stack.callback(store.close, update_status=False)
+            memory = SessionMemory(store.path)
+            stack.callback(memory.close)
+            names = _source_agents(store, memory, dims)
+            events = _prepare_events(store, names)
+            config = None
+            if policy == "rebuild":
+                embedder, config = _resolve_embedder(
+                    store, provider, model, dimensions, embedder
+                )
+                if isinstance(embedder, NullEmbedder) or embedder.dimensions <= 0:
+                    raise RebuildRefused("Vector rebuild needs a real embedding model.")
+            fts, vec = _rebuild_indexes(
+                store, memory, events, dims, policy, embedder, config
             )
-        _reject_busy_source(source)
-        if _file_digest(source) != before_digest:
-            raise RebuildRefused(
-                "Source database bytes changed during staging; original untouched."
-            )
-        backup = source.with_name(
-            f"{source.name}.before-memory-rebuild-{uuid4().hex[:12]}.bak"
+        return RebuildResult(
+            names, sum(map(len, events.values())), fts, vec, policy, backup
         )
-        shutil.copy2(source, backup)
-        if _file_digest(backup) != before_digest:
-            raise RebuildRefused("Backup verification failed; source untouched.")
-        os.replace(stage, source)
-        return RebuildResult(names, events, fts, vec, policy, backup)
+    except Exception as exc:
+        if backup is None:
+            raise
+        raise RebuildRefused(f"{exc} (original database backup: {backup})") from exc
     finally:
-        stage.unlink(missing_ok=True)
-        for suffix in ("-wal", "-shm", ".lock"):
-            Path(str(stage) + suffix).unlink(missing_ok=True)
+        guards.close()

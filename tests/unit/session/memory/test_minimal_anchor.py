@@ -168,7 +168,7 @@ async def test_large_tool_output_offset_and_explicit_stale_event(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_mirrored_nonmonotonic_ids_keep_ordinary_search_without_anchor(tmp_path):
+async def test_unique_nonmonotonic_ids_retain_physical_anchors(tmp_path):
     store = SessionStore(tmp_path / "mirrors.kohakutr")
     store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
     ctx = _ctx(store)
@@ -185,8 +185,13 @@ async def test_mirrored_nonmonotonic_ids_keep_ordinary_search_without_anchor(tmp
         )
         assert result.error is None
         assert "MIRROR_PROBE_50" in result.output
-        assert not _anchors(result.output)
-        assert "UNVERIFIABLE_SOURCE" in result.output
+        assert _anchors(result.output), result.output
+        window = await tool.execute(
+            {"anchor": _anchors(result.output)[0], "before": 0, "after": 1},
+            context=ctx,
+        )
+        assert window.error is None
+        assert "UNORDERED_PROBE_10" in window.output
     finally:
         _close(store, ctx)
 
@@ -283,7 +288,7 @@ async def test_existing_anchor_remains_bound_to_old_branch_after_regeneration(tm
 
 
 @pytest.mark.asyncio
-async def test_unique_ids_but_reused_scope_on_incompatible_ancestry_fails_closed(
+async def test_unambiguous_anchor_does_not_expand_conflicting_scope(
     tmp_path,
 ):
     store = SessionStore(tmp_path / "reused-scope.kohakutr")
@@ -309,8 +314,16 @@ async def test_unique_ids_but_reused_scope_on_incompatible_ancestry_fails_closed
         )
         assert result.error is None
         assert "ROOT_TWO" in result.output
-        assert not _anchors(result.output)
-        assert "UNVERIFIABLE_SOURCE" in result.output
+        anchors = _anchors(result.output)
+        assert anchors, result.output
+        window = await SearchMemoryTool().execute(
+            {"anchor": anchors[0], "before": 3, "after": 3}, context=ctx
+        )
+        assert window.error is None
+        assert "ROOT_TWO" in window.output
+        assert "ROOT_ONE" not in window.output
+        assert "MIRROR_CHILD_ONE" not in window.output
+        assert "MIRROR_CHILD_TWO" not in window.output
     finally:
         _close(store, ctx)
 

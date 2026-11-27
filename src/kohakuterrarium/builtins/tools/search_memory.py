@@ -126,8 +126,13 @@ class SearchMemoryTool(BaseTool):
                 results = await memory.attach_anchors(results, query)
             except MemoryNavigationError as exc:
                 # An incompatible historical index must not break legacy search.
+                scope = (
+                    " for some hits"
+                    if any(getattr(r, "anchor", "") for r in results)
+                    else ""
+                )
                 warning = (warning + "\n" if warning else "") + (
-                    f"Anchors unavailable ({exc.code}): {exc}"
+                    f"Anchors unavailable{scope} ({exc.code}): {exc}"
                 )
 
         lines = [f"Found {len(results)} result(s) for: {query}\n"]

@@ -6,14 +6,25 @@ rebuild can upgrade their derived source-bound Anchors.
 
 import re
 import secrets
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 
+from kohakuterrarium.session.history.branch_paths import (
+    InvalidBranchViewError,
+    _coerce_branch_view,
+    _coerce_path,
+    index_parent_paths,
+)
+from kohakuterrarium.session.history.selection import SelectionCompatibility
 from kohakuterrarium.session.memory.blocks import (
     _anchor,
     _content_to_text,
     _extract_blocks,
 )
+from kohakuterrarium.session.memory.source_events import sourced_events
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 MAX_ANCHORS = 2048
 MAX_WINDOW_SIDE = 10
@@ -70,50 +81,75 @@ class ContextWindow:
     has_after: bool | None
 
 
-def _certify(events: list[dict]) -> None:
-    """Legacy ID-keyed lineage can be trusted only for ordered unique IDs."""
-    previous = 0
-    ancestry_by_scope: dict[tuple[int, int], tuple] = {}
+@dataclass
+class _LineageEvidence:
+    frontier: int | None
+    legacy_paths: dict[str, tuple]
+    ambiguous_ids: set[int]
+    ambiguous_scopes: set[tuple[int, int]]
+
+
+def _scope(event: dict) -> tuple[int, int] | None:
+    turn, branch = event.get("turn_index"), event.get("branch_id")
+    if type(turn) is int and type(branch) is int and turn > 0 and branch > 0:
+        return turn, branch
+    return None
+
+
+def _explicit_path(event: dict, turn: int) -> tuple | None:
+    raw = event.get("parent_branch_path")
+    if not isinstance(raw, (list, tuple)):
+        return None
+    path = _coerce_path(raw)
+    if len(path) != len(raw):
+        return None
+    parents = {}
+    for t, b in path:
+        if type(t) is not int or type(b) is not int or not 0 < t < turn or b <= 0:
+            return None
+        if parents.setdefault(t, b) != b:
+            return None
+    return tuple(sorted(parents.items()))
+
+
+def _lineage_evidence(events: list[dict], frontier: int | None) -> _LineageEvidence:
+    """Keep evidence for legacy ancestry and ambiguous coordinates."""
+    ids = Counter(
+        event["event_id"]
+        for event in events
+        if isinstance(event, dict) and type(event.get("event_id")) is int
+    )
+    ambiguous_ids = {eid for eid, count in ids.items() if count > 1}
+    inferred = None
+    legacy_paths = {}
+    scope_paths: dict[tuple[int, int], dict[int, int]] = {}
+    ambiguous_scopes = set()
     for event in events:
-        eid = event.get("event_id")
-        if type(eid) is not int or eid <= previous:
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE",
-                "Non-monotonic/mirrored event IDs cannot certify a legacy anchor.",
-            )
-        previous = eid
-        turn, branch = event.get("turn_index"), event.get("branch_id")
-        raw_path = event.get("parent_branch_path")
-        if type(turn) is not int or type(branch) is not int or raw_path is None:
+        scope = _scope(event)
+        if scope is None:
             continue
-        if type(raw_path) not in (list, tuple):
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Invalid recorded branch ancestry."
-            )
-        path: list[tuple[int, int]] = []
-        last_turn = 0
-        for pair in raw_path:
-            if (
-                not isinstance(pair, (list, tuple))
-                or len(pair) != 2
-                or type(pair[0]) is not int
-                or type(pair[1]) is not int
-                or not last_turn < pair[0] < turn
-                or pair[1] <= 0
-            ):
-                raise MemoryNavigationError(
-                    "UNVERIFIABLE_SOURCE", "Invalid recorded branch ancestry."
-                )
-            path.append(tuple(pair))
-            last_turn = pair[0]
-        key = turn, branch
-        path_tuple = tuple(path)
-        if key in ancestry_by_scope and ancestry_by_scope[key] != path_tuple:
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE",
-                "Multiple incompatible ancestries reuse one legacy turn/branch.",
-            )
-        ancestry_by_scope[key] = path_tuple
+        turn, _ = scope
+        eid = event.get("event_id")
+        if type(eid) is not int or eid in ambiguous_ids:
+            continue
+        raw = event.get("parent_branch_path")
+        if raw is None or raw == [] or raw == ():
+            if turn == 1:
+                path = ()
+            else:
+                if inferred is None:
+                    inferred = index_parent_paths(events)
+                path = inferred.get(eid)
+                ref = getattr(event, "source_ref", "")
+                if ref and path is not None:
+                    legacy_paths[ref] = path
+        else:
+            path = _explicit_path(event, turn)
+        if path is not None:
+            parents = scope_paths.setdefault(scope, {})
+            if any(parents.setdefault(t, b) != b for t, b in path):
+                ambiguous_scopes.add(scope)
+    return _LineageEvidence(frontier, legacy_paths, ambiguous_ids, ambiguous_scopes)
 
 
 def _event_text(event: dict) -> str:
@@ -155,25 +191,26 @@ class MemoryNavigator:
     def __init__(self, store, memory=None):
         self._store = store
         self._memory = memory
-        # One process-local physical frontier per certified Agent; a later
-        # append invalidates trust without scanning that Agent on every query.
-        self._certified_sources: dict[str, int | None] = {}
+        self._lineage: dict[str, _LineageEvidence] = {}
         self._anchors: OrderedDict[str, _Location] = OrderedDict()
 
-    def certify_source(self, agent: str, trusted: bool) -> None:
-        """Remember the Store frontier checked during the index refresh."""
+    def observe_source(self, agent: str, events: list[dict]) -> None:
+        """Reuse the index refresh's event read for lineage evidence."""
         frontier = self._store._event_seq.get(agent)
-        self._certified_sources[agent] = (
-            frontier if trusted and type(frontier) is int else None
-        )
+        previous = self._lineage.get(agent)
+        if previous is not None and previous.frontier == frontier:
+            return
+        self._lineage[agent] = _lineage_evidence(events, frontier)
 
-    def source_certified(self, agent: str) -> bool:
-        """O(1) trust check; invalidate on new physical event appends."""
-        frontier = self._store._event_seq.get(agent)
-        return type(frontier) is int and self._certified_sources.get(agent) == frontier
+    def _evidence_for(self, agent: str) -> _LineageEvidence:
+        previous = self._lineage.get(agent)
+        if previous is None or previous.frontier != self._store._event_seq.get(agent):
+            self.observe_source(agent, sourced_events(self._store, agent))
+        return self._lineage[agent]
 
     def close(self) -> None:
         self._anchors.clear()
+        self._lineage.clear()
 
     def _remember(self, loc: _Location) -> str:
         token = secrets.token_urlsafe(24)
@@ -194,21 +231,24 @@ class MemoryNavigator:
                 hit, "source_fingerprint", ""
             ):
                 if first_error is None:
-                    if self.source_certified(hit.agent):
-                        first_error = MemoryNavigationError(
-                            "ANCHOR_REBUILD_REQUIRED",
-                            "Existing index row has no certified source. "
-                            "Stop session writers, then run 'kt memory rebuild SESSION'.",
-                        )
-                    else:
-                        first_error = MemoryNavigationError(
-                            "UNVERIFIABLE_SOURCE",
-                            "Physical source has unsupported ordering or ancestry.",
-                        )
+                    first_error = MemoryNavigationError(
+                        "ANCHOR_REBUILD_REQUIRED",
+                        "Existing index row has no physical source reference. "
+                        "Stop session writers, then run 'kt memory rebuild SESSION'.",
+                    )
                 continue
             try:
                 location = self._direct_hit(hit, query)
-            except MemoryNavigationError as exc:
+            except Exception as exc:
+                if not isinstance(exc, MemoryNavigationError):
+                    logger.warning(
+                        "Memory source evidence unavailable",
+                        agent=hit.agent,
+                        error=str(exc),
+                    )
+                    exc = MemoryNavigationError(
+                        "UNVERIFIABLE_SOURCE", "Unable to read source evidence."
+                    )
                 if first_error is None:
                     first_error = exc
                 continue
@@ -254,38 +294,37 @@ class MemoryNavigator:
         return int(suffix)
 
     @staticmethod
-    def _visible_scoped(event: dict, view: dict[int, int]) -> bool:
-        """Conservative physical visibility without Replay's message projection."""
+    def _visible_scoped(
+        event: dict,
+        ref: str,
+        view: dict[int, int],
+        compatibility: SelectionCompatibility,
+        evidence: _LineageEvidence,
+    ) -> bool:
+        """Check an event against the index's pinned selected lineage."""
         if event.get("type") not in CONTEXT_TYPES:
             return False
         turn, branch = event.get("turn_index"), event.get("branch_id")
         if turn is None and branch is None:
             return True
-        if type(turn) is not int or type(branch) is not int:
-            return False
-        if (turn, branch) == (0, 0):
+        if type(turn) is int and type(branch) is int and (turn, branch) == (0, 0):
             return True
-        if turn < 1 or branch < 1 or view.get(turn) != branch:
+        scope = _scope(event)
+        eid = event.get("event_id")
+        if (
+            scope is None
+            or view.get(turn) != branch
+            or type(eid) is not int
+            or eid in evidence.ambiguous_ids
+            or scope in evidence.ambiguous_scopes
+        ):
             return False
         raw = event.get("parent_branch_path")
-        if raw is None:
-            return turn == 1
-        if not isinstance(raw, (tuple, list)):
-            return False
-        previous = 0
-        for pair in raw:
-            if (
-                not isinstance(pair, (tuple, list))
-                or len(pair) != 2
-                or type(pair[0]) is not int
-                or type(pair[1]) is not int
-                or not previous < pair[0] < turn
-                or pair[1] <= 0
-                or view.get(pair[0]) != pair[1]
-            ):
-                return False
-            previous = pair[0]
-        return True
+        if raw is None or raw == [] or raw == ():
+            path = () if turn == 1 else evidence.legacy_paths.get(ref)
+        else:
+            path = _explicit_path(event, turn)
+        return path is not None and compatibility.matches(path, turn)
 
     def _index_view(self, agent: str) -> tuple[tuple[int, int], ...]:
         if self._memory is None:
@@ -293,7 +332,7 @@ class MemoryNavigator:
                 "UNVERIFIABLE_SOURCE", "Memory index was not attached."
             )
         checkpoint = self._memory._state.get(f"{agent}:cursor:keywords")
-        if self._memory._state.get(f"{agent}:cursor:keywords:pending", False):
+        if not self._memory._valid_index(agent, "keywords"):
             raise MemoryNavigationError(
                 "UNVERIFIABLE_SOURCE", "Keyword index update is incomplete."
             )
@@ -312,51 +351,29 @@ class MemoryNavigator:
             raise MemoryNavigationError(
                 "UNVERIFIABLE_SOURCE", "Selected-lineage proof is not available."
             )
-        selected: dict[int, int] = {}
-        for turn, branch in raw.items():
-            # Historical bookkeeping records at (0, 0) are globally visible
-            # but do not represent a conversational branch selection.
-            if turn == "0" and branch == 0:
-                continue
-            if (
-                not isinstance(turn, str)
-                or not turn.isascii()
-                or not turn.isdecimal()
-                or type(branch) is not int
-                or int(turn) < 1
-                or branch < 1
-            ):
-                raise MemoryNavigationError(
-                    "UNVERIFIABLE_SOURCE", "Invalid indexed branch selection."
-                )
-            selected[int(turn)] = branch
-        # The baseline selected-lineage index resolves the latest compatible
-        # branch, not an explicitly persisted older selection. Do not extend
-        # such a mismatched query hit into another branch's raw context.
-        requested = self._store.state.get(f"{agent}:branch_view")
-        if requested:
-            if not isinstance(requested, dict):
-                raise MemoryNavigationError(
-                    "UNVERIFIABLE_SOURCE", "Selected branch marker is invalid."
-                )
-            for raw_turn, branch in requested.items():
-                if (
-                    not str(raw_turn).isascii()
-                    or not str(raw_turn).isdecimal()
-                    or type(branch) is not int
-                    or selected.get(int(raw_turn)) != branch
-                ):
-                    raise MemoryNavigationError(
-                        "UNVERIFIABLE_SOURCE",
-                        "Indexed lineage differs from the active selected branch.",
-                    )
+        try:
+            selected = _coerce_branch_view(
+                {
+                    turn: branch
+                    for turn, branch in raw.items()
+                    if (turn, branch) not in (("0", 0), (0, 0))
+                }
+            )
+            requested = _coerce_branch_view(
+                self._store.state.get(f"{agent}:branch_view")
+            )
+        except InvalidBranchViewError as exc:
+            raise MemoryNavigationError(
+                "UNVERIFIABLE_SOURCE", "Invalid branch selection."
+            ) from exc
+        if any(selected.get(turn) != branch for turn, branch in requested.items()):
+            raise MemoryNavigationError(
+                "UNVERIFIABLE_SOURCE",
+                "Indexed lineage differs from the active selected branch.",
+            )
         return tuple(sorted(selected.items()))
 
     def _direct_hit(self, hit, query: str) -> _Location:
-        if not self.source_certified(hit.agent):
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Current event source is not certifiable."
-            )
         ref = hit.source_ref
         self._ref_sequence(hit.agent, ref)
         self._store._flush_events_cache()
@@ -371,7 +388,11 @@ class MemoryNavigator:
                 "STALE_INDEX", "Indexed source and physical event do not agree."
             )
         view = self._index_view(hit.agent)
-        if not self._visible_scoped(event, dict(view)):
+        evidence = self._evidence_for(hit.agent)
+        selected = dict(view)
+        if not self._visible_scoped(
+            event, ref, selected, SelectionCompatibility(selected), evidence
+        ):
             raise MemoryNavigationError(
                 "UNVERIFIABLE_SOURCE", "Hit is outside certified selected lineage."
             )
@@ -402,10 +423,12 @@ class MemoryNavigator:
                 "ANCHOR_EXPIRED", "Physical event was deleted."
             ) from exc
         view = dict(loc.view)
+        compatibility = SelectionCompatibility(view)
+        evidence = self._lineage[loc.agent]
         if (
             not isinstance(raw, dict)
             or _anchor(raw) != loc.fingerprint
-            or not self._visible_scoped(raw, view)
+            or not self._visible_scoped(raw, loc.ref, view, compatibility, evidence)
         ):
             raise MemoryNavigationError(
                 "ANCHOR_EXPIRED", "Anchor source or visibility changed."
@@ -423,21 +446,15 @@ class MemoryNavigator:
             while 0 <= seq < frontier and len(found) <= count:
                 examined += 1
                 if examined > MAX_SCANNED_PER_SIDE:
-                    if len(found) < count:
-                        raise MemoryNavigationError(
-                            "CONTEXT_SCAN_LIMIT",
-                            "Requested neighbors exceed the physical scan budget.",
-                        )
-                    # All requested content is available. Do not fail the
-                    # window merely because the presence of *more* visible
-                    # history cannot be established within the budget.
                     return found[:count], None
                 ref = f"{loc.agent}:e{seq:06d}"
                 try:
                     event = self._store.events[ref]
                 except KeyError:
                     event = None
-                if isinstance(event, dict) and self._visible_scoped(event, view):
+                if isinstance(event, dict) and self._visible_scoped(
+                    event, ref, view, compatibility, evidence
+                ):
                     found.append((ref, event))
                 seq += direction
             return found[:count], len(found) > count

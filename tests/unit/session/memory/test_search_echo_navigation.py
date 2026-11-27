@@ -9,8 +9,9 @@ import pytest
 from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.modules.tool.base import ToolContext
+from kohakuterrarium.session.memory.blocks import _extract_blocks
 from kohakuterrarium.session.memory.embedding import BaseEmbedder
-from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.index import SessionMemory, _block_metadata
 from kohakuterrarium.session.store import SessionStore
 
 MARKER = "31.933066093773366"
@@ -24,6 +25,28 @@ class _Embedder(BaseEmbedder):
 
     def encode_one(self, query):
         return np.ones(4, dtype=np.float32)
+
+
+def _legacy_index(memory, rows):
+    """Seed pre-upgrade echoes while retaining the ordinary persisted cursor."""
+    memory.index_events("alice", rows)
+    echoes = [
+        b for b in _extract_blocks("alice", rows) if b.tool_name == "search_memory"
+    ]
+    for b in echoes:
+        memory._fts.insert(b.content, _block_metadata(b))
+    if memory._has_vectors and memory._vec is not None and echoes:
+        vectors = memory._embedder.encode([b.content for b in echoes])
+        for vector, b in zip(vectors, echoes):
+            memory._vec.insert(vector, _block_metadata(b, include_content=True))
+
+
+def _seed_legacy_store(store, embedder=None):
+    memory = SessionMemory(store.path, embedder)
+    try:
+        _legacy_index(memory, store.get_events("alice"))
+    finally:
+        memory.close()
 
 
 @pytest.mark.parametrize("mode", ["fts", "semantic", "hybrid"])
@@ -54,7 +77,7 @@ def test_prior_search_calls_never_displace_relevant_top_k(tmp_path, mode):
         )
     memory = SessionMemory(str(tmp_path / "echo.kohakutr"), _Embedder())
     try:
-        memory.index_events("alice", rows)
+        _legacy_index(memory, rows)
         # The corpus is unchanged, including previous search invocations.
         assert memory._fts.count() > 100
         hits = memory.search(MARKER, mode=mode, k=1)
@@ -80,9 +103,10 @@ def test_search_only_echo_corpus_returns_no_results(tmp_path):
             "output": f"Echo: {MARKER}",
         },
     ]
-    memory = SessionMemory(str(tmp_path / "echo-only.kohakutr"))
+    memory = SessionMemory(str(tmp_path / "echo-only.kohakutr"), _Embedder())
     try:
         memory.index_events("alice", rows)
+        assert memory._fts.count() == memory._vec.count() == 1
         assert memory.search(MARKER, mode="fts", k=5) == []
     finally:
         memory.close()
@@ -145,8 +169,8 @@ def test_bounded_search_returns_partial_hits_with_warning_not_an_error(
     monkeypatch.setattr(index_mod, "_MAX_RANKED_CANDIDATES", 4)
     memory = SessionMemory(str(tmp_path / "small-budget.kohakutr"))
     try:
-        memory.index_events(
-            "alice",
+        _legacy_index(
+            memory,
             [
                 {"type": "user_input", "content": "historical note"},
                 {
@@ -231,6 +255,7 @@ async def test_live_search_surfaces_partial_warning_with_no_hits(tmp_path, monke
             "tool_call",
             {"name": "search_memory", "args": {"query": MARKER, "sequence": i}},
         )
+    _seed_legacy_store(store)
     context = ToolContext(
         agent_name="alice",
         session=Session(key="warning"),
@@ -299,6 +324,7 @@ async def test_hybrid_keeps_fts_hits_and_semantic_partial_warning(
             "tool_call",
             {"name": "search_memory", "args": {"query": MARKER, "sequence": i}},
         )
+    _seed_legacy_store(store, EchoPreferredEmbedder())
     context = ToolContext(
         agent_name="alice",
         session=Session(key="s"),
@@ -339,6 +365,7 @@ async def test_offline_studio_search_displays_partial_warning(tmp_path, monkeypa
                 else {"name": "search_memory", "args": {"query": MARKER, "sequence": i}}
             ),
         )
+    _seed_legacy_store(store)
     store.close(update_status=False)
 
     response = await search_session_memory(path, q=MARKER, mode="fts", k=5)

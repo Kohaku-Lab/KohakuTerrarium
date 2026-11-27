@@ -7,10 +7,7 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory.index import SessionMemory
-from kohakuterrarium.session.memory.navigation import (
-    MemoryNavigationError,
-    MemoryNavigator,
-)
+from kohakuterrarium.session.memory.navigation import MemoryNavigator
 from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.utils.logging import get_logger
 
@@ -79,39 +76,7 @@ class LiveSessionMemory:
             self._memory.close()
 
     async def attach_anchors(self, hits: list, query: str) -> list:
-        return await self._store.run(self._attach_certified_hits, hits, query)
-
-    def _attach_certified_hits(self, hits: list, query: str) -> list:
-        """Refresh only uncertified source namespaces that actually returned hits.
-
-        Search can return an indexed peer's hit even when only the caller's
-        source was refreshed. Keep certification and issuance on the same
-        serialized Store worker, without scanning unrelated Agents.
-        """
-        missing = sorted(
-            {
-                hit.agent
-                for hit in hits
-                if hit.agent and not self._navigator.source_certified(hit.agent)
-            }
-        )
-        if missing:
-            try:
-                self._index_keywords(missing)
-            except Exception as exc:
-                # This extra proof step is not part of Search itself. Never
-                # discard already retrieved hits because peer certification
-                # could not finish; withhold all unverified new Anchors.
-                logger.warning(
-                    "Peer Memory source certification failed",
-                    agents=missing,
-                    error=str(exc),
-                )
-                raise MemoryNavigationError(
-                    "UNVERIFIABLE_SOURCE",
-                    "Unable to certify a returned peer source.",
-                ) from exc
-        return self._navigator.register_hits(hits, query)
+        return await self._store.run(self._navigator.register_hits, hits, query)
 
     async def read_context(
         self, anchor: str, *, before: int = 3, after: int = 3, offset: int | None = None
@@ -124,10 +89,12 @@ class LiveSessionMemory:
         for name in names:
             events = sourced_events(self._store, name)
             self._memory._index_keywords(name, events)
-            self._navigator.certify_source(
-                name,
-                bool(events) and all(hasattr(event, "source_ref") for event in events),
-            )
+            try:
+                self._navigator.observe_source(name, events)
+            except Exception as exc:
+                logger.warning(
+                    "Memory source evidence unavailable", agent=name, error=str(exc)
+                )
 
     def _vector_batch(self, name: str):
         events = sourced_events(self._store, name)

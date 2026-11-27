@@ -17,6 +17,7 @@ from typing import Any
 from kohakuterrarium.errors import SessionError, SessionNotFoundError
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.session.memory.async_search import live_memory_for_store
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import (
@@ -137,7 +138,7 @@ def _search_session_sync(
             # Incremental indexing skips events already represented in memory.
             meta = store.load_meta()
             for agent_name in meta.get("agents", []):
-                events = store.get_events(agent_name)
+                events = sourced_events(store, agent_name)
                 if events:
                     memory.index_events(agent_name, events)
 

@@ -133,7 +133,7 @@ async def test_direct_window_skips_physical_sequence_hole(tmp_path):
         _close(store, ctx)
 
 
-async def test_direct_window_fails_explicitly_on_excessive_sequence_gap(
+async def test_direct_window_returns_verified_prefix_on_excessive_sequence_gap(
     tmp_path, monkeypatch
 ):
     store, ctx, tool = _env(tmp_path)
@@ -149,7 +149,10 @@ async def test_direct_window_fails_explicitly_on_excessive_sequence_gap(
             {"anchor": _token(source.output), "before": 0, "after": 1},
             context=ctx,
         )
-        assert "CONTEXT_SCAN_LIMIT" in (result.error or "")
+        assert result.error is None
+        assert "DIRECT_GAP_SOURCE" in result.output
+        assert "DIRECT_GAP_TAIL" not in result.output
+        assert "has_after=unknown" in result.output
     finally:
         _close(store, ctx)
 
@@ -340,12 +343,14 @@ async def test_zero_neighbor_window_survives_unverifiable_further_continuity(
         assert "has_before=false" in exact.output
         assert "has_after=unknown" in exact.output
 
-        # If an actual later neighbor was requested, the limit is a real
-        # correctness boundary; do not return an incomplete normal window.
+        # Budget exhaustion does not invalidate verified events.
         neighbor = await tool.execute(
             {"anchor": token, "before": 0, "after": 1}, context=ctx
         )
-        assert "CONTEXT_SCAN_LIMIT" in (neighbor.error or "")
+        assert neighbor.error is None
+        assert "VISIBLE_AT_START_OF_SIBLINGS" in neighbor.output
+        assert "INVISIBLE_SIBLING" not in neighbor.output
+        assert "has_after=unknown" in neighbor.output
     finally:
         _close(store, ctx)
 
@@ -373,5 +378,31 @@ async def test_old_all_branch_cursor_withholds_anchor_until_rebuild(tmp_path):
         assert result.error is None
         assert "ANCHOR_REBUILD_REQUIRED" in result.output
         assert not re.search(r"^anchor:", result.output, re.M)
+    finally:
+        _close(store, ctx)
+
+
+async def test_legacy_inferred_ancestry_uses_mainline_selection(tmp_path):
+    store, ctx, tool = _env(tmp_path)
+    try:
+        for turn in (1, 2):
+            store.append_event(
+                "alice",
+                "user_input",
+                {"content": f"LEGACY_TURN_{turn}"},
+                turn_index=turn,
+                branch_id=1,
+            )
+        result = await tool.execute(
+            {"query": "LEGACY_TURN_2", "mode": "fts"}, context=ctx
+        )
+        assert result.error is None
+        window = await tool.execute(
+            {"anchor": _token(result.output), "before": 1, "after": 0},
+            context=ctx,
+        )
+        assert window.error is None
+        assert "LEGACY_TURN_1" in window.output
+        assert "LEGACY_TURN_2" in window.output
     finally:
         _close(store, ctx)

@@ -320,14 +320,14 @@ class TestSearchSessionMemory:
         finally:
             store.close()
 
-        real_get_events = SessionStore.get_events
+        real_event_rows = SessionStore._event_rows
         witness = LoopWitness(asyncio.get_running_loop())
 
-        def observed_get_events(self, agent, **kwargs):
+        def observed_event_rows(self, agent, **kwargs):
             witness.observe()
-            return real_get_events(self, agent, **kwargs)
+            return real_event_rows(self, agent, **kwargs)
 
-        monkeypatch.setattr(SessionStore, "get_events", observed_get_events)
+        monkeypatch.setattr(SessionStore, "_event_rows", observed_event_rows)
         monkeypatch.setattr(
             mem_mod, "_live_store_for_path", lambda eng, p: (None, None)
         )
@@ -335,6 +335,14 @@ class TestSearchSessionMemory:
         out = await mem_mod.search_session_memory(path, q="needle", mode="fts")
         assert out["count"] >= 1
         assert witness.never_blocked, "saved search blocked the event loop"
+        from kohakuterrarium.session.memory.index import SessionMemory
+
+        memory = SessionMemory(str(path))
+        try:
+            hit = memory.search("needle", mode="fts")[0]
+            assert hit.source_ref == "alice:e000000" and hit.source_fingerprint
+        finally:
+            memory.close()
 
     async def test_live_search_does_not_block_event_loop(self, tmp_path, monkeypatch):
         # S5 negative case: a live store's search dispatches onto the

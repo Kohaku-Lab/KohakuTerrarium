@@ -85,7 +85,10 @@ class TestSessionReader:
             assert indexed > 0
             hits = r.search("score.json")
             assert hits
-            assert any("score.json" in h.content for h in hits)
+            assert any(
+                "score.json" in h.content and h.source_ref and h.source_fingerprint
+                for h in hits
+            )
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):

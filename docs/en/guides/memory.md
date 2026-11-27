@@ -99,21 +99,24 @@ uses the ordinary Session format gate to reject future archive-family versions.
 This guards the derived Search index; it does not diagnose or repair missing
 Session history.
 
-For safety, indexes are rebuilt in a **separate database copy** and published
-only after validation. The original database is saved as a backup; externally stored Session
-artifacts are not changed. SQLite may retire idle WAL/shared-memory sidecars.
-If rebuilding fails, the original database remains in place. Existing vectors are not silently reused across incompatible index
-formats, and the default mode does not silently drop them.
-If you choose to drop vectors, semantic search is disabled until you
-explicitly rebuild an embedding index.
+Before updating the original Session through its normal Store and Memory
+interfaces, the command creates a verified logical SQLite backup, including
+committed WAL data. Rebuild never replaces the Session file or changes
+external artifacts. Original events are not rewritten. If an index update is
+interrupted, that index remains invalid until refreshed or rebuilt; retry
+the command with the same vector policy. The backup preserves prior indexes,
+including paid embeddings.
 
-When an older Session stores an Embedding provider but leaves its model
-unspecified, rebuild uses that provider's default model. If model loading
-fails, the original database remains in place and the command can be retried.
-A previous read-only open may leave an empty SQLite WAL and a shared-memory
-sidecar: rebuild lets SQLite retire those files under the writer lock.
-**Do not manually delete SQLite sidecars**. A non-empty WAL or active reader/
-writer is still a reason to stop other processes before retrying.
+Existing vectors are not silently reused across incompatible index formats.
+If you choose to drop vectors, semantic retrieval is disabled until an
+embedding index is explicitly rebuilt. A vector reset does not clear the
+previous rows for an Agent until its new embeddings have been computed.
+
+A saved provider with no model name uses its default model. A failed model
+load can be retried. SQLite manages its own WAL/SHM bookkeeping; **do not
+delete sidecar files manually**. Offline maintenance requires stopping all
+readers/writers, including consumers that do not participate in the Session
+writer lock.
 
 Old Search results may report `ANCHOR_REBUILD_REQUIRED` until the Session's
 derived indexes have been rebuilt. Normal Search never silently triggers

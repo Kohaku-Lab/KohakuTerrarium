@@ -40,6 +40,7 @@ def _without_search_echo(
     k: int,
     agent: str | None,
     max_candidates: int | None = None,
+    eligible: Callable[[str], bool] | None = None,
 ) -> tuple[list[_RankedHit], bool]:
     """Return visible ranked prefix and whether the backend cap hid its tail.
 
@@ -57,6 +58,7 @@ def _without_search_echo(
             for hit in candidates
             if hit[2].get("tool_name") != "search_memory"
             and (agent is None or hit[2].get("agent") == agent)
+            and (eligible is None or eligible(hit[2].get("agent", "")))
         ]
         if len(visible) >= k or len(candidates) < limit:
             return visible[:k], False
@@ -119,6 +121,7 @@ class _IndexBatch:
     generation: int
     embedder: object
     checkpoint: dict
+    reset: bool
 
 
 class SessionMemory:
@@ -163,6 +166,7 @@ class SessionMemory:
 
         # Dimension-specific tables prevent incompatible embedding models from mixing.
         self._vec: VectorKVault | None = None
+        self._active_vector_dims = 0
         if self._has_vectors and self._embedder.dimensions > 0:
             dims = self._embedder.dimensions
             self._vec = self._resources.open(
@@ -171,6 +175,7 @@ class SessionMemory:
                 table=f"memory_vec_{dims}d",
                 dimensions=dims,
             )
+            self._active_vector_dims = dims
             self._state["vec_dimensions"] = dims
         elif not self._has_vectors:
             # Existing vector tables remain queryable without a configured embedder.
@@ -183,6 +188,7 @@ class SessionMemory:
                         table=f"memory_vec_{saved_dims}d",
                         dimensions=saved_dims,
                     )
+                    self._active_vector_dims = saved_dims
             except (KeyError, Exception):
                 pass
 
@@ -217,28 +223,60 @@ class SessionMemory:
     def _clear_fts(self, agent: str) -> None:
         self._clear_index(agent, "keywords")
 
-    def _clear_index(self, agent: str, kind: str) -> None:
-        vault = self._fts if kind == "keywords" else self._vec
+    def _index_rows(self, kind: str, vault=None):
+        """Iterate persisted row ids and metadata in one index table."""
+        if vault is None:
+            vault = self._fts if kind == "keywords" else self._vec
         if kind == "keywords":
             ids = vault.keys(limit=vault.count())
         else:
             dims = int(kind.split(":")[1])
-            # VectorKVault has no keys API. TextVault.keys performs a plain
-            # rowid SELECT on the existing table through the same native SQLite
-            # library; its CREATE IF NOT EXISTS leaves the vec0 table intact.
-            # Python sqlite3 must not open a live vault: separate SQLite copies
-            # can invalidate each other's WAL/locking state on POSIX.
             reader = self._resources.open(
                 TextVault, self._path, table=f"memory_vec_{dims}d"
             )
             try:
-                ids = reader.keys(limit=vault.count())
+                ids = list(reader.keys(limit=vault.count()))
             finally:
                 self._resources.drop(reader)
         for row_id in ids:
             _, meta = vault.get_by_id(row_id)
-            if isinstance(meta, dict) and meta.get("agent") == agent:
+            yield row_id, meta
+
+    def _clear_index(self, agent: str | None, kind: str, vault=None) -> None:
+        if vault is None:
+            vault = self._fts if kind == "keywords" else self._vec
+        if agent is None and kind == "keywords":
+            vault.clear()
+            return
+        for row_id, meta in self._index_rows(kind, vault):
+            if agent is None or (isinstance(meta, dict) and meta.get("agent") == agent):
                 vault.delete(row_id)
+
+    def _valid_index(self, agent: str, kind: str) -> bool:
+        key = f"{agent}:cursor:{kind}"
+        if self._state.get(f"{key}:pending", False):
+            return False
+        checkpoint = self._state.get(key)
+        return (
+            not isinstance(checkpoint, dict)
+            or "generation" not in checkpoint
+            or checkpoint["generation"] == self._generation(agent)
+        )
+
+    def _ranked_candidates(self, retrieve, *, k, agent, kind, max_candidates=None):
+        validity = {}
+
+        def ready(name):
+            if name not in validity:
+                validity[name] = self._valid_index(name, kind)
+            return validity[name]
+
+        result = _without_search_echo(
+            retrieve, k=k, agent=agent, max_candidates=max_candidates, eligible=ready
+        )
+        if any(not valid for valid in validity.values()):
+            logger.debug("Skipped invalidated memory index rows", index_kind=kind)
+        return result
 
     def _prepare(self, agent: str, events: list[dict], kind: str, start_from: int):
         key = f"{agent}:cursor:{kind}"
@@ -261,7 +299,6 @@ class SessionMemory:
                 reset = True
         if reset:
             self._state[f"{key}:pending"] = True
-            self._clear_index(agent, kind)
             revision += 1
             self._state[f"{key}:revision"] = revision
             checkpoint = None
@@ -274,6 +311,7 @@ class SessionMemory:
                 generation,
                 self._embedder,
                 next_state,
+                reset,
             ),
             blocks,
         )
@@ -317,6 +355,8 @@ class SessionMemory:
         ):
             return 0
         self._state[f"{agent}:cursor:keywords:pending"] = True
+        if batch.reset:
+            self._clear_index(agent, "keywords")
         for block in blocks:
             self._fts.insert(block.content, _block_metadata(block))
         self._finish_batch(agent, "keywords", batch)
@@ -335,6 +375,7 @@ class SessionMemory:
             )
             if previous is not None:
                 self._resources.drop(previous)
+            self._active_vector_dims = embedder.dimensions
             self._state["vec_dimensions"] = embedder.dimensions
 
     def _vector_batch(self, agent: str, events: list[dict], start_from: int = 0):
@@ -362,6 +403,8 @@ class SessionMemory:
         ):
             return
         self._state[f"{key}:pending"] = True
+        if start.reset:
+            self._clear_index(agent, kind)
         for vector, block in zip(vectors, blocks):
             self._vec.insert(vector, _block_metadata(block, include_content=True))
         self._finish_batch(agent, kind, start)
@@ -406,8 +449,11 @@ class SessionMemory:
 
     def _search_fts(self, query: str, k: int, agent: str | None) -> list[SearchResult]:
         """FTS5 keyword search."""
-        results, incomplete = _without_search_echo(
-            lambda limit: self._fts.search(query, k=limit), k=k, agent=agent
+        results, incomplete = self._ranked_candidates(
+            lambda limit: self._fts.search(query, k=limit),
+            k=k,
+            agent=agent,
+            kind="keywords",
         )
         out = SearchHits(
             warning=(
@@ -453,10 +499,11 @@ class SessionMemory:
     def _search_vector(
         self, query_vec, k: int, agent: str | None
     ) -> list[SearchResult]:
-        results, incomplete = _without_search_echo(
+        results, incomplete = self._ranked_candidates(
             lambda limit: self._vec.search(query_vec, k=limit),
             k=k,
             agent=agent,
+            kind=f"vectors:{self._active_vector_dims}",
             max_candidates=_MAX_VECTOR_CANDIDATES,
         )
         out = SearchHits(

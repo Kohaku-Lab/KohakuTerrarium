@@ -95,17 +95,19 @@ kt memory rebuild /path/to/session.kohakutr --vectors rebuild --provider sentenc
 版本成员的文件族。这里仅保护派生的 Search 索引，**不负责检查或修复
 Session 事件历史的完整性**。
 
-重建先在**独立数据库副本**上完成，验证通过后才替换 Session 文件，
-并自动保留原数据库备份；关联的 artifacts 不会被改动。如果重建失败，
-原数据库仍保留在原位置。不会在格式不兼容时静默复用旧向量，也不会
-在默认模式下擅自删除它们。显式舍弃旧向量后，需重新建立 Embedding
-索引才能恢复语义检索。
+重建通过原有 Store 与 Memory 接口操作原始 Session，先创建并验证
+SQLite 逻辑备份（包含已提交的 WAL 数据），不替换 Session 文件，也不改动
+外部 artifacts 或重写原始事件。索引更新中断后，已知失效的索引需要刷新
+或重建，可使用相同的向量策略重试。备份保留旧索引，包括付费生成的向量。
 
-旧 Session 即使保存了 Embedding Provider 但未保存模型名称，重建也会
-采用该 Provider 的默认模型。模型加载失败后，可在不修改原始数据库的
-情况下重试。若先前的只读访问留下了空 SQLite WAL 和共享内存 Sidecar，
-重建器会在持有写锁时通过 SQLite 正常回收。**不要手动删除 SQLite
-Sidecar**；非空 WAL 或仍有活动 Reader／Writer 时，必须先关闭占用进程。
+不会在格式不兼容时静默复用旧向量；显式舍弃向量后，需要重新建立
+Embedding 索引才能恢复语义检索。重新计算向量时，会先完成对应 Agent
+的新 Embedding 计算，再清除其旧向量记录。
+
+旧 Session 保存了 Embedding Provider 但未保存模型名称时，使用该 Provider
+的默认模型。模型加载失败后可以重试。SQLite 自行管理 WAL／SHM，
+**不要手动删除 Sidecar 文件**。离线维护要求关闭所有读写进程，包括不
+参与 Session 写锁协调的消费者。
 
 未重建的旧索引可能返回 `ANCHOR_REBUILD_REQUIRED`。普通 Search 不会
 自动启动重建。

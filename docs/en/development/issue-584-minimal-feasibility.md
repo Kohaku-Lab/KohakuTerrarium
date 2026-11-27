@@ -20,16 +20,19 @@ silently reinterpreted as a neighboring event.
   A matching paragraph proves only *which physical event* to read. Context
   then paginates the **whole original event text**, even when Search indexed
   it as several separate paragraph blocks.
-- Peer-Agent hits from an unfiltered Search are certified on demand only for
-  namespaces actually returned and not yet certified in the live session.
-  A failure in this extra certification withholds Anchors but preserves the
-  ordinary Search hits; unrelated Agent histories are not scanned.
-- An active Anchor is promoted ahead of neighbor-token allocation so its own
-  expansion cannot evict it when the 2048-token process cache is at capacity.
+- Physical event reads share the Store reader; strict source decoding for
+  rebuild is independent of lineage evidence for Anchors. Non-monotonic
+  unique logical event IDs do not invalidate physical provenance.
+- Peer hits use read-only lineage evidence only for returned namespaces;
+  they do not trigger an unrelated index update. Legacy ancestry uses
+  the existing history resolver and incompatible scopes are withheld.
+- An active Anchor is promoted ahead of neighbor-token allocation to prevent
+  self-eviction at the 2048-token cache limit.
 - Expansion is capped to 10 neighboring events per direction, 256 examined
-  keys per side, and 900 characters per displayed event slice. Continuity can
-  be unknown when the source budget cannot determine whether more history
-  exists; requested unavailable neighbors still return a scan-limit error.
+  keys per side, and 900 characters per displayed event slice. Exhausted
+  scan budgets return verified content with unknown continuity, not errors.
+- New projections omit search_memory call/result echoes; existing indexes
+  retain read-time filtering and bounded candidate widening.
 - Legacy unannotated or all-branch index records remain ordinary Search hits
   but do not receive unproven Anchors. They report ANCHOR_REBUILD_REQUIRED.
 - No new all-branch Search feature, Replay, Resume, /clear, Compaction or
@@ -63,56 +66,34 @@ No incompatible old vector bytes are silently reused, and re-embedding may
 download models or incur API charges.
 
 The operation:
-1. Acquires the existing process-wide native occupancy gate *exclusively*
-   before source inspection or rebuild and holds it through publication. This
-   also excludes standalone SessionMemory and other KohakuVault handles not
-   registered as live SessionStore instances, while preventing new local
-   opens during the rebuild. A separate Session writer lock covers cooperating
-   processes; the operator must still stop unrelated external readers/writers
-   that do not participate in that lock. Historical read-only opens can leave
-   a zero-byte SQLite WAL and 32 KB shared-memory sidecar. After acquiring
-   the writer lock, a zero-frame SQLite TRUNCATE checkpoint may retire these
-   idle sidecars; an uncheckpointed WAL or still-live handle is refused.
-   Read-only inventory must never create or remove sidecars.
-2. Inspects old FTS and vector counts without materializing old indexes.
-   A destructive rebuild uses strict physical event decoding: an unreadable
-   event rejects publication instead of being reclassified as an empty Agent.
-   Normal Search still uses its existing tolerant fallback and withholds
-   unverifiable Anchors.
-   Before opening the staged copy, the existing Session
-   `require_writable_format()` gate validates the **original archive family**
-   under the existing writer lock (and before native exclusive occupancy
-   admission, because the format reader itself uses a legacy lease).
-   Rebuild refuses to replace a previously nonempty Agent FTS/vector index
-   when that Agent has no physical source event keys; it does not assert
-   completeness or attempt repair of the Session event log.
-3. Takes a same-directory stage copy of the database, rebuilding **only the
-   derived Memory indexes** in that copy for all discovered Session agents.
-   It clears old index cursors, manifest, FTS and known vector tables; it
-   preserves Session events, conversation, snapshots and artifact storage.
-4. Uses the physical Source Ref reader for both selected-lineage FTS and any
-   newly recomputed vectors. It checks all published FTS metadata and compares
-   physical event fingerprints before and after staging.
-5. Keeps a backup of the original Session file, then publishes the staged
-   database using one atomic file replacement; a staging/model failure
-   leaves the original in place.
+1. Requires all readers and writers to stop. It preserves the supplied
+   archive family for ordinary format admission, uses the canonical
+   physical path for native operations, and acquires the existing writer
+   locks for the known target identities.
+2. Inspects existing FTS and vector dimensions using a short exclusive
+   ResourceGate lease for the separate SQLite reader. The verified
+   logical backup includes committed WAL data. Normal Store/Memory opens
+   use their existing native resource lifecycle; there is no file
+   replacement or manual sidecar management.
+3. Reads all source namespaces strictly before invalidating derived indexes.
+   Previously indexed namespaces without physical events are refused.
+   Anchor ambiguity alone does not reject a rebuild.
+4. Uses the ordinary Memory generation, pending, revision and cursor
+   protocol on the original Session. Known invalid rows are excluded
+   from ranked retrieval. Embeddings are computed before clearing the
+   corresponding old Agent vector rows.
+5. Preserves raw events and artifacts. On interruption, an affected
+   index can be refreshed or explicitly rebuilt; the earlier backup
+   preserves the previous indexes. The operation is not a whole-database
+   transaction and does not promise byte-identical failure rollback.
 
-The vector drop choice also sets the saved embedding provider to none so
-a later semantic search does not silently re-encode the discarded index.
-A subsequent explicit embedding build can restore semantic retrieval.
-Legacy configs with a provider but a null model select that provider's
-default. The saved Embedding config is read from the isolated staging copy;
-model setup failure cannot leave a new shared-memory sidecar on the source.
-Provider import/model load failures are reported by CLI rather than an
-uncaught traceback.
-Legacy configurations with a provider but `model=None` use that provider's
-default model; saved embedding settings are read from the staged copy so a
-failed model initialization cannot reintroduce sidecars on the source.
-Provider import/model setup exceptions are reported by CLI, not uncaught.
+The explicit vector drop policy disables the saved embedding provider and
+clears old vector rows. A later explicit embedding build can restore semantic
+retrieval. Legacy null model names use provider defaults.
 
-This is not a concurrent live database migration; the same operation must
-not race unrelated processes that ignore the Session writer lock. Byte-for-
-byte restoration of the old file remains possible using the emitted backup.
+This is offline maintenance; writers and readers not participating in the
+existing coordination mechanisms must be stopped by the operator. Rebuild
+does not discover arbitrary filesystem aliases or repair Session history.
 
 ## Validation and cost
 
@@ -125,15 +106,17 @@ Measured on synthetic Windows histories (already indexed, median of five):
 | 4,000 | 0.219 ms | 0.076 ms | 0.206 ms |
 
 Unlike the initial prototype (27.96 ms registration and 13.73 ms expansion
-at 4,000 events), Anchor navigation no longer rereads all historical events
-per hit. The mainline live Search refresh still scans history and has its
+at 4,000 events), Anchor navigation does not reread the full history per
+expansion. The mainline live Search refresh still scans history and has its
 own cost, outside #584's performance target.
 
 A copy of the real 2,087-event Session was rebuilt in FTS-only mode after
 explicitly dropping invalid old vectors. FTS rows changed 512 -> 438,
 Vector rows 414 -> 0; the output could issue and expand real source Anchors.
 The event fingerprints matched before/after and the original snapshot was
-byte-for-byte unchanged. A verified original backup was retained. Separately,
+byte-for-byte unchanged in the earlier staged implementation. These are
+historical measurements, not a claim of byte-identical rollback for the
+current in-place implementation. Separately,
 a deterministic test embedder validated full FTS+Vector reconstruction and
 semantic hits without network or paid API calls.
 
@@ -147,7 +130,7 @@ Cold Resume owns its own physical event reading and shutdown/resume concerns.
 The Memory-only physical-key scan can later reuse a bounded Store cursor,
 but #584 does not depend on Cold Resume's checkpoint lifecycle or format.
 
-The upstream Review and CI should focus on crash-safe index publication,
+The upstream Review and CI should focus on recoverable index maintenance,
 vector-policy UX, unambiguous source proof, selected-lineage behavior,
 old-index recovery and bounded context navigation, not on unrelated
 Compaction/Resume repairs.
