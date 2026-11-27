@@ -674,6 +674,42 @@ class TestApiIntegration:
         )
         assert resp.status_code == 404
 
+        # Repair duplicate provider keys through the raw editor. Inventory
+        # and default selection must surface the error without changing the file.
+        raw_profiles = "/api/settings/config-files/llm_profiles/content"
+        first = "presets:\n  openai:\n    manual-a: {model: a}\n"
+        second = "    manual-b: {model: b}\n"
+        uploaded = client.put(
+            raw_profiles, json={"content": first + "  openai:\n" + second}
+        )
+        assert uploaded.status_code == 200
+        choose_b = {"name": "openai/manual-b"}
+        for response in (
+            client.get("/api/configs/models"),
+            client.post("/api/settings/default-model", json=choose_b),
+        ):
+            assert response.status_code == 400
+            assert (
+                response.json()["detail"]
+                == "Duplicate mapping key in llm_profiles.yaml on line 4."
+            )
+        assert client.get(raw_profiles).json()["sha256"] == uploaded.json()["sha256"]
+
+        assert (
+            client.put(raw_profiles, json={"content": first + second}).status_code
+            == 200
+        )
+        assert (
+            client.post("/api/settings/default-model", json=choose_b).status_code == 200
+        )
+        inventory = client.get("/api/configs/models")
+        assert inventory.status_code == 200
+        assert {
+            row["name"]: (row["model"], row["is_default"])
+            for row in inventory.json()
+            if row["source"] == "user"
+        } == {"manual-a": ("a", False), "manual-b": ("b", True)}
+
         # Identity write round-trip the Settings → Models pane commits:
         # register a backend, add a profile under it, then click a row to
         # make it the default.
