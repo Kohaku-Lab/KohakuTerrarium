@@ -219,3 +219,81 @@ async def test_calls_without_extra_content_record_no_state():
     await _attach(provider, respond)
     await provider.chat_complete([{"role": "user", "content": "hi"}])
     assert TOOL_CALL_EXTRA_KEY not in provider.last_assistant_extra_fields
+
+
+IMAGE = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+
+
+def _history_with_tool_images():
+    calls = [
+        {"id": cid, "type": "function", "function": {"name": "read", "arguments": "{}"}}
+        for cid in ("call-1", "call-2")
+    ]
+    return [
+        {"role": "user", "content": "look"},
+        {"role": "assistant", "content": "", "tool_calls": calls},
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": [{"type": "text", "text": "shot.png"}, IMAGE],
+        },
+        {"role": "tool", "tool_call_id": "call-2", "content": "plain"},
+        {"role": "user", "content": [{"type": "text", "text": "and this"}, IMAGE]},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("base_url", "moved"),
+    [(GEMINI_URL, True), ("https://compatible.example/v1", False)],
+)
+async def test_tool_result_images_follow_the_tool_round_on_gemini(base_url, moved):
+    bodies = []
+
+    def respond(request):
+        bodies.append(json.loads(request.content))
+        return _text_response()
+
+    history = _history_with_tool_images()
+    async with OpenAIProvider(api_key="k", model="m", base_url=base_url) as provider:
+        await _attach(provider, respond)
+        await provider.chat_complete(history)
+    sent = bodies[0]["messages"]
+    if not moved:
+        assert sent[2]["content"][1] == IMAGE
+        assert len(sent) == len(history)
+        return
+    assert [m["role"] for m in sent] == [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "user",
+        "user",
+    ]
+    assert sent[2]["tool_call_id"] == "call-1"
+    assert sent[2]["content"].startswith("shot.png\n") and "image" in sent[2]["content"]
+    assert sent[3]["content"] == "plain"
+    assert sent[4]["content"] == [
+        {"type": "text", "text": "Image(s) returned by tool call call-1:"},
+        IMAGE,
+    ]
+    assert sent[5]["content"][1] == IMAGE
+    assert history[2]["content"][1] == IMAGE
+
+
+async def test_trailing_tool_result_image_is_still_sent_on_gemini():
+    bodies = []
+
+    def respond(request):
+        bodies.append(json.loads(request.content))
+        return _text_response()
+
+    history = _history_with_tool_images()[:3]
+    history[1]["tool_calls"] = history[1]["tool_calls"][:1]
+    history[2]["content"] = [IMAGE]
+    async with OpenAIProvider(api_key="k", model="m", base_url=GEMINI_URL) as provider:
+        await _attach(provider, respond)
+        await provider.chat_complete(history)
+    sent = bodies[0]["messages"]
+    assert isinstance(sent[2]["content"], str) and sent[2]["content"]
+    assert sent[3]["role"] == "user" and sent[3]["content"][1] == IMAGE

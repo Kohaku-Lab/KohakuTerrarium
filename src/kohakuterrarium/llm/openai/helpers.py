@@ -195,6 +195,48 @@ def restore_tool_call_extra(messages: list[dict[str, Any]]) -> list[dict[str, An
     return out if changed else messages
 
 
+def _split_tool_images(msg: dict[str, Any]) -> tuple[dict[str, Any], list[dict]]:
+    """Return a tool message without its image parts, and those parts."""
+    content = msg.get("content")
+    if msg.get("role") != "tool" or not isinstance(content, list):
+        return msg, []
+    images = [
+        part
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "image_url"
+    ]
+    if not images:
+        return msg, []
+    texts = [
+        part.get("text", "")
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+    ]
+    note = f"[{len(images)} image(s) attached in the next user message]"
+    text = "\n".join([*(t for t in texts if t.strip()), note])
+    return {**msg, "content": text}, images
+
+
+def move_tool_result_images(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Carry tool-result images in a user message after each tool round."""
+    out: list[dict[str, Any]] = []
+    pending: list[dict] = []
+    changed = False
+    for msg in messages:
+        if pending and msg.get("role") != "tool":
+            out.append({"role": "user", "content": pending})
+            pending = []
+        stripped, images = _split_tool_images(msg)
+        out.append(stripped)
+        if images:
+            changed = True
+            label = f"Image(s) returned by tool call {msg.get('tool_call_id', '')}:"
+            pending.extend([{"type": "text", "text": label}, *images])
+    if pending:
+        out.append({"role": "user", "content": pending})
+    return out if changed else messages
+
+
 def tool_call_from_pending(call: dict[str, Any]) -> NativeToolCall:
     """Convert a streaming tool-call accumulator to a native call."""
     return NativeToolCall(
