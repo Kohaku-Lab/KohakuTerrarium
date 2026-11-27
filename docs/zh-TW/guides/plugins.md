@@ -66,6 +66,7 @@ Priority 越低越早執行。你可以藉此把外掛插到正確位置。
 |---|---|---|
 | `on_load(context)` | agent 啟動時初始化 |（無）|
 | `on_unload()` | 停止時清理 |（無）|
+| `on_disable()` | 同步；執行時停用生效後呼叫 | 只是通知，不是拆除屏障：釋放外掛持有的資源；管理器不會等待清理，需自行安排它與之後重新啟用時 `on_load` 的順序，並在 `on_unload` 中等待 |
 | `pre_llm_call(messages, **kwargs)` | 回傳 `list[dict] \| None` | 取代送往 LLM 的訊息 |
 | `post_llm_call(response)` | 回傳 `ChatResponse \| None` | 取代回應 |
 | `pre_tool_execute(name, args)` | 回傳 `dict \| None`；或 raise `PluginBlockError` | 取代參數或阻擋呼叫 |

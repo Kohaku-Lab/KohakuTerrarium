@@ -52,6 +52,7 @@ from kohakuterrarium.builtins.tools.web import search as web_search
 from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.files.edit import EditTool
 from kohakuterrarium.builtins.tools.files.read import ReadTool
+from kohakuterrarium.builtins.tools.files.write import WriteTool
 from kohakuterrarium.builtins.tools.bash.bash import ShellTool
 from kohakuterrarium.builtins.tools.files.glob import GlobTool
 from kohakuterrarium.builtins.tools.files.grep import GrepTool
@@ -85,6 +86,7 @@ from kohakuterrarium.modules.subagent.config import (
     OutputTarget,
     SubAgentConfig,
 )
+from kohakuterrarium.modules.subagent.runtime_builders import fork_tool_context
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
 from kohakuterrarium.modules.trigger.scheduler import SchedulerTrigger
@@ -94,6 +96,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
+from kohakuterrarium.modules.tool.function import tool as kt_tool
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.store import SessionStore
@@ -398,6 +401,20 @@ class ToolVisibilityPlugin(BasePlugin):
             allowed_tools=frozenset({"recorder"}),
             allowed_subagents=frozenset(),
         )
+
+
+class NetworkProbePlugin(BasePlugin):
+    """Contribute a ``@tool`` function that declares a URL argument."""
+
+    name = "net_probe"
+
+    def contribute_tools(self) -> list[BaseTool]:
+        @kt_tool(url_arguments="target")
+        def net_probe(target: str) -> str:
+            """Pretend to fetch target."""
+            return f"probed {target}"
+
+        return [net_probe]
 
 
 class PingCommand(BaseUserCommand):
@@ -824,6 +841,90 @@ class TestModulesIntegration:
             denied = await agent.executor.wait_for(denied_job)
             assert "SandboxViolation[fs_read]" in denied.error
             assert "blocked.txt" not in denied.output
+
+            async def run(name: str, args: dict[str, Any]) -> Any:
+                job = await agent.executor.submit(name, args, is_direct=True)
+                return await agent.executor.wait_for(job)
+
+            # Declared network use is gated live: a plugin-contributed function
+            # tool and web_fetch both, and a held network_policy follows edits.
+            mgr.register(NetworkProbePlugin())
+            agent.refresh_plugin_tools()
+            agent.executor.register_tool(WebFetchTool())
+            policy = mgr.collect_runtime_services(ctx)["network_policy"]
+            assert policy.mode == "allow" and policy.check("evil.test", 443) is None
+            mgr.set_plugin_options("sandbox", {"network_allowlist": ["ok.test"]})
+            probed = await run("net_probe", {"target": "https://ok.test/a"})
+            assert probed.error is None
+            assert probed.output.startswith("probed https://ok.test/a")
+            for name, key in (("net_probe", "target"), ("web_fetch", "url")):
+                refused = await run(name, {key: "https://evil.test/a"})
+                assert refused.error == (
+                    f"SandboxViolation[network]: {name}: host 'evil.test' not "
+                    "allowlisted (https://evil.test/a)"
+                )
+            assert policy.check("evil.test", 443) == "host 'evil.test' not allowlisted"
+            unparseable = await run("net_probe", {"target": "http://[::1"})
+            assert unparseable.error == (
+                "SandboxViolation[network]: net_probe: unparseable URL (http://[::1)"
+            )
+            mgr.set_plugin_options("sandbox", {"network": "deny"})
+            assert policy.mode == "deny"
+            assert policy.check("ok.test", 443) == "network access denied"
+            refused = await run("net_probe", {"target": "https://ok.test/a"})
+            assert "net_probe: network access denied" in refused.error
+            mgr.set_plugin_options(
+                "sandbox", {"network": "default", "network_allowlist": []}
+            )
+            assert policy.check("evil.test", 443) is None
+            assert mgr.unregister("net_probe") is True
+
+            # A held write_policy gives a write outside a tool call the write
+            # tool's decision, against the agent's current directory.
+            monkeypatch.setattr(roots, "temp_roots", lambda: [])
+            await sandbox.on_load(ctx)
+            writes = mgr.collect_runtime_services(ctx)["write_policy"]
+            agent.executor.register_tool(WriteTool())
+            assert writes.check("downloads/page.pdf") is None
+            assert writes.check(work / "downloads" / "page.pdf") is None
+            refused = await run("write", {"path": str(outside / "x"), "content": "x"})
+            assert "outside working directory" in refused.error
+            assert "outside working directory" in writes.check(outside / "x")
+            assert not (outside / "x").exists()
+            mgr.set_plugin_options("sandbox", {"fs_write": "deny"})
+            assert "fs_write=deny" in writes.check("downloads/page.pdf")
+            mgr.set_plugin_options("sandbox", {"fs_write": "default"})
+            assert writes.check("downloads/page.pdf") is None
+
+            # A relative write follows the agent's working directory as it moves.
+            agent.workspace.set(outside)
+            assert writes.check("x") is None
+            assert "outside working directory" in writes.check(work / "x")
+            agent.workspace.set(work)
+
+            # Every tool call, a fork's included, carries the held services
+            # themselves; a disabled sandbox publishes none, and a held one
+            # keeps the last options until the same objects come back.
+            def services(build=agent.executor._build_tool_context) -> dict:
+                return build().runtime_services
+
+            fork = SimpleNamespace(config=SimpleNamespace(name="fork"))
+            for build in (
+                agent.executor._build_tool_context,
+                fork_tool_context(agent.executor._build_tool_context, fork),
+            ):
+                assert services(build)["network_policy"] is policy
+                assert services(build)["write_policy"] is writes
+            mgr.set_plugin_options("sandbox", {"network_allowlist": ["ok.test"]})
+            assert mgr.disable("sandbox") is True
+            assert "network_policy" not in services()
+            assert "write_policy" not in services()
+            assert policy.check("evil.test", 443) == "host 'evil.test' not allowlisted"
+            assert mgr.enable("sandbox") is True
+            await mgr.load_pending()
+            assert services()["network_policy"] is policy
+            assert services()["write_policy"] is writes
+            mgr.set_plugin_options("sandbox", {"network_allowlist": []})
             if confinement_backend() is not None:
                 # pytest's base temp lies under /tmp on Linux, a writable root.
                 monkeypatch.setattr(roots, "temp_roots", lambda: [])

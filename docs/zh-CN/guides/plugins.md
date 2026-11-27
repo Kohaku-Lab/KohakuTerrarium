@@ -65,6 +65,7 @@ Priority 越低越早执行。你可以借此把插件插到正确位置。
 |---|---|---|
 | `on_load(context)` | agent 启动时初始化 | （无） |
 | `on_unload()` | 停止时清理 | （无） |
+| `on_disable()` | 同步；运行时停用生效后调用 | 只是通知，不是拆除屏障：释放插件持有的资源；管理器不会等待清理，需自行安排它与之后重新启用时 `on_load` 的顺序，并在 `on_unload` 中等待 |
 | `pre_llm_call(messages, ** kwargs)` | 回传 `list[dict] \| None` | 取代送往 LLM 的消息 |
 | `post_llm_call(response)` | 回传 `ChatResponse \| None` | 取代回应 |
 | `pre_tool_execute(name, args)` | 回传 `dict \| None`；或 raise `PluginBlockError` | 取代参数或阻挡调用 |

@@ -89,6 +89,28 @@ jobs:
         # locally (see tests/README.md).
         run: pytest tests/integration/ --tb=short --durations=30
 
+  test-browser:
+    # The browser-backed tests skip in ``test``, which installs no Chromium.
+    # Here Chromium is installed, and KT_TEST_REQUIRE_BROWSER=1 makes a skip
+    # for want of it fail the job.
+    runs-on: ubuntu-latest
+    env:
+      KT_TEST_REQUIRE_BROWSER: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev,browser-use]"
+      - name: Install Chromium and its system libraries
+        run: python -m playwright install --with-deps chromium
+      - name: Run browser tests
+        run: pytest tests/unit/browser/ tests/integration/test_browser.py --tb=short --durations=15
+
   test-format-guards:
     runs-on: ubuntu-latest
     steps:

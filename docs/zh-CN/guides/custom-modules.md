@@ -72,6 +72,39 @@ tools:
 - **background**：送出后回传 job id，结果晚点再到。
 - **stateful**：类似 generator，跨回合 yield 中间结果。
 
+### 声明网络使用
+
+会连网的工具要声明连网方式，`sandbox` 插件的 `network` /
+`network_allowlist` 政策才会套用到它（与声明文件路径的
+`path_arguments` 同一种做法）：
+
+```python
+class MirrorTool(BaseTool):
+    url_arguments = ("source",)          # 存放要抓取 URL 的参数
+    network_hosts = ("api.example.com",)  # 不论参数为何都会连的主机
+    network_access = False                # True：目的主机由别处决定
+```
+
+- `url_arguments`：值可以是一个 URL 或 URL 列表。值会先去掉前后的空白与
+  控制字符；不以 `http://` 或 `https://`（不分大小写）开头的值以
+  `https://` 检查。每个主机都要通过白名单，`network=deny` 时拒绝呼叫。
+  设有白名单时，无法解析出主机的值（例如 `http://[::1`，或路径前出现
+  反斜线）也会拒绝呼叫；没有白名单时 sandbox 不验证 URL。主机比对不分
+  大小写，其余按原样：
+  `münchen.de` 与 `xn--mnchen-3ya.de` 是不同条目，`example.com` 与
+  `example.com.` 也是。
+- `network_hosts`：每个主机以 `https://<host>/` 检查；无法解析的主机同样
+  拒绝。
+- `network_access`：声明工具在执行时才决定要连的主机。`network=deny` 时
+  拒绝呼叫；白名单无法在呼叫前判断，hook 会放行。这类工具必须在每次连线
+  前呼叫 `context.runtime_services["network_policy"].check(host, port)`，
+  回传理由时拒绝该连线。没有启用 sandbox 时该服务不存在。
+
+这些声明会加到 sandbox 内建的工具名称表上，该表依名称管制 `web_fetch`
+与 `web_search`。其他三者都没声明的工具不受网络轴管制。`@kt.tool`
+函数以同名关键字参数声明：
+`@kt.tool(url_arguments=["url"])`。
+
 ### 工具结果里的媒体
 
 回传 `ImagePart` / `FilePart` 媒体的工具，可用

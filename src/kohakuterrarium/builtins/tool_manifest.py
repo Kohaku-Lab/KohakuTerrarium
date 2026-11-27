@@ -3,6 +3,15 @@
 TOOL_MODULES = {
     "ask_user": ("builtins.tools.ask_user", "AskUserTool"),
     "bash": ("builtins.tools.bash.bash", "BashTool"),
+    "browser_act": ("builtins.tools.browser.act", "BrowserActTool"),
+    "browser_eval": ("builtins.tools.browser.eval", "BrowserEvalTool"),
+    "browser_navigate": ("builtins.tools.browser.navigate", "BrowserNavigateTool"),
+    "browser_screenshot": (
+        "builtins.tools.browser.screenshot",
+        "BrowserScreenshotTool",
+    ),
+    "browser_snapshot": ("builtins.tools.browser.snapshot", "BrowserSnapshotTool"),
+    "browser_tabs": ("builtins.tools.browser.tabs", "BrowserTabsTool"),
     "canvas_image": ("builtins.tools.media.canvas_image", "CanvasImageTool"),
     "delete_trigger": ("builtins.tools.delete_trigger", "DeleteTriggerTool"),
     "python": ("builtins.tools.python", "PythonTool"),

@@ -1,0 +1,29 @@
+- generic [active] [ref=e1]:
+  - paragraph [ref=e2]: "Time: 10:30 today"
+  - paragraph [ref=e3]: "key: value pair"
+  - paragraph [ref=e4]: "hash # inside"
+  - paragraph [ref=e5]: "[bracket start"
+  - paragraph [ref=e6]: "42"
+  - paragraph [ref=e7]: "yes"
+  - paragraph [ref=e8]: "'single quoted'"
+  - paragraph [ref=e9]: "\"double quoted\""
+  - paragraph [ref=e10]: back\slash and tab here
+  - paragraph [ref=e11]: "Unicode: café 😀 中文"
+  - 'button "Label: with colon" [ref=e12]': A
+  - button "It's \"quoted\"" [ref=e13]: B
+  - button "line one line two" [ref=e14]: C
+  - link "Link with query" [ref=e15] [cursor=pointer]:
+    - /url: /path?a=1&b=two words#frag
+  - spinbutton "Count" [ref=e16]: "7"
+  - slider "Volume" [ref=e17]: "30"
+  - switch "Wifi" [checked] [ref=e18]: "on"
+  - tablist [ref=e19]:
+    - tab "Tab one" [selected] [ref=e20]
+    - tab "Tab two" [ref=e21]
+  - group [ref=e22]:
+    - generic "More info" [ref=e23]
+    - paragraph [ref=e24]: Details body
+  - dialog "Notice" [ref=e25]:
+    - paragraph [ref=e26]: Dialog text
+    - button "OK" [ref=e27]
+  - img "Logo image" [ref=e28]

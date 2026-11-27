@@ -15,12 +15,17 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.builtins.plugins.apps.plugin import FULL_PAGE_PART
+from kohakuterrarium.builtins.plugins.browser.plugin import (
+    PROMPT as BROWSER_PROMPT,
+    BrowserPlugin,
+)
 from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
     inline_ui_section,
 )
 from kohakuterrarium.builtins.tools.app.show import ShowAppTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config.load import load_agent_config
+from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.tools.schemas import _BUILTIN_SCHEMAS
 from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.prompt.presentation import CLOSING, HEADING, OPENING
@@ -112,6 +117,10 @@ class TestPromptBudget:
             assert "## Calling functions" not in prompt
             assert "## Output format" not in prompt
 
+            # The browser plugin is off by default and costs nothing while off.
+            assert not [s.name for s in schemas if s.name.startswith("browser_")]
+            assert "browser_" not in prompt and "page_content" not in prompt
+
             # Solo creature: no graph sections at all.
             assert "Working with the group" not in prompt
             assert "Growing the group" not in prompt
@@ -187,6 +196,21 @@ class TestPromptBudget:
         assert len(app_tool.prompt_contribution()) <= MAX_WIDGET_GUIDANCE_CHARS
         assert len(json.dumps(_BUILTIN_SCHEMAS["show_app"])) <= MAX_SCHEMA_CHARS
         assert len(app_tool.description) <= 160
+
+        # ── the browser plugin's tools and prompt block, when it is on ──
+        browser = BrowserPlugin()
+        browser_registry = Registry()
+        for tool in browser.contribute_tools():
+            browser_registry.register_tool(tool)
+        browser_schemas = {
+            spec.name: spec.parameters for spec in build_tool_schemas(browser_registry)
+        }
+        for tool in browser.contribute_tools():
+            schema = json.dumps(browser_schemas[tool.tool_name])
+            assert len(schema) <= MAX_SCHEMA_CHARS, (tool.tool_name, len(schema))
+            assert len(tool.description) <= 160
+            assert tool.prompt_contribution() is None
+        assert len(BROWSER_PROMPT) <= MAX_TOOL_GUIDANCE_CHARS
 
     @pytest.mark.asyncio
     async def test_per_tool_full_override_costs_only_that_tool(

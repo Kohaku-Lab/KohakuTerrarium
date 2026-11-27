@@ -203,6 +203,14 @@ class BaseTool(UIOwnerMixin):
     # sandbox plugin checks each declared value (a path or a list of paths).
     path_arguments: ClassVar[dict[str, str]] = {}
 
+    # Arguments holding a URL (or a list of URLs) the tool fetches.
+    url_arguments: tuple[str, ...] = ()
+    # Hosts the tool contacts whatever its arguments.
+    network_hosts: tuple[str, ...] = ()
+    # The tool picks hosts at run time: network=deny refuses the call, an allowlist
+    # cannot; check each host with runtime_services["network_policy"].check().
+    network_access: bool = False
+
     # Widget renderer ids that must be attached for the model to see this tool.
     requires_renderers: ClassVar[frozenset[str]] = frozenset()
 

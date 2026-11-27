@@ -1,0 +1,44 @@
+# Web tester: checks a web app running on this machine in a real browser.
+#
+# Needs the browser extra and Chromium:
+#   pip install "kohakuterrarium[browser-use]"
+#   playwright install chromium
+#
+# Start your app (for example on http://localhost:5173), then:
+#   kt run examples/agent-apps/web_tester --llm <your preset>
+#
+# The browser can reach only localhost / 127.0.0.1: allow_loopback lets the
+# proxy connect to loopback addresses, and allow_hosts keeps everything else
+# (the public internet included) out. See docs/en/guides/browser.md.
+
+name: web_tester
+version: "1.0"
+description: Checks a local web app in a real browser and reports what works
+
+controller:
+  # Screenshots reach the model only through native tool calls.
+  tool_format: native
+
+system_prompt_file: system.md
+
+tools:
+  - name: read
+    type: builtin
+  - name: glob
+    type: builtin
+  - name: grep
+    type: builtin
+
+plugins:
+  - name: browser
+    options:
+      allow_loopback: true
+      allow_hosts: ["localhost", "127.0.0.1"]
+      action_timeout_s: 10
+      # To log in to your app, name a secret: the model types it by name, its
+      # value comes from the environment variable, and it is typed only into
+      # pages (and frames) of the listed origins.
+      # secrets:
+      #   app_password:
+      #     env: WEB_TESTER_PASSWORD
+      #     origins: ["http://localhost:5173"]

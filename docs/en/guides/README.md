@@ -32,6 +32,7 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 - [Custom Modules](custom-modules.md): writing tools, inputs, outputs, triggers, sub-agents.
 - [MCP](mcp.md): registering MCP servers per-agent or globally.
 - [MCP server](mcp-server.md): expose KT tools and local delegation to external MCP clients.
+- [Browser](browser.md): the `browser` plugin: a real Chromium, its six tools, network policy, sandbox and permgate.
 - [Packages](packages.md): `kohaku.yaml` manifests, install modes, publishing.
 - [UI extensions](ui-extensions.md): package-owned settings/overlays, owner RPC, shared controls and observed session work.
 

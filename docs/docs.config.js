@@ -43,6 +43,7 @@ const sidebarStructure = {
     "guides/custom-modules.md",
     "guides/mcp.md",
     "guides/mcp-server.md",
+    "guides/browser.md",
     "guides/packages.md",
     "guides/serving.md",
     "guides/laboratory.md",

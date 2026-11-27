@@ -100,6 +100,43 @@ the declaration the sandbox cannot see the path, so a package tool that
 touches files should always declare it. Plugins receive the tool
 instance as the `tool` keyword of `pre_tool_execute`.
 
+### Network use
+
+A tool that reaches the network declares how, so the `sandbox` plugin's
+`network` / `network_allowlist` policy applies to it:
+
+```python
+class MirrorTool(BaseTool):
+    url_arguments = ("source",)          # arguments holding a URL it fetches
+    network_hosts = ("api.example.com",)  # hosts it contacts whatever its arguments
+    network_access = False                # True: hosts are decided elsewhere
+```
+
+- `url_arguments`: a value may be one URL or a list of URLs. It is
+  trimmed of surrounding spaces and control characters; one that does
+  not start with `http://` or `https://` (in any letter case) is checked
+  as `https://`. Each host must pass the allowlist, and `network=deny`
+  refuses the call. Under an allowlist, a value whose host cannot be
+  parsed (such as `http://[::1`, or a backslash before the path) refuses
+  it too; with no allowlist the sandbox does not validate the URL. Hosts
+  are compared ignoring letter case but otherwise as written:
+  `münchen.de` and `xn--mnchen-3ya.de` are different entries, and so are
+  `example.com` and `example.com.`.
+- `network_hosts`: each host is checked as `https://<host>/`, with the
+  same refusal for one that cannot be parsed.
+- `network_access`: declares that the tool picks hosts at run time. The
+  call is refused under `network=deny`; an allowlist cannot judge it
+  before the call, so the hook lets it through. Such a tool must call
+  `context.runtime_services["network_policy"].check(host, port)` before
+  each connection and refuse it when that returns a reason. The service
+  is absent while no sandbox is enabled.
+
+The declarations add to the sandbox's built-in name tables, which gate
+`web_fetch` and `web_search` by name. Any other tool that declares none
+of them is not gated on the network axis. A
+`@kt.tool` function takes the same names as keyword arguments:
+`@kt.tool(url_arguments=["url"])`.
+
 ### Tools that need a UI renderer
 
 A tool that only makes sense while a client can draw its UI (a widget

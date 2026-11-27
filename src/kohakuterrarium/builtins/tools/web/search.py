@@ -189,6 +189,7 @@ class WebSearchTool(BaseTool):
     """Search using a configured backend without changing the caller's LLM."""
 
     supports_background = True
+    network_hosts = ("duckduckgo.com",)
 
     def __init__(self, config=None):
         super().__init__(config=config)

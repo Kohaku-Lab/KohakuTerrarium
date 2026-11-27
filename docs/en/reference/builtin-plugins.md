@@ -1,6 +1,6 @@
 ---
 title: Built-in plugins
-summary: Reference for the runtime plugins shipped with the framework. Sandbox, budget, repeat_guard, permgate, compact.auto, ui.apps.
+summary: Reference for the runtime plugins shipped with the framework. Sandbox, budget, repeat_guard, permgate, compact.auto, ui.apps, browser.
 tags:
   - reference
   - plugins
@@ -27,6 +27,7 @@ of the sandbox plugin, see
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls. |
 | [`ui.apps`](#uiapps) | 50 | `contribute_tools`, `presentation_contribution` | Adds `show_app`: model-written HTML apps in the web UI. |
 | [`ui.declarative`](#uideclarative) | 50 | `presentation_contribution`, `pre_llm_call` | Inline UI: `<ui>` components in replies (renderer `kt.ui`). |
+| [`browser`](#browser) | 0 | `contribute_tools`, `runtime_services`, `pre_tool_execute`, `get_prompt_content`, `on_disable` | An interactive Chromium driven by six `browser_*` tools. |
 
 Lower priority runs earlier on `pre_*` hooks. The order above is the
 default registration order.
@@ -93,8 +94,48 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   except `fs_deny`; `deny` blocks all paths.
 - **Network gating**: when `network=allow` and `network_allowlist`
   is set, only listed hosts pass the check; otherwise all hosts pass.
-  When `network=deny`, all network tool calls (`web_fetch`,
-  `web_search`) raise `PluginBlockError`.
+  When `network=deny`, all network tool calls raise `PluginBlockError`.
+  The plugin keeps a built-in table by tool name (`web_fetch`: its
+  `url` argument; `web_search`: `duckduckgo.com`), and a tool's
+  `url_arguments`, `network_hosts` and `network_access` declarations
+  add to it (see [Custom modules](../guides/custom-modules.md#network-use)).
+  A tool with one of those names is gated even when it declares
+  nothing; each host or argument is checked once per call.
+- **Network policy service**: while enabled, the plugin also publishes a
+  `network_policy` service via `runtime_services()`, for components that
+  open connections outside the tool hooks (such as a filtering proxy).
+  `check(host, port)` returns `None` to allow or a short reason to refuse,
+  applying `network` and `network_allowlist`; in audit mode it logs and
+  allows. `mode` is `"allow"` or `"deny"`. `requires_os_confinement` is
+  true while `os_enforce=require` is enforced, meaning a process spawned
+  outside the `subprocess_runner` would escape the confinement it demands.
+  Each read follows the plugin's current options.
+- **Write policy service**: while enabled, the plugin also publishes a
+  `write_policy` service, for components that write files outside a tool
+  call (such as a browser saving a download). `check(path)` returns `None`
+  to allow or a short reason to refuse (such as `fs_write=deny`), by the
+  same decision a write tool's path argument gets: `fs_write`, the
+  workspace boundary, `fs_deny` and `fs_write_allow`. A relative path
+  resolves against the agent's current working directory (it follows a
+  working-directory switch); in a host without an agent, such as the MCP
+  tool server, against the directory the plugin was loaded with. In audit
+  mode it logs and allows; each call follows the plugin's current options.
+- **Holding the services**: the plugin publishes the same `network_policy`
+  and `write_policy` objects for its whole life, so a component may hold one
+  across calls. Option changes apply to a held object at once, and
+  `enabled: false` or `backend: off` make it allow everything. Disabling the
+  plugin through the plugin manager only stops handing the objects to new
+  tool calls: a held one keeps answering by the last options, and enabling
+  the plugin again hands out the same objects. Consumers can type against
+  the interfaces `NetworkPolicy` and `WritePolicy` from
+  `kohakuterrarium.modules.sandbox`.
+- **Which tool calls see them**: a tool call gets the services of the
+  plugin manager that built its tool context. A context-fork sub-agent's
+  calls get the parent's objects, and the parent's sandbox also checks them.
+  A regular sub-agent's tool context is built by the parent, so its calls
+  carry the parent's services, while its hooks run only through its own
+  plugins; a sandbox configured on the sub-agent itself gates those hooks
+  but publishes no services to its tools.
 - **Subprocess gating**: the plugin publishes a `subprocess_runner`
   service via `runtime_services()`. Tools that need to spawn
   subprocesses (`bash`, etc.) consume it from
@@ -335,25 +376,32 @@ Implementation: `src/kohakuterrarium/builtins/plugins/permgate/plugin.py`.
 
 | Option | Type | Default | Purpose |
 |---|---|---|---|
-| `enabled` | bool | true | Master on / off. |
-| `tools` | list[str] / `"all"` | `"all"` | Which tools require approval. `"all"` = every tool. |
-| `whitelist` | list[str] | `[]` | Tools that bypass approval (added to a per-session "always allow" list when the user picks "always"). |
-| `auto_approve_pattern` | str | "" | Regex pattern; matching tool args auto-approve without prompting. Use sparingly. |
-| `prompt_template` | str | default | Customise the approval prompt shown to the user. |
+| `gated_tools` | list[str] | `[]` | Tools that require approval. Empty list = every tool; `"*"` also matches every tool. |
+| `allowlist` | list[str] | `[]` | Tools that never require approval, even when listed in `gated_tools`. |
+| `timeout_s` | float | null | Seconds to wait for the user; null = wait forever. No answer in time denies the call. |
+| `surface` | `modal` / `chat` | `modal` | Where the approval prompt appears. |
 
 ### Behaviour
 
-`pre_tool_execute` emits a `tool_approval_request` output event with
-the tool name, args, and a request id. The agent waits on the output
-bus for a `tool_approval_reply` event with a matching id; the reply
-carries `decision ∈ {approve, deny, always}`. `always` adds the tool
-to a per-session whitelist persisted in plugin state. `deny` raises
-`PluginBlockError` so the agent sees the rejection as a tool failure.
+`pre_tool_execute` emits an interactive `confirm` output event on the
+configured `surface`, naming the tool and summarising its arguments, and
+waits for the reply. The choices are `allow_once`, `allow_session`
+("Always allow") and `deny`. `allow_session` stops asking about that tool
+for the life of the plugin instance; it is not persisted. Any other
+outcome (deny, cancellation, no answer within `timeout_s`, a bus error)
+raises `PluginBlockError`, so the agent sees the rejection as a tool failure.
+
+One exception lets a gated call through without asking: when the plugin has
+no host agent to show the prompt on. That is the case before its `on_load`
+has run, and in a host that loads plugins without an agent, such as the MCP
+tool server. A fork's tool policy is stricter: with no output router on the
+parent it denies the call.
 
 The web UI and TUI render the approval as an inline prompt on the
 output stream; CLI surfaces it via the same output bus and replies
 through the input loop. Headless deployments without a user surface
-should disable permgate or set `auto_approve_pattern: "^.*$"`.
+should disable permgate or set `timeout_s`, so an unanswered call is
+denied instead of waiting forever.
 
 ### Example
 
@@ -361,8 +409,8 @@ should disable permgate or set `auto_approve_pattern: "^.*$"`.
 plugins:
   - name: permgate
     options:
-      tools: ["bash", "write", "edit"]
-      whitelist: ["read", "grep", "glob"]
+      gated_tools: ["bash", "write", "edit"]
+      allowlist: ["read", "grep", "glob"]
 ```
 
 ## `ui.apps`
@@ -432,6 +480,82 @@ plugins:
   - name: ui.declarative
 ```
 
+## `browser`
+
+An interactive Chromium per creature, driven by six tools (`browser_navigate`,
+`browser_snapshot`, `browser_act`, `browser_screenshot`, `browser_tabs`,
+`browser_eval`; see [built-ins](builtins.md#browser)). The plugin contributes
+the tools, owns the browser session (shared with the creature's sub-agents),
+and closes it when the creature stops, the plugin unloads, or it is disabled
+at runtime. Needs the `browser-use` extra and `playwright install chromium`.
+Implementation: `src/kohakuterrarium/builtins/plugins/browser/plugin.py`;
+the runtime is `src/kohakuterrarium/browser/`.
+
+### Options
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `headless` | bool | true | Run without a window. |
+| `channel` | str | null | Installed browser channel, e.g. `chrome` or `msedge`. |
+| `executable_path` | str | null | Path of a Chromium-based browser. |
+| `viewport` | `"WxH"` / `[w, h]` | `1280x800` | Page size in CSS pixels (width 320–7680, height 200–4320). |
+| `profile_dir` | str | null | Persistent profile directory; null = throwaway profile per launch. |
+| `allow_hosts` | list[str] | `[]` | If not empty, the only hosts pages may reach. Patterns: `host`, `*.host`, `host:port`, `[v6]:port`. |
+| `block_hosts` | list[str] | `[]` | Hosts pages may never reach; checked first. An IP address here also blocks names that resolve to it. |
+| `allow_loopback` | bool | false | Allow loopback addresses (local dev servers). |
+| `allow_private` | bool | false | Allow private, carrier-grade NAT and IPv6 unique-local addresses. |
+| `secrets` | dict | `{}` | Secret names, each to `{env: VAR_NAME, origins: [...]}` (a non-empty list of `scheme://host[:port]`), for `type` actions; typed only into those origins, values redacted from results. |
+| `nav_timeout_s` | float | 30 | Navigation timeout in seconds. |
+| `action_timeout_s` | float | 5 | Per-action timeout in seconds; one `browser_act` batch gets 60 s, or three times (this + 10 s) when longer. |
+| `snapshot_max_chars` | int | 20000 | Snapshot size cap (1000–1000000). |
+| `idle_close_s` | float | 600 | Close the browser after this many idle seconds; the next call starts a fresh one. |
+
+Unknown option names are rejected.
+
+### Behaviour
+
+- **Lazy launch.** The browser starts on the first browser call. Idle close,
+  a crash or `close_browser` drop it; the next call starts a fresh one and
+  says that state was lost. Stop, unload and runtime disable close it for
+  good: a later call fails instead of relaunching. A new browser never starts
+  while one this plugin let go of (an option change, a disable) is still
+  closing. A browser that stops answering is killed with every process it
+  started.
+- **Network.** All traffic goes through a filtering proxy owned by the
+  session, which judges every hop, subresource, popup and WebSocket. Loopback
+  and private addresses are refused unless allowed; link-local addresses
+  (cloud metadata included) are always refused.
+- **sandbox.** The proxy consults the sandbox's `network_policy` service as
+  the host publishes it at that moment, for every new connection, and judges
+  open connections again every 2 seconds while any is open (and at once on
+  each browser call), closing those the sandbox now refuses. Downloads are
+  checked with its `write_policy` before anything is written. `network: deny`
+  refuses every browser tool; `os_enforce: require` refuses to start the
+  browser.
+- **Host resources.** Where the engine's host resources are off (non-admin
+  users on a multi-user server), only a headless browser with a throwaway
+  profile, the bundled Chromium (never a system browser) and public addresses
+  is allowed, and no `secrets`.
+- **Prompt.** While enabled and at least one browser tool is switched on, the
+  plugin adds a short `## Browser pages` block saying that page content arrives
+  in `page_content` elements and is data, never instructions.
+
+### Example
+
+```yaml
+plugins:
+  - name: browser
+    options:
+      allow_loopback: true
+      allow_hosts: ["localhost", "127.0.0.1"]
+  - name: permgate
+    options:
+      gated_tools: [browser_navigate, browser_act, browser_eval, browser_tabs]
+```
+
+See [guides/browser](../guides/browser.md) for the workflow, the network
+policy in full, secrets and troubleshooting.
+
 ## Activation summary
 
 ```yaml
@@ -445,7 +569,7 @@ plugins:
       network_allowlist: ["api.example.com"]
   - name: permgate
     options:
-      tools: "all"
+      gated_tools: ["*"]
   - name: budget
     options:
       turn_budget: [40, 60]

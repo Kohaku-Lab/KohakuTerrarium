@@ -121,6 +121,48 @@ Tests should run in full asyncio. Use `pytest-asyncio` (`@pytest.mark.asyncio`)
 for async test functions. Avoid `asyncio.run()` inside a test; let
 the plugin own the loop.
 
+## Browser-backed tests
+
+Most browser tests run without a browser: the session is driven by a scripted
+driver (`tests/helpers/browser_driver.py`) that implements the real driver
+protocol. A few run real Chromium through Playwright against a loopback
+fixture site (`tests/helpers/browser_site.py`, pages in
+`tests/fixtures/browser/site/`):
+
+- `tests/integration/test_browser.py`: the `browser/` workflow. A real agent
+  with the `browser` plugin and a scripted LLM navigates, snapshots, acts in
+  batches, answers a dialog, works in a new tab, uploads, downloads, takes a
+  screenshot, evaluates script, hits the network policy, is interrupted
+  mid-action, is disabled and re-enabled at runtime, and stops; the test
+  checks the fixture server's state, the files on disk and that no Chromium
+  process survives.
+- `tests/unit/browser/test_driver.py`: the Playwright driver behind a real
+  session. `browser/driver.py` gets its coverage from it.
+- `tests/unit/browser/test_hidden.py`: the hidden-text probe in a real page.
+
+They need Playwright and its Chromium:
+
+```bash
+uv pip install -e ".[dev,browser-use]"
+playwright install chromium
+```
+
+Without either they skip; any other launch failure fails. CI does not install
+Playwright, so there they skip and `browser/driver.py` is a coverage
+carve-out. The tests find Playwright's browser cache in the operator's real
+home even though the suite redirects `HOME`; set `PLAYWRIGHT_BROWSERS_PATH`
+to use another cache, or `KT_CHROMIUM_PATH` (for the page-probe fixture) to
+use a specific binary.
+
+The integration workflow, `test_driver.py` and the Chromium tests in
+`test_hidden.py` carry
+`@pytest.mark.xdist_group("browser")`, so a parallel run puts them on one
+worker, one after the other.
+
+```bash
+pytest tests/integration/test_browser.py tests/unit/browser/test_driver.py -n 0
+```
+
 ## The testing harness
 
 `src/kohakuterrarium/testing/` exports four primitives. Import from

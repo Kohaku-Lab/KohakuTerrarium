@@ -42,6 +42,7 @@ hooks cannot block.
 |---|---|---|---|
 | `on_load` | `async on_load(ctx: PluginContext) -> None` | Plugin is loaded into an agent. | ignored |
 | `on_unload` | `async on_unload() -> None` | Plugin is unloaded or agent stops. | ignored |
+| `on_disable` | `def on_disable() -> None` | After `PluginManager.disable()` took effect at runtime (state changed, inventories refreshed); `on_unload` is not called then. Called once per effective disable: not for a disable that changed nothing, not on unload. Synchronous (an `async def` hook is not run; a warning is logged) and must return promptly. It is a lifecycle notification, not a teardown barrier: the manager does not wait for cleanup started here, and a hook call already in progress may still be running. Re-enabling calls `on_load` again, possibly before that cleanup has finished, so a plugin that owns resources orders its own cleanup against a later `on_load` and awaits it in `on_unload`. An exception is logged and does not undo the disable. | ignored |
 | `should_apply` | `def should_apply(ctx: PluginContext) -> bool` | Evaluated before each hook call. | `False` skips this plugin for that context. |
 | `contribute_commands` | `def contribute_commands() -> dict[str, BaseCommand]` | After load, during controller wiring. | Mapping of controller command names. |
 | `contribute_termination_check` | `def contribute_termination_check() -> Callable[[TerminationContext], TerminationDecision \| None] \| None` | During termination wiring. | Checker function or `None`. |

@@ -8,6 +8,7 @@ plugin panel) and the pack/alias expansion rules.
 from kohakuterrarium.builtins import plugin_catalog as pc
 
 _BUILTIN_PLUGIN_NAMES = {
+    "browser",
     "budget",
     "compact.auto",
     "goal",

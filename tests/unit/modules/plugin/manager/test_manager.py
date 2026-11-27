@@ -7,6 +7,8 @@ honour a single False, and collectors aggregate per-plugin output.
 """
 
 import asyncio
+import gc
+import warnings
 
 import pytest
 from types import SimpleNamespace
@@ -19,6 +21,7 @@ from kohakuterrarium.modules.plugin.base import (
     ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
+from kohakuterrarium.modules.user_command.aggregate import UserCommandCollisionError
 
 # ── Test plugins ───────────────────────────────────────────────────
 
@@ -1271,6 +1274,98 @@ class TestSelectionChangeCallback:
         assert pm.enable("missing") is False
 
         assert calls == []
+
+
+class _DisableHookPlugin(BasePlugin):
+    """Counts ``on_disable`` calls; can raise from the hook."""
+
+    def __init__(self, name="owner", *, fail=False):
+        super().__init__()
+        self.name = name
+        self.disabled: list[bool] = []
+        self._fail = fail
+        self._manager = None
+
+    def on_disable(self) -> None:
+        self.disabled.append(self._manager.is_enabled(self.name))
+        if self._fail:
+            raise RuntimeError("cleanup failed")
+
+
+def _disable_hook_manager(plugin, host=None):
+    mgr = PluginManager()
+    mgr.register(plugin)
+    plugin._manager = mgr
+    if host is not None:
+        mgr._load_context = PluginContext(_host_agent=host)
+    return mgr
+
+
+class TestOnDisableHook:
+    def test_called_once_after_a_real_disable_took_effect(self):
+        plugin = _DisableHookPlugin()
+        host = _RefreshHost()
+        mgr = _disable_hook_manager(plugin, host)
+        assert mgr.disable("owner") is True
+        assert plugin.disabled == [False], "runs after the disable took effect"
+        assert host.calls == ["commands", "prompt"]
+
+    def test_not_called_when_already_disabled(self):
+        plugin = _DisableHookPlugin()
+        mgr = _disable_hook_manager(plugin)
+        mgr.disable("owner")
+        mgr.disable("owner")
+        assert plugin.disabled == [False]
+        mgr.enable("owner")
+        assert plugin.disabled == [False], "enable does not call it"
+        mgr.disable("owner")
+        assert plugin.disabled == [False, False]
+
+    def test_not_called_when_the_refresh_fails_and_the_disable_rolls_back(self):
+        plugin = _DisableHookPlugin()
+        mgr = _disable_hook_manager(plugin, _RefreshHost(raise_on_commands=True))
+        with pytest.raises(UserCommandCollisionError):
+            mgr.disable("owner")
+        assert mgr.is_enabled("owner") and plugin.disabled == []
+
+    def test_a_raising_hook_does_not_break_disable(self):
+        plugin = _DisableHookPlugin(fail=True)
+        calls = []
+        mgr = _disable_hook_manager(plugin, _RefreshHost())
+        mgr.set_selection_change_callback(lambda: calls.append(1))
+        assert mgr.disable("owner") is True
+        assert not mgr.is_enabled("owner") and plugin.disabled == [False]
+        assert calls == [1], "the selection observers still hear the change"
+
+    async def test_not_called_on_unload(self):
+        plugin = _DisableHookPlugin()
+        mgr = _disable_hook_manager(plugin)
+        await mgr.unload_all()
+        assert plugin.disabled == []
+        mgr.disable("owner")
+        await mgr.unload_all()
+        assert plugin.disabled == [False], "unload does not repeat the hook"
+
+    def test_an_async_hook_is_closed_and_reported_not_left_dangling(self, caplog):
+        ran = []
+
+        class _AsyncHook(BasePlugin):
+            name = "asyncy"
+
+            async def on_disable(self):  # type: ignore[override]
+                ran.append(1)
+
+        mgr = PluginManager()
+        mgr.register(_AsyncHook())
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            assert mgr.disable("asyncy") is True
+            gc.collect()
+        assert ran == [] and not mgr.is_enabled("asyncy")
+        assert "must be synchronous" in caplog.text
+
+    def test_base_hook_is_a_no_op(self):
+        assert BasePlugin().on_disable() is None
 
 
 class _ToolsPlugin(BasePlugin):

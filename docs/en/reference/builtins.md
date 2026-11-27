@@ -118,6 +118,76 @@ model-verified citations. Search is independent of the creature's active model.
   `ori_question` for `deepseek_api`. Direct Search accepts 1–128 query characters
   and 1–50 results. The optional `localization` runtime setting is an IP address.
 
+### Browser
+
+Contributed by the [`browser` plugin](builtin-plugins.md#browser), not listed
+under `tools:`: enabling the plugin adds all six, disabling it removes them.
+They share one Chromium per creature (and its sub-agents), and page-derived
+text comes back inside a `page_content` element marked untrusted. Every tool
+except `browser_tabs` takes an optional `tab` (default the active tab). Every
+optional argument also accepts an empty value (`""`, `0`, `false`, `[]`)
+meaning not given, for models that must fill in every argument. See
+[guides/browser](../guides/browser.md).
+
+**`browser_navigate`**: Open a URL, or go back, forward or reload. Returns a
+header line (tab id and URL) and the page text with refs; a page longer than
+8000 characters shows only its interactive elements.
+A URL the network policy refuses is an error naming the reason.
+
+- Args: `url` (http or https), `action` (`goto` default, `back`, `forward`,
+  `reload`; the last three ignore `url`).
+
+**`browser_snapshot`**: The current page as an accessibility tree with element
+refs (`e12`; `f1e12` / `f2e12` after the tab loads a new page or inside
+frames) on interactive elements, frames, dialogs, tables, rows, articles and
+named containers, a frame's origin on its line when it differs from the
+page's, hidden text dropped, password and secret
+values redacted, capped at the plugin's `snapshot_max_chars`. Starts the
+browser when none is running.
+
+- Args: `ref` (one subtree), `depth` (0 = no limit), `query` (matching lines with their
+  ancestors), `interactive` (controls only), `boxes` (element positions in
+  viewport pixels).
+
+**`browser_act`**: Run an ordered batch of actions on one tab, stopping at the
+first failure. Returns one status line per action and the page delta (lines
+added or changed, elements marked `(moved)`, navigation, tabs opened with
+their text, dialogs, downloads, blocked requests), or the whole page when it
+loaded a new one or the delta would hide more than it shows. An action that
+led to a blocked page is reported as failed and ends the batch, and so does
+the batch's time limit (60 s by default). At most 20
+actions per call. `click`, `hover` and `drag` also take viewport coordinates
+(`x` / `y`, `to_x` / `to_y`); a non-empty `ref` wins over them.
+
+- Args: `actions` (list of action objects: `click`, `type`, `select`, `check`,
+  `press`, `hover`, `scroll`, `drag`, `upload`, `wait`, `dialog`), `files`
+  (paths the `upload` actions index into).
+
+**`browser_screenshot`**: The viewport, one element or the whole page as an
+image in CSS pixels (PNG, or JPEG above about 500 KB, downscaled when still
+too big; full pages and elements stop at 8000 px). The image reaches the model with native tool calling; text tool formats
+pass on the text line only. Starts the browser when none is running.
+
+- Args: `ref` (wins over `full_page`), `full_page`, `path` (also write the
+  image to that file; the sandbox checks it as a file write).
+
+**`browser_tabs`**: List, open, select or close tabs, or close the browser (the
+next call starts a fresh one). `list` never starts the browser; `new` with a
+`url` opens that page, as `browser_navigate` does. At most 20 tabs; `new`
+beyond that is refused.
+
+- Args: `action` (`list` default, `new`, `select`, `close`, `close_browser`),
+  `tab` (for `select` / `close`), `url` (for `new`).
+
+**`browser_eval`**: Run a JavaScript expression or function in the page,
+optionally receiving one element, and return its JSON result (cut at 10000
+characters). The script runs with the page's privileges: it sees what the
+page holds, typed secrets included, can change the page and can send requests
+through the browser's proxy. To run the plugin without it, turn the tool off
+(`/module disable browser_eval`).
+
+- Args: `expression`, `ref`.
+
 
 ### Provider-native media
 

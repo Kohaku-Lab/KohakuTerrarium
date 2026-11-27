@@ -116,6 +116,42 @@ pytest --no-header -q                     # 安靜一點
 `@pytest.mark.asyncio`。別在測試裡自己呼叫 `asyncio.run()`，
 讓 plugin 管 event loop。
 
+## 需要瀏覽器的測試
+
+大多數瀏覽器測試不需要瀏覽器：工作階段由一個實作真實 driver 協定的 scripted
+driver（`tests/helpers/browser_driver.py`）驅動。少數幾個會透過 Playwright
+跑真正的 Chromium，對象是 loopback 上的 fixture 站台
+（`tests/helpers/browser_site.py`，頁面在 `tests/fixtures/browser/site/`）：
+
+- `tests/integration/test_browser.py`：`browser/` 的工作流程。一個掛著 `browser`
+  外掛與 scripted LLM 的真實 agent，依序導覽、快照、成批動作、回答對話框、在新分頁
+  裡操作、上傳、下載、截圖、執行指令碼、撞上網路政策、在動作途中被中斷、在執行期間
+  停用再啟用，最後停止；測試檢查 fixture 伺服器的狀態、磁碟上的檔案，以及沒有任何
+  Chromium 行程殘留。
+- `tests/unit/browser/test_driver.py`：真實工作階段背後的 Playwright driver。
+  `browser/driver.py` 的覆蓋率來自這裡。
+- `tests/unit/browser/test_hidden.py`：在真實頁面裡跑隱藏文字偵測。
+
+它們需要 Playwright 與它的 Chromium：
+
+```bash
+uv pip install -e ".[dev,browser-use]"
+playwright install chromium
+```
+
+缺任一個就會 skip；其他啟動失敗則會讓測試失敗。CI 沒有安裝 Playwright，所以在 CI
+上它們會 skip，`browser/driver.py` 屬於覆蓋率例外。雖然測試套件會重導 `HOME`，
+這些測試仍會到操作者真正的 home 底下找 Playwright 的瀏覽器快取；要用別的快取請設
+`PLAYWRIGHT_BROWSERS_PATH`，要用特定執行檔（頁面偵測 fixture）請設
+`KT_CHROMIUM_PATH`。
+
+整合工作流程、`test_driver.py` 以及 `test_hidden.py` 裡的 Chromium 測試都帶有 `@pytest.mark.xdist_group("browser")`，
+平行執行時會被排到同一個 worker 上依序跑。
+
+```bash
+pytest tests/integration/test_browser.py tests/unit/browser/test_driver.py -n 0
+```
+
 ## 測試 harness
 
 `src/kohakuterrarium/testing/` 匯出四個原語，直接從套件根 import：

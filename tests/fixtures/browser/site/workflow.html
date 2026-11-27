@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workflow fixture</title>
+</head>
+<body>
+<main>
+  <h1>Team settings</h1>
+  <p role="status" id="status">Ready</p>
+  <form aria-label="Profile" onsubmit="return false">
+    <label>Display name <input id="name"></label>
+    <label>Theme
+      <select id="theme"><option>Light</option><option>Dark</option><option>Sepia</option></select>
+    </label>
+    <label><input type="checkbox" id="terms"> Accept terms</label>
+    <button type="button" id="save">Save profile</button>
+  </form>
+  <section aria-label="Notice" id="notice">
+    <button type="button" id="notice-link">Read notice</button>
+  </section>
+  <button type="button" id="dismiss">Dismiss notice</button>
+  <button type="button" id="delete">Delete account</button>
+  <a href="/help.html" target="_blank">Open help</a>
+  <label>Attachment <input type="file" id="attachment"></label>
+  <a href="/report.csv">Download report</a>
+  <button type="button" id="slow">Load slow data</button>
+  <button type="button" id="probe">Run probes</button>
+</main>
+<script>
+  const status = document.getElementById('status');
+  const post = (path, body) => fetch(path, {method: 'POST', body});
+
+  document.getElementById('save').onclick = async () => {
+    const profile = {
+      name: document.getElementById('name').value,
+      theme: document.getElementById('theme').value,
+      terms: document.getElementById('terms').checked,
+    };
+    await post('/api/profile', JSON.stringify(profile));
+    localStorage.setItem('profile', JSON.stringify(profile));
+    status.textContent = 'Saved profile for ' + profile.name;
+  };
+  document.getElementById('dismiss').onclick = () => {
+    document.getElementById('notice').remove();
+  };
+  document.getElementById('delete').onclick = async () => {
+    if (!confirm('Delete the account?')) { status.textContent = 'Kept account'; return; }
+    await post('/api/delete', 'yes');
+    status.textContent = 'Account deleted';
+  };
+  document.getElementById('attachment').onchange = async (event) => {
+    const file = event.target.files[0];
+    await post('/api/upload', await file.text());
+    status.textContent = 'Uploaded ' + file.name;
+  };
+  document.getElementById('slow').onclick = async () => {
+    await fetch('/api/slow');
+    status.textContent = 'Slow data loaded';
+  };
+  document.getElementById('probe').onclick = async () => {
+    const port = new URLSearchParams(location.search).get('probe');
+    const targets = ['http://169.254.169.254/latest/meta-data/', 'http://127.0.0.1:' + port + '/steal'];
+    const outcomes = await Promise.all(targets.map((url) => fetch(url).then((r) => r.status, () => 'refused')));
+    status.textContent = 'Probes finished: ' + outcomes.join(', ');
+  };
+</script>
+</body>
+</html>

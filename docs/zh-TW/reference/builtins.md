@@ -101,6 +101,58 @@ KohakuTerrarium 隨附的所有內建工具、子代理、輸入、輸出、使�
   `ori_question`。直連 query 為 1–128 字元，結果數為 1–50；
   `localization` 執行時設定填寫 IP。
 
+### Browser
+
+由 [`browser` 外掛](builtin-plugins.md#browser)提供，不必列在 `tools:` 底下：
+啟用外掛就會加入全部六個，停用則會移除。它們共用每個生物（及其子代理）的一個
+Chromium，頁面來的文字會包在標記為不受信任的 `page_content` 元素裡回傳。除了
+`browser_tabs` 以外，每個工具都接受選用的 `tab`（預設為使用中分頁）。每個選用
+參數也接受空值（`""`、`0`、`false`、`[]`），代表沒有提供，給必須填滿每個參數的
+模型使用。見 [guides/browser](../guides/browser.md)。
+
+**`browser_navigate`**：開啟 URL，或上一頁、下一頁、重新載入。回傳頁首行（分頁 id
+與 URL）以及帶 ref 的頁面文字；頁面超過 8000 個字元時只列可互動元素。網路政策拒絕的 URL 會回傳指出原因的錯誤。
+
+- 參數：`url`（http 或 https）、`action`（預設 `goto`，另有 `back`、`forward`、
+  `reload`；後三者會忽略 `url`）。
+
+**`browser_snapshot`**：以帶元素 ref（`e12`；分頁載入新頁面後或 frame 內為 `f1e12` / `f2e12`）的無障礙樹呈現
+目前頁面；ref 標在可互動元素、frame、對話框、表格、列、article 與有名稱的容器上，frame 的來源與頁面不同時寫在它那一行；隱藏文字會丟掉，密碼與密鑰的值會遮蔽，長度上限為外掛的
+`snapshot_max_chars`。沒有瀏覽器在跑時會啟動它。
+
+- 參數：`ref`（單一子樹）、`depth`（0 表示不限）、`query`（符合的行與其祖先）、`interactive`
+  （只列控制項）、`boxes`（元素在 viewport 中的像素位置）。
+
+**`browser_act`**：在單一分頁上依序執行一批動作，遇到第一個失敗就停。每個動作回傳
+一行狀態，加上頁面的變化（新增或變更的行、標成 `(moved)` 的元素、導覽、新開的
+分頁及其文字、對話框、下載、被擋下的請求）；載入了新頁面、或變化會藏住的比顯示的多時，改為顯示整個頁面。導向被擋下頁面的動作會回報為失敗並結束這批動作；到達這批動作的時間上限（預設 60 秒）也會結束。每次最多 20 個動作。`click`、
+`hover`、`drag` 也接受 viewport 座標（`x` / `y`、`to_x` / `to_y`）；非空的 `ref`
+優先於座標。
+
+- 參數：`actions`（動作物件清單：`click`、`type`、`select`、`check`、`press`、
+  `hover`、`scroll`、`drag`、`upload`、`wait`、`dialog`）、`files`（`upload`
+  動作索引用的路徑）。
+
+**`browser_screenshot`**：把 viewport、單一元素或整頁擷取成 CSS 像素的圖片（PNG；
+超過約 500 KB 時改用 JPEG，仍然太大時縮小；整頁與元素最高 8000 px）。使用原生工具呼叫時圖片會送到模型；
+文字型的工具呼叫格式只會送出文字那一行。沒有瀏覽器在跑時會啟動它。
+
+- 參數：`ref`（優先於 `full_page`）、`full_page`、`path`（另外把圖片寫入該檔案；
+  sandbox 把它當成檔案寫入來檢查）。
+
+**`browser_tabs`**：列出、開啟、選取或關閉分頁，或關閉瀏覽器（下一次呼叫會啟動
+新的）。`list` 不會啟動瀏覽器；帶 `url` 的 `new` 會開啟該頁面，和 `browser_navigate` 一樣。最多 20 個分頁；超出後 `new` 會被拒絕。
+
+- 參數：`action`（預設 `list`，另有 `new`、`select`、`close`、`close_browser`）、
+  `tab`（`select` / `close` 用）、`url`（`new` 用）。
+
+**`browser_eval`**：在頁面中執行 JavaScript 運算式或函式（可接收一個元素），回傳
+JSON 結果（在 10000 個字元處截斷）。指令碼以頁面的權限執行：它看得到頁面持有的一切，包括輸入過的密鑰，
+也能改變頁面，並經由瀏覽器的代理發出請求。想在沒有它的情況下使用外掛，就關掉這個工具
+（`/module disable browser_eval`）。
+
+- 參數：`expression`、`ref`。
+
 
 ### 互動與記憶
 

@@ -1,6 +1,6 @@
 ---
 title: Python API
-summary: kohakuterrarium 的公开 Python 接口：errors、Agent、轮次结果、Terrarium 引擎、Creature、会话、packages、compose、validate 与 testing。
+summary: kohakuterrarium 的公开 Python 接口：errors、Agent、轮次结果、Terrarium 引擎、Creature、会话、packages、browser、compose、validate 与 testing。
 tags:
   - reference
   - python
@@ -175,10 +175,11 @@ finally:
 JSON-schema 参数取自类型注解。同步函数经 `asyncio.to_thread` 运行。
 名为 `context` 的参数会收到 `ToolContext`。
 
-- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT) -> FunctionTool | decorator`：
+- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT, url_arguments=(), network_hosts=(), network_access=False) -> FunctionTool | decorator`：
   可写作 `@tool`、`@tool(name=..., description=...)`，或直接调用
-  `tool(existing_fn)`。
-- `FunctionTool(fn, *, name=None, description=None, execution_mode=...)`：背后的类。
+  `tool(existing_fn)`。网络关键字设定 sandbox 插件据以管制的同名
+  `BaseTool` 属性（见 [自定义模块](../guides/custom-modules.md#声明网络使用)）。
+- `FunctionTool(fn, *, name=None, description=None, execution_mode=..., url_arguments=(), network_hosts=(), network_access=False)`：背后的类。
 
 ```python
 import kohakuterrarium as kt
@@ -513,6 +514,74 @@ packages.ensure("@kt-biome")                  # idempotent install
 path = packages.resolve_package_path("@kt-biome/creatures/swe")
 for pkg in packages.list_packages():
     print(pkg["name"], pkg["version"])
+```
+
+---
+
+## Browser
+
+模块：`kohakuterrarium.browser`，一个惰性门面（PEP 562）：导入它不会加载
+任何子模块，也绝不会导入 Playwright。它是 `browser` 插件背后的运行时，可以
+单独使用；见
+[guides/browser](../guides/browser.md#在你自己的工具或代码里使用浏览器)。
+
+会话与读取：
+
+- `BrowserSession(options, *, downloads_dir=None, driver=None, external_check=None, ...)`：
+  一个惰性启动、位于过滤代理之后的 Chromium。操作逐个执行；空闲
+  `options.idle_close_s` 后关闭浏览器，下次调用时重新启动；
+  `await session.close()` 之后不可再用。
+  `async with BrowserSession(...) as session:` 在退出时关闭它。
+  没有 `downloads_dir` 时下载会被取消。
+  每个连接都会询问 `external_check(host, port) -> str | None`（返回原因即拒绝）。
+- `await session.read_page(url, *, max_chars=1_000_000) -> PageRead`：
+  在一个会话其他操作看不到的临时标签页中加载 `url`，并以数据形式返回。
+  URL 检查、代理与网络策略都与 `navigate` 相同。这不是隔离的读取：这个标签页与会话共用
+  cookie、存储、缓存和 service worker。
+- `await read_page(url, options=None, *, external_check=None, max_chars=1_000_000, driver=None) -> PageRead`：
+  同上，但使用自己的浏览器，并在返回前关闭它。与 `BrowserSession` 一样，除了 `external_check`
+  之外不应用任何框架策略。
+- `await read_page_for(context, url, options=None, *, max_chars=1_000_000, driver=None) -> PageRead`
+  （模块 `kohakuterrarium.builtins.plugins.browser.reading`，不在门面中）：给框架工具用的读取。
+  它接收工具的 `ToolContext`，无论插件是否加载，都应用浏览器插件对自身调用所做的检查：
+  sandbox 要求 OS 级隔离，或 `options` 要求该 Creature 不能使用的主机资源时，在启动任何东西之前
+  抛出 `BrowserUnavailableError`；这样的 Creature 只用自带的 Chromium；每个连接都按 sandbox 的
+  网络规则判断；不写入任何下载。所用的 sandbox 是调用开始时上下文 runtime services 中的那个：
+  它的 options 变更在读取期间生效，之后才加入或移除的服务不生效。
+- `PageRead`：冻结的 dataclass。`url`（跟随重定向后的最终 URL）、
+  `status`（`int | None`）、`title`、`html`（脚本运行后序列化的 DOM）、
+  `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。
+  `options.secrets` 中配置的密钥以及页面密码框的值会从每一项中脱敏；除此之外内容都是不可信的
+  页面文字。
+- `BrowserOptions`：插件 options 的冻结 dataclass；
+  `BrowserOptions.from_mapping(dict)` 校验普通数据。
+- `BrowserResult`：面向 agent 的操作（`navigate`、`snapshot`、`act`、
+  `screenshot`、`evaluate`、`tab_*`）的返回值；`text` 是为模型排好版的文本。
+
+Agent 共享的会话：
+
+- `BROWSER_SERVICE`：插件发布时使用的 `runtime_services` 键（`"browser"`）。
+- `BrowserAccess`：带有 `session` 与
+  `await prepare(context) -> BrowserSession` 的协议，`prepare` 会执行发布者
+  的逐次调用检查。
+- `browser_access(context) -> BrowserAccess | None`
+- `await agent_session(context) -> BrowserSession | None`：一次工具调用所用的
+  agent 会话；没有加载 browser 插件时为 `None`。
+
+类型化错误（都是 `BrowserError(KTError)`）：`BrowserUnavailableError`
+（缺少 Playwright 或 Chromium）、`BrowserLaunchError`、`BrowserClosedError`、
+`BrowserTimeoutError`（同时是 `TimeoutError`）、`BrowserStateLostError`、
+`NavigationBlockedError`（同时是 `PermissionError`）、`NavigationError`、
+`PageNavigatingError`。
+
+```python
+from kohakuterrarium import browser
+
+page = await browser.read_page(
+    "https://example.com/",
+    browser.BrowserOptions(allow_hosts=("example.com",)),
+)
+print(page.status, page.title, len(page.html))
 ```
 
 ---

@@ -2,10 +2,31 @@
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 DEFAULT_TIMEOUT = 60.0
+
+
+async def finish_within(awaitable: Awaitable[Any], what: str, limit: float) -> Any:
+    """Await ``awaitable``; fail the test when it is still running after ``limit`` seconds.
+
+    Whatever the call raises, a ``TimeoutError`` of its own included, reaches
+    the caller unchanged; only the limit running out is reported as overrun.
+    An overrun or cancelled wait cancels the call and waits for it to end.
+    """
+    task = asyncio.ensure_future(awaitable)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=limit)
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.wait({task})
+        raise
+    if not done:
+        task.cancel()
+        await asyncio.wait({task})
+        raise AssertionError(f"{what} did not finish within {limit:g} s")
+    return task.result()
 
 
 async def wait_until(
@@ -42,3 +63,30 @@ def wait_until_sync(
         if time.monotonic() >= deadline:
             raise AssertionError(f"timed out after {timeout}s waiting for {what}")
         time.sleep(interval)
+
+
+class LoopProbe:
+    """A task that ticks every ``interval`` seconds; ``ticks`` counts the ticks so far.
+
+    A blocked event loop shows as few ticks over a span many ``interval`` long.
+    """
+
+    def __init__(self, interval: float = 0.01) -> None:
+        self.interval = interval
+        self.ticks = 0
+        self._task: asyncio.Task | None = None
+
+    async def _tick(self) -> None:
+        while True:
+            await asyncio.sleep(self.interval)
+            self.ticks += 1
+
+    async def __aenter__(self) -> "LoopProbe":
+        self._task = asyncio.create_task(self._tick())
+        await asyncio.sleep(0)
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> None:
+        await asyncio.sleep(self.interval * 3)
+        self._task.cancel()
+        await asyncio.wait({self._task})

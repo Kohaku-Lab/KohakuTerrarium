@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Controls fixture</title>
+<style>
+  .card { border: 1px solid #ccc; padding: 4px; margin: 4px; }
+  .clickable { cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <nav aria-label="Primary">
+    <ul>
+      <li><a href="/home">Home</a></li>
+      <li><a href="/docs?page=1&amp;q=a">Docs</a></li>
+    </ul>
+  </nav>
+</header>
+<main>
+  <div><div><div>
+    <h1>Account settings</h1>
+  </div></div></div>
+  <p>Update your details below. Status: <span id="status">idle</span></p>
+  <form aria-label="Profile">
+    <div class="card">
+      <label for="name">Name</label>
+      <input id="name" type="text" placeholder="Your name" value="Ada">
+    </div>
+    <div class="card">
+      <label for="pw">Password</label>
+      <input id="pw" type="password" value="p4ss.w*rd(1)">
+    </div>
+    <div class="card">
+      <input id="news" type="checkbox" checked>
+      <label for="news">Subscribe to news</label>
+    </div>
+    <fieldset>
+      <legend>Plan</legend>
+      <label><input type="radio" name="plan" value="free" checked> Free</label>
+      <label><input type="radio" name="plan" value="pro"> Pro</label>
+    </fieldset>
+    <label for="color">Color</label>
+    <select id="color">
+      <option>Red</option>
+      <option selected>Green</option>
+      <option>Blue</option>
+    </select>
+    <button type="button" id="save" onclick="document.getElementById('status').textContent='saved'">Save</button>
+    <button type="button" disabled>Delete account</button>
+  </form>
+  <table>
+    <thead><tr><th>User</th><th>Role</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>Alice</td><td>Admin</td><td><button type="button">Remove</button></td></tr>
+      <tr><td>Bob</td><td>Viewer</td><td><button type="button">Remove</button></td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li>First item</li>
+    <li>Second item with <a href="https://example.invalid/more">a link</a></li>
+  </ul>
+  <div class="clickable" onclick="this.textContent='clicked'">Clickable card</div>
+  <button type="button" aria-label="Quote &quot;this&quot;: yes">Q</button>
+  <p>- starts with a dash</p>
+</main>
+</body>
+</html>

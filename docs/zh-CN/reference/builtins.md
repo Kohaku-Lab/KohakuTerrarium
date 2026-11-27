@@ -98,6 +98,58 @@ KohakuTerrarium 随附的所有内置工具、子代理、输入、输出、用�
   `ori_question`。直连 query 为 1–128 字符，结果数为 1–50；
   `localization` 运行时配置填写 IP。
 
+### Browser
+
+由 [`browser` 插件](builtin-plugins.md#browser)提供，不写在 `tools:` 下：启用插件
+即加入全部六个工具，停用则移除。它们共用每个 Creature（及其子代理）的一个
+Chromium，来自页面的文字放在标记为不可信的 `page_content` 元素中返回。除
+`browser_tabs` 外，每个工具都接受可选的 `tab`（默认活动标签页）。每个可选
+参数也接受空值（`""`、`0`、`false`、`[]`），表示未提供，供必须填写每个参数的
+模型使用。见 [guides/browser](../guides/browser.md)。
+
+**`browser_navigate`**：打开 URL，或后退、前进、重新加载。返回一行头部信息
+（标签页 id 与 URL）以及带 ref 的页面文字；页面超过 8000 个字符时只列可交互元素。被网络策略拒绝的 URL 会返回
+写明原因的错误。
+
+- 参数：`url`（http 或 https）、`action`（默认 `goto`，以及 `back`、`forward`、
+  `reload`；后三者忽略 `url`）。
+
+**`browser_snapshot`**：以带元素 ref（`e12`；标签页载入新页面后或 frame 内为 `f1e12` / `f2e12`）的无障碍树
+返回当前页面，ref 标在可交互元素、frame、对话框、表格、行、article 和有名称的容器上，frame 的 origin 与页面不同时写在它那一行，隐藏文字被丢弃，密码与密钥值被遮蔽，长度上限为插件的
+`snapshot_max_chars`。没有浏览器在运行时会启动它。
+
+- 参数：`ref`（单个子树）、`depth`（0 表示不限）、`query`（匹配的行及其祖先）、
+  `interactive`（只看控件）、`boxes`（以视口像素表示的元素位置）。
+
+**`browser_act`**：在一个标签页上按顺序执行一批动作，遇到第一个失败即停止。
+每个动作返回一行状态，并附上页面变化（新增或改变的行、标为 `(moved)` 的元素、
+导航、新开的标签页及其文字、对话框、下载、被拦截的请求）；载入了新页面、或变化会隐藏的比显示的多时，改为显示整个页面。导向被拦截页面的动作会报告为失败并结束这批动作；达到这批动作的时间上限（默认 60 秒）也会结束。每次最多 20 个
+动作。`click`、`hover`、`drag` 也接受视口坐标（`x` / `y`、`to_x` / `to_y`）；
+非空的 `ref` 优先于坐标。
+
+- 参数：`actions`（动作对象列表：`click`、`type`、`select`、`check`、
+  `press`、`hover`、`scroll`、`drag`、`upload`、`wait`、`dialog`）、`files`
+  （`upload` 动作按下标引用的路径）。
+
+**`browser_screenshot`**：以 CSS 像素截取视口、单个元素或整个页面（PNG，
+超过约 500 KB 时改用 JPEG，仍然太大时缩小；整页和元素最高 8000 px）。原生工具调用下图片会送到模型；
+文本工具格式只传回说明行。没有浏览器在运行时会启动它。
+
+- 参数：`ref`（优先于 `full_page`）、`full_page`、`path`（同时把图片写入该
+  文件；sandbox 把它当作文件写入来检查）。
+
+**`browser_tabs`**：列出、打开、切换或关闭标签页，或关闭浏览器（下一次调用
+会启动一个新的）。`list` 从不启动浏览器；带 `url` 的 `new` 会打开该页面，和 `browser_navigate` 一样。最多 20 个标签页；超出后 `new` 会被拒绝。
+
+- 参数：`action`（默认 `list`，以及 `new`、`select`、`close`、
+  `close_browser`）、`tab`（用于 `select` / `close`）、`url`（用于 `new`）。
+
+**`browser_eval`**：在页面中运行一段 JavaScript 表达式或函数，可选地传入一个
+元素，返回其 JSON 结果（在 10000 字符处截断）。脚本以页面的权限运行：它能看到页面持有的一切，包括
+已输入的密钥，还能修改页面，并经由浏览器的代理发出请求。想在没有它的情况下使用插件，就关掉这个工具（`/module disable browser_eval`）。
+
+- 参数：`expression`、`ref`。
+
 
 ### 互动与记忆
 

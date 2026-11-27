@@ -1,0 +1,28 @@
+- generic [active] [ref=e1]:
+  - heading "Hidden text" [level=1] [ref=e2]
+  - paragraph [ref=e3]: Visible paragraph one.
+  - generic [ref=e4]: HIDE01 opacity zero
+  - generic [ref=e5]: HIDE02 inherited opacity
+  - generic: HIDE03 font size zero
+  - generic [ref=e7]: HIDE04 font size one
+  - generic [ref=e8]: HIDE05 white on white
+  - generic [ref=e9]: HIDE06 white on page background
+  - generic [ref=e10]: HIDE07 transparent text
+  - generic [ref=e11]: HIDE08 zero alpha text
+  - generic [ref=e12]: HIDE09 off screen left
+  - generic [ref=e13]: HIDE10 off screen top
+  - generic [ref=e14]: HIDE11 sr only
+  - generic [ref=e15]: HIDE12 text indent
+  - generic: HIDE13 zero size box
+  - generic: HIDE14 zero height box
+  - generic [ref=e16]: HIDE15 clip path only
+  - paragraph [ref=e17]: Visible start HIDE16 inline hidden visible end.
+  - generic [ref=e18]: Visible paragraph one.
+  - paragraph [ref=e19]: Gradient heading text
+  - generic [ref=e20]: Light on dark
+  - button "Close dialog" [ref=e21]: X
+  - button "Invisible button" [ref=e23]
+  - link "Next page" [ref=e24] [cursor=pointer]:
+    - /url: /next
+  - text: Secret
+  - textbox "Secret" [ref=e25]: s3cr.t+[x]

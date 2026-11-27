@@ -31,6 +31,7 @@ class WebFetchTool(BaseTool):
     """Return a web page as bounded Markdown using the best available backend."""
 
     supports_background = True
+    url_arguments = ("url",)
 
     def __init__(self, config=None):
         super().__init__(config=config)

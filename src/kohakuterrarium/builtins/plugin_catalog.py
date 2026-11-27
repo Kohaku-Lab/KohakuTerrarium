@@ -7,6 +7,10 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _PLUGINS: dict[str, dict[str, str]] = {
+    "browser": {
+        "module": "kohakuterrarium.builtins.plugins.browser.plugin",
+        "class": "BrowserPlugin",
+    },
     "budget": {
         "module": "kohakuterrarium.builtins.plugins.budget.plugin",
         "class": "BudgetPlugin",

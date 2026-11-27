@@ -1,6 +1,6 @@
 ---
 title: Python API
-summary: kohakuterrarium 的公開介面：errors、Agent、輪次結果、Terrarium 引擎、Creature、工作階段、packages、compose、validate 與 testing。
+summary: kohakuterrarium 的公開介面：errors、Agent、輪次結果、Terrarium 引擎、Creature、工作階段、packages、browser、compose、validate 與 testing。
 tags:
   - reference
   - python
@@ -177,10 +177,11 @@ finally:
 同步函式透過 `asyncio.to_thread` 執行。`context`
 參數會收到 `ToolContext`。
 
-- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT) -> FunctionTool | decorator`：
+- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT, url_arguments=(), network_hosts=(), network_access=False) -> FunctionTool | decorator`：
   可寫成 `@tool`、`@tool(name=..., description=...)`，或直接呼叫
-  `tool(existing_fn)`。
-- `FunctionTool(fn, *, name=None, description=None, execution_mode=...)`：背後的類別。
+  `tool(existing_fn)`。網路關鍵字設定 sandbox 外掛據以管制的同名
+  `BaseTool` 屬性（見 [自訂模組](../guides/custom-modules.md#宣告網路使用)）。
+- `FunctionTool(fn, *, name=None, description=None, execution_mode=..., url_arguments=(), network_hosts=(), network_access=False)`：背後的類別。
 
 ```python
 import kohakuterrarium as kt
@@ -520,6 +521,74 @@ packages.ensure("@kt-biome")                  # 冪等安裝
 path = packages.resolve_package_path("@kt-biome/creatures/swe")
 for pkg in packages.list_packages():
     print(pkg["name"], pkg["version"])
+```
+
+---
+
+## Browser
+
+模組：`kohakuterrarium.browser`，惰性門面 (PEP 562)：import 它不會載入任何
+子模組，也絕不會 import Playwright。它是 `browser` 插件背後的執行環境，可以
+單獨使用；見
+[guides/browser](../guides/browser.md#在你自己的工具或程式碼裡使用瀏覽器)。
+
+工作階段與讀取：
+
+- `BrowserSession(options, *, downloads_dir=None, driver=None, external_check=None, ...)`：
+  一個延遲啟動、位在過濾代理之後的 Chromium。操作逐一執行；閒置
+  `options.idle_close_s` 後關閉瀏覽器，下次呼叫時重新啟動；
+  `await session.close()` 之後不能再用。
+  `async with BrowserSession(...) as session:` 在離開時關閉它。
+  沒有 `downloads_dir` 時下載會被取消。
+  每個連線都會詢問 `external_check(host, port) -> str | None`（回傳原因即拒絕）。
+- `await session.read_page(url, *, max_chars=1_000_000) -> PageRead`：
+  在一個工作階段其他操作看不到的暫時分頁中載入 `url`，以資料形式回傳。
+  URL 檢查、代理與網路政策都與 `navigate` 相同。這不是隔離的讀取：這個分頁與工作階段共用
+  cookie、儲存空間、快取與 service worker。
+- `await read_page(url, options=None, *, external_check=None, max_chars=1_000_000, driver=None) -> PageRead`：
+  同上，但用自己的瀏覽器，並在回傳前關閉它。和 `BrowserSession` 一樣，除了 `external_check`
+  以外不套用任何框架政策。
+- `await read_page_for(context, url, options=None, *, max_chars=1_000_000, driver=None) -> PageRead`
+  （模組 `kohakuterrarium.builtins.plugins.browser.reading`，不在門面裡）：給框架工具用的讀取。
+  它接收工具的 `ToolContext`，不論外掛是否載入，都套用瀏覽器外掛對自身呼叫所做的檢查：
+  sandbox 要求 OS 層級隔離，或 `options` 要求該生物不能使用的主機資源時，在啟動任何東西之前
+  丟出 `BrowserUnavailableError`；這樣的生物只用內附的 Chromium；每個連線都依 sandbox 的網路
+  規則判斷；不寫入任何下載。所用的 sandbox 是呼叫開始時 context 的 runtime services 裡的那個：
+  它的 options 變更在讀取期間生效，之後才加入或移除的服務不生效。
+- `PageRead`：凍結的 dataclass。`url`（跟隨重新導向後的最終 URL）、
+  `status`（`int | None`）、`title`、`html`（腳本執行後序列化的 DOM）、
+  `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。
+  `options.secrets` 中設定的密鑰以及頁面密碼欄位的值會從每一項中遮蔽；除此之外內容都是不受信任的
+  頁面文字。
+- `BrowserOptions`：插件 options 的凍結 dataclass；
+  `BrowserOptions.from_mapping(dict)` 驗證一般資料。
+- `BrowserResult`：面向 agent 的操作（`navigate`、`snapshot`、`act`、
+  `screenshot`、`evaluate`、`tab_*`）的回傳值；`text` 是替模型排好的文字。
+
+Agent 共用的工作階段：
+
+- `BROWSER_SERVICE`：插件發布時用的 `runtime_services` 鍵（`"browser"`）。
+- `BrowserAccess`：具有 `session` 與
+  `await prepare(context) -> BrowserSession` 的協定，`prepare` 會執行發布者
+  的逐次呼叫檢查。
+- `browser_access(context) -> BrowserAccess | None`
+- `await agent_session(context) -> BrowserSession | None`：一次工具呼叫所用的
+  agent 工作階段；沒有載入 browser 插件時為 `None`。
+
+型別化錯誤（都是 `BrowserError(KTError)`）：`BrowserUnavailableError`
+（缺少 Playwright 或 Chromium）、`BrowserLaunchError`、`BrowserClosedError`、
+`BrowserTimeoutError`（同時是 `TimeoutError`）、`BrowserStateLostError`、
+`NavigationBlockedError`（同時是 `PermissionError`）、`NavigationError`、
+`PageNavigatingError`。
+
+```python
+from kohakuterrarium import browser
+
+page = await browser.read_page(
+    "https://example.com/",
+    browser.BrowserOptions(allow_hosts=("example.com",)),
+)
+print(page.status, page.title, len(page.html))
 ```
 
 ---
