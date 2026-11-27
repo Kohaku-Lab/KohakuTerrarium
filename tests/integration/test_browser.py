@@ -341,8 +341,14 @@ class TestBrowserIntegration:
 
             # The tab cap holds for tabs the tools open: the next one is refused.
             plugin.session._max_tabs = 2
-            second = await creature.call("browser_tabs", action="new")
-            assert "Tabs (2, active t3)" in second
+            second = await creature.call(
+                "browser_tabs", action="new", url="about:blank"
+            )
+            assert "[t3] about:blank" in second
+            blank_snapshot = await creature.call("browser_snapshot", tab="t3")
+            for result in (second, blank_snapshot):
+                assert "(no accessible content)" in result
+                assert "may still be loading" not in result
             refused_tab = await creature.call("browser_tabs", action="new")
             assert "the limit of 2 open tabs is reached" in refused_tab
             await creature.call("browser_tabs", action="close", tab="t3")

@@ -297,6 +297,10 @@ class SessionObserveMixin:
                 )
         return fmt.join_sections(*notes)
 
+    def _note_empty_page(self, obs: Observation, op: Op) -> None:
+        if obs.url != "about:blank" and not obs.nodes and LOADING not in op.notes:
+            op.notes.append(LOADING)
+
     async def _page_result(
         self,
         tab: Tab,
@@ -310,8 +314,7 @@ class SessionObserveMixin:
         ``full`` is false when ``rendered`` lists only the interactive elements.
         """
         self._refs.record(tab.id, rendered.fingerprints, obs.frame_docs)
-        if not obs.nodes and LOADING not in op.notes:
-            op.notes.append(LOADING)
+        self._note_empty_page(obs, op)
         body = fmt.join_sections(
             self._title_line(tab, obs.title),
             rendered.text
@@ -330,14 +333,13 @@ class SessionObserveMixin:
     async def _page_view(self, obs: Observation, op: Op) -> tuple[snap.Rendered, bool]:
         """The cleaned page when it fits ``PAGE_TEXT_MAX_CHARS``, else its controls.
 
-        Returns the rendering and whether it is the full page; the fallback
-        and an empty page each add a note to ``op``.
+        Returns the rendering and whether it is the full page; adds notes
+        for the fallback or a possibly still-loading page.
         """
         limit = min(PAGE_TEXT_MAX_CHARS, self.options.snapshot_max_chars)
         full = await self._render(obs.nodes, max_chars=limit)
         if not full.cut_lines:
-            if not obs.nodes and LOADING not in op.notes:
-                op.notes.append(LOADING)
+            self._note_empty_page(obs, op)
             return full, True
         op.notes.append(TEXT_LEFT_OUT.format(limit=limit))
         return await self._compact(obs), False

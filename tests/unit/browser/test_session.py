@@ -2360,6 +2360,15 @@ class TestPageText:
         same = await session.act([{"kind": "click", "ref": "e2"}])
         assert "No change in the page snapshot." in same.text
 
+    async def test_a_blank_tab_does_not_suggest_waiting(self, tmp_path):
+        session, _ = make(tmp_path, setup=None)
+        async with session:
+            opened = await session.tab_new("about:blank")
+            for result in (opened, await session.snapshot()):
+                assert "about:blank" in result.text
+                assert "(no accessible content)" in result.text
+                assert "may still be loading" not in result.text
+
     async def test_an_empty_page_says_it_may_still_be_loading(self, made):
         session, driver = made
         await session.snapshot()

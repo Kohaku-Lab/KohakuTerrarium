@@ -247,6 +247,12 @@ class TestSnapshot:
 
 
 class TestAct:
+    def test_select_schema_explains_that_values_are_option_labels(self):
+        spec = built_schema(get_builtin_tool("browser_act"))
+        values = spec["properties"]["actions"]["items"]["properties"]["values"]
+        assert "visible option labels" in values["description"]
+        assert "not HTML value attributes" in values["description"]
+
     @pytest.mark.parametrize("shape", ["list", "json", "body"])
     async def test_three_shapes_of_actions(self, env, shape):
         _, driver, run = env

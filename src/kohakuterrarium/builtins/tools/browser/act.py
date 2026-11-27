@@ -62,7 +62,14 @@ class BrowserActTool(BrowserTool):
                             "secret": {"type": "string"},
                             "submit": {"type": "boolean"},
                             "slowly": {"type": "boolean"},
-                            "values": {"type": "array", "items": {"type": "string"}},
+                            "values": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    'For select: visible option labels (e.g. ["Two"]), '
+                                    "not HTML value attributes."
+                                ),
+                            },
                             "checked": {"type": "boolean"},
                             "key": {"type": "string"},
                             "x": {"type": "number"},
