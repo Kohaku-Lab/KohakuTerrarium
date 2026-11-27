@@ -92,6 +92,15 @@ def add_run_like_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_missing_images_arg(parser: argparse.ArgumentParser) -> None:
+    """Register the non-interactive resume image policy."""
+    parser.add_argument(
+        "--missing-images",
+        choices=("ignore", "warn", "error"),
+        help="Override the interactive check for unavailable historical images",
+    )
+
+
 def add_resume_like_args(parser: argparse.ArgumentParser) -> None:
     """Register the resume options shared by the cli/tui front doors.
 
@@ -104,6 +113,7 @@ def add_resume_like_args(parser: argparse.ArgumentParser) -> None:
         help="Session name/prefix, full path, or omit to list recent sessions.",
     )
     parser.add_argument("--pwd", default=None, help="Override working directory")
+    add_missing_images_arg(parser)
     parser.add_argument(
         "--last",
         action="store_true",

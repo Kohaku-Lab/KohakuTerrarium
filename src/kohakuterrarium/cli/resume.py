@@ -14,6 +14,10 @@ from typing import Literal
 
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.resume.images import (
+    MissingImagesPolicy,
+    MissingResumeImagesError,
+)
 from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity.drive_settings.settings import resolve_drive_kwargs
@@ -60,6 +64,7 @@ def resume_cli(
     io_mode: str | None = None,
     llm: str | None = None,
     log_stderr: str = "auto",
+    missing_images: MissingImagesPolicy | None = None,
 ) -> int:
     """Resume an agent or terrarium session via the engine.
 
@@ -98,13 +103,15 @@ def resume_cli(
         return 0
 
     try:
-        result = asyncio.run(_run(path, resolved_pwd, llm, io_mode))
+        result = asyncio.run(_run(path, resolved_pwd, llm, io_mode, missing_images))
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 0
     except Exception as exc:
         print(f"Error: {exc}")
         return 1
+    if result is None:
+        return 0
     if result == 0 and path.exists():
         print("\nSession saved. To resume:")
         print(f"  {resume_command(io_mode)} {path.stem}")
@@ -112,7 +119,13 @@ def resume_cli(
     following = take_next_session()
     if following:
         return resume_cli(
-            following, None, log_level, io_mode=io_mode, llm=llm, log_stderr=log_stderr
+            following,
+            None,
+            log_level,
+            io_mode=io_mode,
+            llm=llm,
+            log_stderr=log_stderr,
+            missing_images=missing_images,
         )
     return result
 
@@ -142,12 +155,53 @@ def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None | Literal
         print(f"Not a directory: {entered}")
 
 
-async def _run(path, pwd_override, llm, io_mode: str | None) -> int:
+async def _run(
+    path,
+    pwd_override,
+    llm,
+    io_mode: str | None,
+    missing_images: MissingImagesPolicy | None = None,
+) -> int | None:
     """Resume the engine and run the selected interactive surface."""
     register_group_hooks()
-    engine = await Terrarium.resume(
-        str(path), pwd=pwd_override, llm=llm, **resolve_drive_kwargs()
-    )
+    confirmation = None
+    while True:
+        try:
+            engine = await Terrarium.resume(
+                str(path),
+                pwd=pwd_override,
+                llm=llm,
+                missing_images=missing_images or "error",
+                image_repair_confirmation=confirmation,
+                **resolve_drive_kwargs(),
+            )
+            break
+        except MissingResumeImagesError as exc:
+            report = exc.report
+            print(report.summary(), file=sys.stderr)
+            for issue in report.issues[:5]:
+                image = issue.image
+                turn = f" turn {image.turn_index}" if image.turn_index else ""
+                print(f"  {issue.namespace}{turn}: {image.url!r}", file=sys.stderr)
+            if missing_images is not None or not sys.stdin.isatty():
+                return 1
+            if not report.confirmation or not all(
+                issue.image.repairable for issue in report.issues
+            ):
+                print("Restore the unavailable files before resuming.", file=sys.stderr)
+                if input(
+                    "Check again after restoring the files? [y/N] "
+                ).strip().lower() in {"y", "yes"}:
+                    confirmation = None
+                    continue
+                print("Resume cancelled.")
+                return None
+            if input(
+                "Replace the missing images with text notes and resume? [y/N] "
+            ).strip().lower() not in {"y", "yes"}:
+                print("Resume cancelled.")
+                return None
+            confirmation = report.confirmation
     async with engine:
         graph_id = next(iter(engine._topology.graphs.keys()), None)
         if graph_id is None:

@@ -120,3 +120,36 @@ class TestResolveMissingPwd:
 
         assert resume_mod.resume_cli("saved", None, "INFO") == 0
         assert "Session saved" in capsys.readouterr().out
+
+    async def test_declining_missing_image_confirmation_leaves_history_unchanged(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        path = _make_store(tmp_path, str(tmp_path))
+        url = (tmp_path / "removed.png").as_uri()
+        store = SessionStore(path)
+        try:
+            store.append_event(
+                "a",
+                "user_message",
+                {"content": [{"type": "image_url", "image_url": {"url": url}}]},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event("a", "processing_end", {}, turn_index=1, branch_id=1)
+        finally:
+            store.close(update_status=False)
+        _fake_stdin(monkeypatch, tty=True)
+        prompts = []
+
+        def decline(prompt):
+            prompts.append(prompt)
+            return ""
+
+        monkeypatch.setattr("builtins.input", decline)
+        assert await resume_mod._run(path, None, None, "tui") is None
+        assert len(prompts) == 1 and "[y/N]" in prompts[0]
+        output = capsys.readouterr()
+        assert "1 original file(s)" in output.err and url in output.err
+        assert "Resume cancelled." in output.out
+        assert await resume_mod._run(path, None, None, "tui", "error") == 1
+        assert len(prompts) == 1

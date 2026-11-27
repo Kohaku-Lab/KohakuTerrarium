@@ -55,6 +55,7 @@ def legacy_main(argv: list[str] | None = None, prog: str = "legacy-cli") -> int:
             io_mode="cli",
             llm=args.llm,
             log_stderr=args.log_stderr,
+            missing_images=args.missing_images,
         )
     session = None if args.no_session else args.session
     return resolve_then_run(

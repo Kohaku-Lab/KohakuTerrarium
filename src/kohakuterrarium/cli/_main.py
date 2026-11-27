@@ -48,7 +48,7 @@ from kohakuterrarium.cli.packages import (
 from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.terrarium.engine.cli.ktui_support import take_next_session
 from kohakuterrarium.cli.run import run_agent_cli
-from kohakuterrarium.cli.select.args import add_attach_args
+from kohakuterrarium.cli.select.args import add_attach_args, add_missing_images_arg
 from kohakuterrarium.terrarium.engine.cli.ktui_support import ktui_unavailable
 from kohakuterrarium.cli.self_uninstall import (
     add_self_uninstall_subparser,
@@ -205,6 +205,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Session name/prefix, full path, or omit to list recent sessions",
     )
     resume_parser.add_argument("--pwd", help="Override working directory")
+    add_missing_images_arg(resume_parser)
     resume_parser.add_argument(
         "--last",
         action="store_true",
@@ -553,6 +554,7 @@ def _dispatch_resume(args: argparse.Namespace) -> int:
         io_mode=args.mode,
         llm=args.llm,
         log_stderr=args.log_stderr,
+        missing_images=args.missing_images,
     )
 
 

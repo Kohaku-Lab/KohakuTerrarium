@@ -107,6 +107,7 @@ def _resume(ns: argparse.Namespace, query: str | None) -> int:
         io_mode="ktui",
         llm=getattr(ns, "llm", None),
         log_stderr=getattr(ns, "log_stderr", "auto"),
+        missing_images=getattr(ns, "missing_images", None),
     )
 
 
