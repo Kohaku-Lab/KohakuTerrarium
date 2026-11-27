@@ -14,6 +14,10 @@ from kohakuterrarium.errors import (
 )
 from kohakuterrarium.session.resume.resume import _open_store_with_migration
 from kohakuterrarium.session.resume.async_flow import inject_saved_state_async
+from kohakuterrarium.session.resume.images import (
+    MissingImagesPolicy,
+    apply_resume_image_policy,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.open import open_owned_store
 from kohakuterrarium.terrarium.creature.host import (
@@ -55,6 +59,8 @@ async def resume_manifest_into_engine(
     allow_valid_targets: bool = False,
     llm: Any = None,
     io: str = "none",
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> str | None:
     """Reserve identities, revalidate the writer view, then restore a manifest.
 
@@ -80,11 +86,15 @@ async def resume_manifest_into_engine(
                 _workspace.WorkspaceResumeFailure.STALE_MANIFEST,
                 "Session workspace metadata changed during resume preflight",
             )
-        locked_plan = _workspace.plan_workspace_resume(
-            locked_manifest,
-            replacements,
-            allow_valid_targets=allow_valid_targets,
-        )
+        try:
+            locked_plan = _workspace.plan_workspace_resume(
+                locked_manifest,
+                replacements,
+                allow_valid_targets=allow_valid_targets,
+            )
+        except BaseException:
+            store.close(update_status=False)
+            raise
         return await _resume_reserved_manifest(
             engine,
             path,
@@ -92,6 +102,8 @@ async def resume_manifest_into_engine(
             llm=llm,
             store=store,
             io=io,
+            missing_images=missing_images,
+            image_repair_confirmation=image_repair_confirmation,
         )
 
 
@@ -103,6 +115,8 @@ async def _resume_reserved_manifest(
     llm: Any,
     store: SessionStore,
     io: str = "none",
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> str:
     """Restore a graph while all persisted creature identities are reserved."""
     if manifest.graph_id in engine._topology.graphs:
@@ -115,6 +129,17 @@ async def _resume_reserved_manifest(
         ):
             store.close(update_status=False)
             raise GraphManifestCollisionError("creature_id", item.creature_id)
+
+    try:
+        await store.run(
+            apply_resume_image_policy,
+            store,
+            missing_images,
+            confirmation=image_repair_confirmation,
+        )
+    except BaseException:
+        store.close(update_status=False)
+        raise
 
     created: list[Creature] = []
     workspace_persisted = False

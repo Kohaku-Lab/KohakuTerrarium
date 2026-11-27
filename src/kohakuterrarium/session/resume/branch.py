@@ -211,6 +211,15 @@ def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
     is still usable — resume appends the post-snapshot tail. Only a snapshot
     whose path diverges (a sibling branch) must be discarded and rebuilt.
     """
+    current = (getattr(agent, "_turn_index", None), getattr(agent, "_branch_id", None))
+    if any(not isinstance(value, int) or value <= 0 for value in current):
+        return False
+    ancestors = getattr(agent, "_parent_branch_path", None) or []
+    return snapshot_mismatches_path(store, agent_name, [*ancestors, current])
+
+
+def snapshot_mismatches_path(store: Any, agent_name: str, path: list) -> bool:
+    """Check whether a saved snapshot is outside the selected lineage."""
     try:
         branch = store.state.get(f"{agent_name}:snapshot_branch")
     except (KeyError, TypeError):
@@ -221,17 +230,11 @@ def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
     bi = branch.get("branch_id")
     if not isinstance(ti, int) or not isinstance(bi, int) or ti <= 0 or bi <= 0:
         return False
-    a_ti = getattr(agent, "_turn_index", None)
-    a_bi = getattr(agent, "_branch_id", None)
-    a_ppath = getattr(agent, "_parent_branch_path", None) or []
-    # An agent with no live selection (core code can set turn/branch to 0) has
-    # no branch to compare against — treat it as "no mismatch" and trust the
-    # snapshot rather than triggering an unnecessary replay.
-    if not isinstance(a_ti, int) or not isinstance(a_bi, int) or a_ti <= 0 or a_bi <= 0:
+    target = _turn_path(_safe_branch_path(path))
+    if not target:
         return False
     snapshot_path = _turn_path(_safe_branch_path(branch.get("parent_branch_path")))
-    agent_path = _turn_path(_safe_branch_path(a_ppath))
-    return not is_path_prefix(snapshot_path + [(ti, bi)], agent_path + [(a_ti, a_bi)])
+    return not is_path_prefix(snapshot_path + [(ti, bi)], target)
 
 
 def _turn_path(path: list[tuple[int, int]]) -> list[tuple[int, int]]:

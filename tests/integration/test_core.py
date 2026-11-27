@@ -77,6 +77,10 @@ from kohakuterrarium.session.resume import branch as resume_branch
 from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.modules.user_command.base import UserCommandContext
+from kohakuterrarium.session.resume.images import (
+    MissingResumeImagesError,
+    MissingResumeImagesWarning,
+)
 from kohakuterrarium.session.resume.resume import resume_agent
 from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store import SessionStore
@@ -1063,6 +1067,34 @@ async def _exercise_direct_media_history(tmp_path, monkeypatch):
             finally:
                 await restored.stop()
                 store.close()
+
+            next(
+                path
+                for path in Path(saved_path).with_suffix(".artifacts").rglob("*.png")
+            ).unlink()
+            with pytest.raises(MissingResumeImagesError) as blocked:
+                await Terrarium.resume(saved_path, missing_images="error")
+            report = blocked.value.report
+            assert report.detail()["artifacts"] == report.detail()["repairable"] == 1
+            with pytest.warns(MissingResumeImagesWarning):
+                warned = await Terrarium.resume(saved_path, missing_images="warn")
+            await warned.shutdown()
+            with pytest.raises(MissingResumeImagesError) as still_missing:
+                await Terrarium.resume(saved_path, missing_images="error")
+            continued_llm = ScriptedLLM(["continued after repair"])
+            async with await Terrarium.resume(
+                saved_path,
+                llm=continued_llm,
+                missing_images="error",
+                image_repair_confirmation=still_missing.value.report.confirmation,
+            ) as repaired:
+                (creature,) = repaired.list_creatures()
+                assert (
+                    await creature.run("continue with the surviving image")
+                ).text == "continued after repair"
+                assert "Historical image unavailable" in str(
+                    continued_llm.last_messages
+                )
 
 
 async def _exercise_assistant_media_history(tmp_path):

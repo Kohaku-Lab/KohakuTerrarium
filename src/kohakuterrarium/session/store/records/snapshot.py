@@ -119,6 +119,13 @@ def load_branch_snapshot(
     )
 
 
+def _keep_checkpoint(old: list, new: list, preserve_other_paths: bool) -> bool:
+    if preserve_other_paths:
+        return old != new
+    shared = min(len(old), len(new))
+    return old[:shared] != new[:shared]
+
+
 def save_branch_snapshot(
     store: Any,
     agent: str,
@@ -127,6 +134,7 @@ def save_branch_snapshot(
     branch: dict | None,
     watermark: int,
     compact_state: dict | None = None,
+    preserve_other_paths: bool = False,
 ) -> None:
     """Write one coherent checkpoint and maintain the legacy latest mirrors."""
     store._resume_candidate = None
@@ -136,8 +144,7 @@ def save_branch_snapshot(
         records = [
             record
             for record in load_records(store, agent)
-            if record["path"][: min(len(path), len(record["path"]))]
-            != path[: min(len(path), len(record["path"]))]
+            if _keep_checkpoint(record["path"], path, preserve_other_paths)
         ]
         state = compact_state or {"compact_count": 0, "last_compact_time": 0.0}
         records.append(
@@ -161,7 +168,12 @@ def save_branch_snapshot(
 
 
 def save_agent_snapshot(
-    store: Any, namespace: str, agent: Any, messages: list[dict]
+    store: Any,
+    namespace: str,
+    agent: Any,
+    messages: list[dict],
+    *,
+    preserve_other_paths: bool = False,
 ) -> None:
     """Persist a quiescent history mutation without discarding sibling checkpoints."""
     saver = getattr(store, "save_branch_snapshot", None)
@@ -182,4 +194,5 @@ def save_agent_snapshot(
         branch=snapshot_tag(agent),
         watermark=watermark,
         compact_state=state,
+        **({"preserve_other_paths": True} if preserve_other_paths else {}),
     )

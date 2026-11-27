@@ -19,6 +19,10 @@ from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.resume.images import (
+    MissingImagesPolicy,
+    apply_resume_image_policy,
+)
 from kohakuterrarium.session.resume.target import (
     active_resume_graph,
     resolve_resume_path,
@@ -112,6 +116,8 @@ async def resume_new_engine(
     drive_config: Any = None,
     drive_registrations: tuple[Any, ...] | list[Any] | None = None,
     drive_store: Any = None,
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> "Terrarium":
     """Preflight, construct, and adopt into a fresh engine."""
     path = resolve_resume_path(_resolve_store_path(store))
@@ -120,6 +126,10 @@ async def resume_new_engine(
         pwd=pwd,
         workspace_overrides=workspace_overrides,
     )
+    if isinstance(store, SessionStore):
+        await asyncio.to_thread(store.close, update_status=False)
+    if missing_images == "error" and image_repair_confirmation is None:
+        await asyncio.to_thread(apply_resume_image_policy, path, missing_images)
     engine = engine_cls(
         pwd=pwd,
         drive_config=drive_config,
@@ -128,10 +138,15 @@ async def resume_new_engine(
     )
     engine._running = True
     try:
-        resume_kwargs = {"pwd": pwd, "llm": llm}
+        resume_kwargs = {
+            "pwd": pwd,
+            "llm": llm,
+            "missing_images": missing_images,
+            "image_repair_confirmation": image_repair_confirmation,
+        }
         if workspace_overrides is not None:
             resume_kwargs["workspace_overrides"] = workspace_overrides
-        await resume_into_engine(engine, store, **resume_kwargs)
+        await resume_into_engine(engine, path, **resume_kwargs)
     except BaseException:
         await engine.shutdown()
         raise
@@ -147,6 +162,8 @@ async def resume_into_engine(
     llm: Any = None,
     prepared_workspace: "_workspace.WorkspaceResumePlan | None" = None,
     io: str = "none",
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> str:
     """Adopt a saved session into ``engine`` and return its graph ID."""
     if io not in {"none", "headless"}:
@@ -164,6 +181,10 @@ async def resume_into_engine(
         return active
     if isinstance(store, SessionStore):
         store.close(update_status=False)
+    media_kwargs = {
+        "missing_images": missing_images,
+        "image_repair_confirmation": image_repair_confirmation,
+    }
     meta = await asyncio.to_thread(read_session_meta, path)
     # None is the checkpoint tombstone — legacy resume, not a manifest.
     dirty_state = meta.get("workspace_resume_state")
@@ -197,6 +218,7 @@ async def resume_into_engine(
             allow_valid_targets=pwd is not None,
             llm=llm,
             io=io,
+            **media_kwargs,
         )
         if resumed is not None:
             return resumed
@@ -205,10 +227,12 @@ async def resume_into_engine(
     session_type = await asyncio.to_thread(detect_session_type, path)
 
     if session_type == "agent":
-        return await _resume_agent_into_engine(engine, path, pwd=pwd, llm=llm, io=io)
+        return await _resume_agent_into_engine(
+            engine, path, pwd=pwd, llm=llm, io=io, **media_kwargs
+        )
     if session_type == "terrarium":
         return await _resume_terrarium_into_engine(
-            engine, path, pwd=pwd, llm=llm, io=io
+            engine, path, pwd=pwd, llm=llm, io=io, **media_kwargs
         )
     raise SessionNotResumableError(f"Unknown saved-session type: {session_type!r}")
 
@@ -271,6 +295,8 @@ async def _resume_agent_into_engine(
     pwd: str | None,
     llm: Any,
     io: str = "none",
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> str:
     """Standalone-agent resume: rebuild Agent, wrap, adopt, attach.
 
@@ -295,6 +321,8 @@ async def _resume_agent_into_engine(
         input_module=NoneInput(),
         output_module=NoneOutput() if io == "headless" else None,
         mark_conversation_open=False,
+        missing_images=missing_images,
+        image_repair_confirmation=image_repair_confirmation,
     )
     created: list[str] = []
     original_workspace = _legacy_workspace_snapshot(store)
@@ -387,6 +415,8 @@ async def _resume_terrarium_into_engine(
     pwd: str | None,
     llm: Any = None,
     io: str = "none",
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> str:
     """Multi-creature recipe resume: rebuild graph, inject per-creature."""
     store = await open_owned_store(_open_store_with_migration, path, writer_lock=True)
@@ -395,6 +425,12 @@ async def _resume_terrarium_into_engine(
     # concurrent task added meanwhile.
     created: list[str] = []
     try:
+        await store.run(
+            apply_resume_image_policy,
+            store,
+            missing_images,
+            confirmation=image_repair_confirmation,
+        )
         return await _resume_terrarium_body(
             engine, path, store, created, pwd=pwd, llm=llm, io=io
         )

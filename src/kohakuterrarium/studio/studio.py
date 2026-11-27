@@ -62,6 +62,7 @@ from kohakuterrarium.studio.identity.mcp import servers as _identity_mcp
 from kohakuterrarium.studio.nodes import NodeMap, build_node_map_if_multi_node
 from kohakuterrarium.terrarium import LocalTerrariumService, TerrariumService
 from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.session.resume.images import MissingImagesPolicy
 from kohakuterrarium.terrarium.resume.resume import prepare_resume_workspace
 
 
@@ -187,6 +188,7 @@ class Studio:
         pwd: str | None = None,
         workspace_overrides: dict[str, str] | None = None,
         llm: str | None = None,
+        missing_images: MissingImagesPolicy = "warn",
     ) -> "Studio":
         """Construct a Studio from a saved session, adopted into a fresh engine."""
         prepare_resume_workspace(
@@ -201,6 +203,7 @@ class Studio:
                 pwd_override=pwd,
                 workspace_overrides=workspace_overrides,
                 llm=llm,
+                missing_images=missing_images,
             )
         except BaseException:
             await studio.shutdown()

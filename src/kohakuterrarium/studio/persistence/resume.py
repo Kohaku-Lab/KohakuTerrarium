@@ -16,6 +16,7 @@ from kohakuterrarium.session.migrations import (
     path_for_version,
 )
 from kohakuterrarium.session.resume.resume import _open_store_with_migration
+from kohakuterrarium.session.resume.images import MissingImagesPolicy
 from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
@@ -70,6 +71,8 @@ async def resume_session(
     workspace_overrides: dict[str, str] | None = None,
     llm: str | None = None,
     restore_runs: bool = True,
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> Session:
     """Adopt a saved session and register it with Studio lifecycle state.
 
@@ -92,6 +95,8 @@ async def resume_session(
         pwd=pwd_override,
         workspace_overrides=workspace_overrides,
         llm=llm,
+        missing_images=missing_images,
+        image_repair_confirmation=image_repair_confirmation,
     )
 
     # Lifecycle registries must contain resumed graphs so listing and lookup

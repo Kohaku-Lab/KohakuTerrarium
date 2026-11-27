@@ -3,16 +3,19 @@
 import asyncio
 import hashlib
 import json
+import os
+import stat
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.errors import ConflictError
+from kohakuterrarium.errors import ConflictError, InvalidRequestError, NotFoundError
 from kohakuterrarium.core.conversation.continuation import (
     live_branch_path,
     require_no_running_jobs,
 )
-from kohakuterrarium.llm.media.reference import file_reference_path
+from kohakuterrarium.llm.media.reference import file_reference_path, session_media_path
 from kohakuterrarium.session.history.replay import select_live_event_ids
 from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store.records.snapshot import (
@@ -41,8 +44,10 @@ class MissingHistoryImage:
 
     message_index: int
     part_index: int
-    turn_index: int
+    turn_index: int | None
     url: str
+    kind: str = "file"
+    repairable: bool = True
 
 
 def _pair(metadata: dict) -> tuple[int, int] | None:
@@ -58,10 +63,16 @@ def _pair(metadata: dict) -> tuple[int, int] | None:
     return None
 
 
-def missing_history_images(
-    messages: list[dict], events: list[dict], branch: dict[int, int], current_turn: int
+def inspect_history_images(
+    messages: list[dict],
+    events: list[dict],
+    branch: dict[int, int],
+    current_turn: int,
+    *,
+    session_path: str | Path | None = None,
+    include_completed_tip: bool = False,
 ) -> list[MissingHistoryImage]:
-    """Scan absent files in completed older live turns (requires blocking I/O)."""
+    """Report unavailable local references and whether each can be replaced."""
     live_ids = select_live_event_ids(events, branch_view=branch)
     ended, rejected = set(), set()
     origins: dict[str, set[tuple[int, int]]] = {}
@@ -81,9 +92,14 @@ def missing_history_images(
             rejected.add(key)
     eligible = ended - rejected
     found = []
+    availability: dict[str, tuple[str, bool] | None] = {}
     open_pair = None
     for index, message in enumerate(messages):
-        metadata = message.get("metadata") or {}
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
         pair = _pair(metadata)
         feedback = metadata.get("kind") == "tool_results"
         if message.get("role") == "user" and not feedback:
@@ -96,33 +112,111 @@ def missing_history_images(
             if (
                 metadata.get("origin_known") is False
                 or metadata.get("tool_result_phase") == "pending"
+                or not isinstance(identities, (list, tuple))
                 or not identities
                 or any(origins.get(str(identity)) != {pair} for identity in identities)
             ):
                 pair = None
-        if (
-            message.get("role") not in {"user", "tool"}
-            or pair is None
-            or not 0 < pair[0] < current_turn
-            or pair not in eligible
-            or not isinstance(message.get("content"), list)
-        ):
+        can_replace = (
+            message.get("role") in {"user", "tool"}
+            and pair is not None
+            and pair in eligible
+            and (
+                pair[0] < current_turn
+                or include_completed_tip
+                and pair[0] == current_turn
+            )
+        )
+        if not isinstance(message.get("content"), list):
             continue
         for part_index, part in enumerate(message["content"]):
             if not isinstance(part, dict) or part.get("type") != "image_url":
                 continue
             image = part.get("image_url")
             url = image.get("url") if isinstance(image, dict) else image
-            path = file_reference_path(url)
-            if path is None or not path.is_absolute():
+            if not isinstance(url, str):
                 continue
-            try:
-                path.stat()
-            except FileNotFoundError:
-                found.append(MissingHistoryImage(index, part_index, pair[0], url))
-            except OSError:
-                continue
+            if url not in availability:
+                availability[url] = _unavailable_image(url, session_path)
+            problem = availability[url]
+            if problem is not None:
+                kind, missing = problem
+                found.append(
+                    MissingHistoryImage(
+                        index,
+                        part_index,
+                        pair[0] if pair else None,
+                        url,
+                        kind,
+                        can_replace and missing,
+                    )
+                )
     return found
+
+
+def _unavailable_image(
+    url: str, session_path: str | Path | None
+) -> tuple[str, bool] | None:
+    if url.startswith("file://"):
+        path = file_reference_path(url)
+        if path is None or not path.is_absolute():
+            return "file", False
+        try:
+            return None if _readable_image_path(path) else ("file", False)
+        except FileNotFoundError:
+            return "file", True
+        except (OSError, ValueError):
+            return "file", False
+    if session_path is not None and url.startswith("/api/sessions/"):
+        try:
+            path = session_media_path(url, session_path=Path(session_path))
+            return None if path and _readable_image_path(path) else ("artifact", False)
+        except (NotFoundError, FileNotFoundError):
+            return "artifact", True
+        except (OSError, ValueError, InvalidRequestError):
+            return "artifact", False
+    return None
+
+
+def _readable_image_path(path: Path) -> bool:
+    return stat.S_ISREG(path.stat().st_mode) and os.access(path, os.R_OK)
+
+
+def missing_history_images(
+    messages: list[dict],
+    events: list[dict],
+    branch: dict[int, int],
+    current_turn: int,
+    *,
+    session_path: str | Path | None = None,
+) -> list[MissingHistoryImage]:
+    """Find repairable occurrences in completed older turns."""
+    return [
+        item
+        for item in inspect_history_images(
+            messages, events, branch, current_turn, session_path=session_path
+        )
+        if item.repairable
+    ]
+
+
+def replace_missing_images(
+    messages: list[dict], found: list[MissingHistoryImage]
+) -> list[dict]:
+    """Replace approved, repairable image parts on a detached conversation."""
+    repaired = deepcopy(messages)
+    for item in found:
+        if not item.repairable:
+            continue
+        repaired[item.message_index]["content"][item.part_index] = {
+            "type": "text",
+            "text": (
+                f"[Historical image unavailable: {item.url}. The local file is "
+                "missing. This request does not include the image. Ask the user "
+                "to provide it again if its contents are needed.]"
+            ),
+        }
+    return repaired
 
 
 async def repair_history_images(
@@ -149,7 +243,12 @@ async def repair_history_images(
         branch = live_branch_path(agent)
         turn = agent._turn_index
         found = await asyncio.to_thread(
-            missing_history_images, messages, events, branch, turn
+            missing_history_images,
+            messages,
+            events,
+            branch,
+            turn,
+            session_path=store.path,
         )
         agent._ensure_history_mutation_idle()
         require_no_running_jobs(agent)
@@ -182,18 +281,11 @@ async def repair_history_images(
             )
         if not found:
             return found, token
-        repaired = deepcopy(messages)
-        for item in found:
-            repaired[item.message_index]["content"][item.part_index] = {
-                "type": "text",
-                "text": (
-                    f"[Historical image unavailable: {item.url}. The local file is "
-                    "missing. This request does not include the image. Ask the user "
-                    "to provide it again if its contents are needed.]"
-                ),
-            }
+        repaired = replace_missing_images(messages, found)
         replacement = build_conversation(repaired)
-        save_agent_snapshot(store, agent.config.name, agent, repaired)
+        save_agent_snapshot(
+            store, agent.config.name, agent, repaired, preserve_other_paths=True
+        )
         store.flush()
         conversation.adopt_contents(replacement)
         return found, token

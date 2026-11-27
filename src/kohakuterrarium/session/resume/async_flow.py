@@ -19,6 +19,10 @@ from kohakuterrarium.session.resume.resume import (
     _rebuild_resumed_agent,
     inject_saved_state,
 )
+from kohakuterrarium.session.resume.images import (
+    MissingImagesPolicy,
+    apply_resume_image_policy,
+)
 from kohakuterrarium.session.resume.open import (
     open_store_with_migration as _open_store_with_migration,
     preflight_legacy_workspace,
@@ -102,6 +106,8 @@ async def resume_agent_async(
     input_module: InputModule | None = None,
     output_module: OutputModule | None = None,
     mark_conversation_open: bool = True,
+    missing_images: MissingImagesPolicy = "warn",
+    image_repair_confirmation: str | None = None,
 ) -> tuple[Agent, SessionStore]:
     """Async twin of :func:`resume_agent`; the caller owns the store.
 
@@ -116,6 +122,12 @@ async def resume_agent_async(
         _open_store_with_migration, session_path, writer_lock=True
     )
     try:
+        await store.run(
+            apply_resume_image_policy,
+            store,
+            missing_images,
+            confirmation=image_repair_confirmation,
+        )
         return await _resume_agent_from_open_store_async(
             store,
             session_path,

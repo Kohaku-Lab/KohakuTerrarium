@@ -8,20 +8,18 @@ from kohakuterrarium.session.store.events.counters import (
     EXACT_EVENT_ID_KEY,
     MAX_EVENT_ID_KEY,
 )
-from kohakuterrarium.session.store.records.resume_point import VERSION, text_messages
+from kohakuterrarium.session.store.records.resume_point import (
+    POINT_KEY,
+    VERSION,
+    text_messages,
+)
 from kohakuterrarium.session.store.records.snapshot import branch_path, load_records
 
 
 def prepare_clean_checkpoint(agent: Any, store: Any, namespace: str) -> dict | None:
     """Return a supported empty-tail checkpoint, or leave legacy restoration intact."""
-    point = getattr(store, "_resume_point", None)
-    if (
-        not isinstance(point, dict)
-        or type(point.get("version")) is not int
-        or point["version"] != VERSION
-    ):
-        return None
-    if store._resume_epoch != store._branch_maxima.invalidation_epoch:
+    record = verified_text_checkpoint(store, namespace)
+    if record is None:
         return None
     router = agent.output_router
     if (
@@ -40,6 +38,22 @@ def prepare_clean_checkpoint(agent: Any, store: Any, namespace: str) -> dict | N
             config.mcp_servers,
             config.output_wiring,
         )
+    ):
+        return None
+    store._branch_maxima.restore_upper_turn(namespace, max(record["selected"]))
+    return record
+
+
+def verified_text_checkpoint(store: Any, namespace: str) -> dict | None:
+    """Validate a text-only checkpoint without reading event payloads."""
+    point = getattr(store, "_resume_point", None)
+    if point is None and getattr(store, "_readonly", False):
+        point = store.state.get(POINT_KEY)
+    if (
+        not isinstance(point, dict)
+        or type(point.get("version")) is not int
+        or point["version"] != VERSION
+        or store._resume_epoch != store._branch_maxima.invalidation_epoch
     ):
         return None
     if (
@@ -96,5 +110,4 @@ def prepare_clean_checkpoint(agent: Any, store: Any, namespace: str) -> dict | N
         return None
     if not text_messages(record["messages"]):
         return None
-    store._branch_maxima.restore_upper_turn(namespace, point["max_turn"])
     return {**record, "selected": selected}

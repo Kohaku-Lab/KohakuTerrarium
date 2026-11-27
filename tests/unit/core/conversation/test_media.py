@@ -324,9 +324,9 @@ async def test_history_changed_during_the_scan_is_a_conflict(
     loop_thread = threading.get_ident()
     scan_threads = []
 
-    def scan_then_advance(*args):
+    def scan_then_advance(*args, **kwargs):
         scan_threads.append(threading.get_ident())
-        found = missing_history_images(*args)
+        found = missing_history_images(*args, **kwargs)
         agent._turn_index += 1
         return found
 

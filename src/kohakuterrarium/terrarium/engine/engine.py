@@ -26,6 +26,7 @@ import kohakuterrarium.terrarium.recipe.loader as _recipe
 import kohakuterrarium.terrarium.recipe.identity as _recipe_identity
 import kohakuterrarium.terrarium.recipe.transaction as _recipe_transaction
 import kohakuterrarium.terrarium.resume.resume as _resume
+from kohakuterrarium.session.resume.images import MissingImagesPolicy
 import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.graph.topology as _topo
 import kohakuterrarium.terrarium.wiring.wiring as _wiring
@@ -166,6 +167,8 @@ class Terrarium:
         drive_config: Any = None,
         drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
         drive_store: Any = None,
+        missing_images: MissingImagesPolicy = "warn",
+        image_repair_confirmation: str | None = None,
     ) -> "Terrarium":
         """Preflight and adopt a saved session into a fresh engine.
 
@@ -179,6 +182,8 @@ class Terrarium:
             drive_config=drive_config,
             drive_registrations=drive_registrations,
             drive_store=drive_store,
+            missing_images=missing_images,
+            image_repair_confirmation=image_repair_confirmation,
         )
 
     async def adopt_session(
@@ -189,9 +194,16 @@ class Terrarium:
         workspace_overrides: dict[str, str] | None = None,
         llm: Any = None,
         io: str = "none",
+        missing_images: MissingImagesPolicy = "warn",
+        image_repair_confirmation: str | None = None,
     ) -> str:
         """Adopt a saved session; ``io='headless'`` also silences default output."""
-        kwargs = {"pwd": pwd, "llm": llm}
+        kwargs = {
+            "pwd": pwd,
+            "llm": llm,
+            "missing_images": missing_images,
+            "image_repair_confirmation": image_repair_confirmation,
+        }
         if io != "none":
             kwargs["io"] = io
         if workspace_overrides is not None:

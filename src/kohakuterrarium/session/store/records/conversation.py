@@ -41,6 +41,7 @@ class ConversationRecordsMixin:
         branch: dict | None,
         watermark: int,
         compact_state: dict | None = None,
+        preserve_other_paths: bool = False,
     ) -> None:
         """Save a branch-local checkpoint alongside the latest conversation."""
         save_branch_snapshot(
@@ -50,6 +51,7 @@ class ConversationRecordsMixin:
             branch=branch,
             watermark=watermark,
             compact_state=compact_state,
+            preserve_other_paths=preserve_other_paths,
         )
 
     def load_branch_snapshot(

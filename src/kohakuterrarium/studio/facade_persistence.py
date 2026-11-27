@@ -113,6 +113,7 @@ class _PersistenceNS:
         pwd_override: str | None = None,
         workspace_overrides: dict[str, str] | None = None,
         llm: str | None = None,
+        missing_images: _persistence_resume.MissingImagesPolicy = "warn",
     ) -> _session_handles.Session:
         return await _persistence_resume.resume_session(
             self._studio._service,
@@ -120,6 +121,7 @@ class _PersistenceNS:
             pwd_override=pwd_override,
             workspace_overrides=workspace_overrides,
             llm=llm,
+            missing_images=missing_images,
         )
 
     def announce_migration(self, path: Path) -> None:

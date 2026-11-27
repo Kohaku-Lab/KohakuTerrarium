@@ -38,6 +38,7 @@ from kohakuterrarium.session.resume.branch import (
     replayed_messages_for,
     snapshot_has_turn_metadata,
     snapshot_mismatches_branch,
+    snapshot_mismatches_path,
     snapshot_needs_settled_tool_replay,
 )
 from kohakuterrarium.session.resume.build import (
@@ -217,6 +218,34 @@ def _load_conversation_result(
     return _LoadedConversation(snapshot)
 
 
+def final_resume_history(
+    store: SessionStore,
+    namespace: str,
+    events: list[dict],
+    prepared: dict | None,
+    selected: dict[int, int],
+) -> list[dict] | None:
+    """Load the selected branch, including any replay needed after the snapshot."""
+    loaded = _load_conversation_result(store, namespace, events, prepared)
+    if prepared is not None:
+        return loaded.messages
+    persisted = load_persisted_branch_view(store, namespace)
+    if not (
+        snapshot_mismatches_path(store, namespace, sorted(selected.items()))
+        or snapshot_needs_settled_tool_replay(
+            events, persisted, snapshot=loaded.messages
+        )
+    ):
+        return loaded.messages
+    replay_view = persisted if events else None
+    if loaded.full_replay and loaded.branch_view == replay_view:
+        return loaded.messages
+    return (
+        replayed_messages_for(store, namespace, events, branch_view=replay_view)
+        or loaded.messages
+    )
+
+
 def _restore_turn_branch_state(
     agent,
     store: SessionStore,
@@ -360,7 +389,6 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     else:
         _restore_turn_branch_state(agent, store, agent_name, events)
 
-    # Repair a mismatched snapshot or a missing completed ancestor tool result.
     persisted = load_persisted_branch_view(store, agent_name)
     if prepared is None and (
         snapshot_mismatches_branch(store, agent, agent_name)
