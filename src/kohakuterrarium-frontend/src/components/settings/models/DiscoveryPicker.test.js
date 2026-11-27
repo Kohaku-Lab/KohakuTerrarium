@@ -156,6 +156,50 @@ describe("provider model discovery", () => {
     await freshRow.trigger("click")
     expect(wrapper.emitted("pick")).toEqual([[fresh.preset]])
   })
+  it("searches the actual target of an override and opens a specific saved alias", async () => {
+    const manual = (name, model) => ({
+      provider: "m",
+      source: "user",
+      name,
+      model,
+      max_context: 262144,
+    })
+    const presets = [manual("x", "local/model"), manual("fast", "shared"), manual("long", "shared")]
+    settingsAPI.discoverModels.mockResolvedValueOnce({
+      models: ["x", "shared"].map((id) => ({
+        id,
+        name: id,
+        context_window: 1000000,
+        reasoning_levels: ["high"],
+        preset: { name: id, model: id, provider: "m" },
+      })),
+    })
+    const wrapper = mount(DiscoveryPicker, {
+      props: {
+        modelValue: true,
+        backends: [{ name: "m", model_discovery: true, available: true }],
+        presets,
+      },
+      global: { stubs },
+    })
+    await flushPromises()
+    const input = wrapper.findComponent(stubs.ElInput)
+    input.vm.$emit("update:modelValue", "local/model")
+    await flushPromises()
+    expect(wrapper.findAll("button.w-full")).toHaveLength(1)
+    const override = wrapper.get("button.w-full")
+    expect(override.text()).toContain("local/model")
+    expect(override.find("[data-reasoning-levels]").exists()).toBe(false)
+    input.vm.$emit("update:modelValue", "shared")
+    await flushPromises()
+    const aliases = wrapper.findAll("button.w-full")
+    expect(aliases).toHaveLength(2)
+    await aliases.find((row) => row.text().includes("long")).trigger("click")
+    expect(wrapper.emitted("existing")).toEqual([[{ provider: "m", name: "long" }]])
+    expect(wrapper.emitted("pick")).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it("shows cached rows at once on provider switch and reopen, and revalidates only after the TTL", async () => {
     vi.useFakeTimers({ toFake: ["Date"] })
     vi.setSystemTime(new Date("2026-11-26T10:00:00Z"))

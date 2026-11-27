@@ -1,15 +1,27 @@
 import { computed, ref, shallowRef, watch } from "vue"
 
-import { loadProviderModels, providerModelsEntry } from "../../utils/providerModels.js"
+import {
+  bindProviderPresets,
+  loadProviderModels,
+  providerModelsEntry,
+} from "../../utils/providerModels.js"
 
 // Discovery is an optional host capability. Only the provider being viewed
 // contacts its upstream, and only an explicit save can create a preset.
 // Catalogs come from the shared provider-models cache: cached rows show at
 // once and a stale list revalidates in the background.
-export function useSwitcherCatalog(api, open, provider) {
+export function useSwitcherCatalog(inventory, open, provider) {
+  const { catalog: api, models: presets, hasLoaded } = inventory
   const providers = ref([])
   const entry = shallowRef(null)
-  const rows = computed(() => entry.value?.rows.value || [])
+  const rows = computed(() =>
+    bindProviderPresets(
+      entry.value?.rows.value || [],
+      presets.value,
+      provider.value,
+      hasLoaded?.value,
+    ),
+  )
   const busy = computed(() => Boolean(entry.value?.loading.value && !entry.value.hasLoaded.value))
   const error = computed(() =>
     entry.value?.failed.value
@@ -18,7 +30,18 @@ export function useSwitcherCatalog(api, open, provider) {
   )
   const fetchedAt = computed(() => entry.value?.fetchedAt.value || "")
   const providersError = ref("")
-  const showSaved = ref(false)
+  const sourceOverride = ref(null)
+  const showSaved = computed({
+    get: () =>
+      sourceOverride.value ??
+      (hasLoaded?.value === false ||
+        presets.value.some(
+          (p) => (p.provider || p.login_provider) === provider.value && p.source === "user",
+        )),
+    set: (saved) => {
+      sourceOverride.value = saved
+    },
+  })
   const selectedId = ref("")
   const refreshIndex = ref(0)
   const retryProviders = ref(0)
@@ -51,9 +74,9 @@ export function useSwitcherCatalog(api, open, provider) {
   )
 
   watch(
-    [open, provider],
+    open,
     () => {
-      showSaved.value = false
+      sourceOverride.value = null
     },
     { flush: "sync" },
   )
@@ -89,6 +112,7 @@ export function useSwitcherCatalog(api, open, provider) {
     refresh() {
       if (providersError.value) retryProviders.value++
       else refreshIndex.value++
+      return entry.value?.inFlight
     },
   }
 }

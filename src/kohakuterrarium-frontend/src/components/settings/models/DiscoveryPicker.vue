@@ -17,13 +17,14 @@
       ></el-input>
       <div class="kt-v2-card overflow-y-auto max-h-72 divide-y divide-[var(--v2-line)]" :aria-busy="busy">
         <p v-if="busy || error || !matches.length" class="px-4 py-6 text-center kt-text-body" role="status">{{ busy ? t("discovery.loading") : error || t(query ? "settings.models.noMatch" : "discovery.empty") }}</p>
-        <button v-for="row in matches.slice(0, limit)" :key="row.id" type="button" class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-iolite/10 focus-visible:bg-iolite/10" @click="choose(row)">
+        <button v-for="row in matches.slice(0, limit)" :key="JSON.stringify([row.id, row.preset?.name])" type="button" class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-iolite/10 focus-visible:bg-iolite/10" @click="choose(row)">
           <span class="min-w-0 flex-1 flex flex-col gap-0.5">
             <span class="flex items-center gap-1.5 min-w-0">
-              <strong class="truncate kt-text-body">{{ row.name || row.id }}</strong>
+              <strong class="truncate kt-text-body">{{ row.preset?.model && row.preset.model !== row.id ? row.preset.name : row.name || row.id }}</strong>
               <span v-if="typeof row.has_preset === 'boolean'" class="shrink-0" :class="row.has_preset ? 'chip-aqua' : 'chip-iolite'" :data-preset-badge="row.has_preset ? 'existing' : 'new'">{{ t(row.has_preset ? "discovery.hasPreset" : "discovery.newPreset") }}</span>
             </span>
-            <span v-if="row.name && row.name !== row.id" class="block truncate kt-text-caption font-mono text-warm-500">{{ row.id }}</span>
+            <span v-if="row.preset?.model && row.preset.model !== row.id" class="block truncate kt-text-caption font-mono text-warm-500">{{ row.preset.model }}</span>
+            <span v-else-if="row.name && row.name !== row.id" class="block truncate kt-text-caption font-mono text-warm-500">{{ row.id }}</span>
             <span v-if="row.reasoning_levels?.length" class="flex flex-wrap items-center gap-1" :title="row.reasoning_levels.join(', ')" data-reasoning-levels>
               <span class="kt-text-caption text-warm-500 mr-0.5">{{ t("discovery.reasoning") }}</span>
               <span v-for="level in row.reasoning_levels.slice(0, LEVELS_SHOWN)" :key="level" class="px-1.5 rounded border border-warm-200 dark:border-warm-700 text-[10px] leading-4 font-mono text-warm-600 dark:text-warm-300" data-reasoning-level>{{ level }}</span>
@@ -47,16 +48,21 @@ import KButton from "@/components/common/ActionButton.vue"
 import { formatCount } from "@/components/settings/models/presetModel"
 import { settingsAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
-import { loadProviderModels, providerModelsEntry } from "@/utils/providerModels"
-const props = defineProps({ modelValue: Boolean, backends: { type: Array, default: () => [] } })
-const emit = defineEmits(["update:modelValue", "pick", "configure"])
+import { bindProviderPresets, loadProviderModels, providerModelsEntry } from "@/utils/providerModels"
+const props = defineProps({ modelValue: Boolean, presets: { type: Array, default: () => [] }, backends: { type: Array, default: () => [] } })
+const emit = defineEmits(["update:modelValue", "pick", "existing", "configure"])
 const { t } = useI18n()
 const LEVELS_SHOWN = 6
 const limit = ref(50)
 const provider = ref(""),
   query = ref(""),
   entry = shallowRef(null)
-const rows = computed(() => entry.value?.rows.value || [])
+const rows = computed(() =>
+  bindProviderPresets(entry.value?.rows.value || [], props.presets, provider.value).flatMap((row) => {
+    if (!row.preset_choices?.length) return row
+    return row.preset_choices.map((name) => ({ ...row, name, preset: { ...row.preset, name } }))
+  }),
+)
 const loading = computed(() => Boolean(entry.value?.loading.value))
 const busy = computed(() => loading.value && !entry.value.hasLoaded.value)
 const error = computed(() => (entry.value?.failed.value ? entry.value.errorDetail.value || t("discovery.failed") : ""))
@@ -64,7 +70,7 @@ const fetchedAt = computed(() => entry.value?.fetchedAt.value || "")
 const available = computed(() => props.backends.filter((b) => b.model_discovery))
 const matches = computed(() => {
   const needle = query.value.trim().toLowerCase()
-  return rows.value.filter((row) => (row.id + " " + row.name).toLowerCase().includes(needle))
+  return rows.value.filter((row) => [row.id, row.name, row.preset?.name, row.preset?.model].join(" ").toLowerCase().includes(needle))
 })
 watch([query, provider, () => props.modelValue], () => {
   limit.value = 50
@@ -98,7 +104,8 @@ watch(
   { immediate: true },
 )
 function choose(row) {
-  emit("pick", row.preset)
+  if (row.has_preset && row.preset?.name) emit("existing", { provider: provider.value, name: row.preset.name })
+  else emit("pick", row.preset)
   emit("update:modelValue", false)
 }
 </script>

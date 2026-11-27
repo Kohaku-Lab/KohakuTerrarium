@@ -45,6 +45,12 @@ controller:
 kt run path/to/creature --llm gpt-5.4
 ```
 
+网页版和桌面版的模型切换器会优先显示当前 provider 下用户保存的 **Saved presets**。点 **Provider models** 可以查看远端目录。切换到另一个支持该页签的 provider 时，会保留刚才手动选择的页签。远端目录离线时，手动 preset 仍可查看。
+
+同一 provider 下，如果目录建议的名称与手动 preset 重名，切换时会使用手动配置的实际模型和参数。同一模型 ID 可以有多个别名，在 **Saved presets** 中可按名称选择不同的上下文长度或 variations。
+
+如果重名时还想保留目录里的原始模型，在 **设置 → 模型 → 新增 → 空白预设** 中选同一个 provider，另取一个名称，模型 ID 填目录里的原值。保存后，就能在 **Saved presets** 中按名称切换这两个模型。
+
 如果想全部写死在 config 里、不要 profile 档，就用 `model` + `api_key_env` + `base_url`：
 
 ```yaml

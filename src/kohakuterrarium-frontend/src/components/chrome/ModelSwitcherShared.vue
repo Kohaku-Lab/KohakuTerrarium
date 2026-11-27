@@ -49,12 +49,21 @@
             <div v-else class="model-switcher-heading">Saved presets</div>
             <div :id="`${uid}-list`" :key="[draftProvider, showCatalog].join('/')" :role="catalogBackend ? 'tabpanel' : 'region'" :aria-label="showCatalog ? 'Provider models' : 'Saved presets'" class="min-h-0 flex-1 overflow-y-auto">
               <div v-if="providersError" class="text-warm-500 text-[11px] p-2" role="status">{{ providersError }}</div>
+              <div v-if="inventoryError" class="text-coral text-[11px] p-2" role="alert">Could not load saved presets: {{ inventoryError }}</div>
               <template v-if="showCatalog">
                 <div v-if="!catalogBackend.available && filteredCatalog.length" class="text-warm-500 text-[11px] p-2">Configure this provider in Settings to switch models.</div>
-                <button v-for="row in filteredCatalog.slice(0, catalogLimit)" :key="row.id" type="button" class="model-row" :class="{ 'is-active': selectedId === row.id }" @click="selectedId = row.id">
-                  <span class="font-medium text-[12px] truncate">{{ row.name || row.id }}</span>
-                  <span v-if="row.name && row.name !== row.id" class="text-[10px] text-warm-400 font-mono truncate">{{ row.id }}</span>
-                </button>
+                <template v-for="row in filteredCatalog.slice(0, catalogLimit)" :key="row.id">
+                  <button type="button" class="model-row" :class="{ 'is-active': selectedId === row.id }" @click="row.stalePreset ? refreshCatalogSelection() : (selectedId = row.id)">
+                    <span class="font-medium text-[12px] truncate">{{ row.preset?.model && row.preset.model !== row.id ? row.preset.name : row.name || row.id }}</span>
+                    <span v-if="row.stalePreset" class="text-[10px] text-warm-500">Refresh saved preset</span>
+                    <span v-else-if="row.preset?.model && row.preset.model !== row.id" class="text-[10px] text-warm-400 font-mono truncate">{{ row.preset.model }}</span>
+                    <span v-else-if="row.name && row.name !== row.id" class="text-[10px] text-warm-400 font-mono truncate">{{ row.id }}</span>
+                  </button>
+                  <div v-if="selectedId === row.id && row.preset_choices?.length" class="px-2 py-1.5 flex items-center flex-wrap gap-1">
+                    <span class="text-[11px] text-warm-500">Choose a saved preset</span>
+                    <button v-for="name in row.preset_choices" :key="name" type="button" class="variation-chip" @click="selectSavedAlias(name)">{{ name }}</button>
+                  </div>
+                </template>
                 <button v-if="filteredCatalog.length > catalogLimit" type="button" class="variation-chip" @click="catalogLimit += 50">Show more models ({{ filteredCatalog.length - catalogLimit }})</button>
                 <div v-if="catalogBusy || catalogError || !filteredCatalog.length" class="text-warm-500 text-[11px] p-2" role="status">
                   {{ catalogBusy ? "Loading provider models…" : catalogError || "No matching provider models." }}
@@ -67,11 +76,9 @@
                     <span v-if="preset.is_default" class="text-[9px] px-1 rounded bg-iolite/20 text-iolite uppercase shrink-0"> default </span>
                     <span v-if="hasVariations(preset)" class="text-[9px] text-warm-400 shrink-0"> {{ Object.keys(preset.variation_groups).length }} opts </span>
                   </div>
-                  <div class="text-[10px] text-warm-400 font-mono truncate w-full">
-                    {{ preset.model }}
-                  </div>
+                  <div class="text-[10px] text-warm-400 font-mono truncate w-full">{{ preset.model }}<span v-if="preset.provider_missing"> · Provider missing</span></div>
                 </button>
-                <div v-if="!filteredPresets.length" class="text-warm-400 text-[11px] italic p-2 text-center">No matching presets.</div>
+                <div v-if="!filteredPresets.length && !inventoryError" class="text-warm-400 text-[11px] italic p-2 text-center">{{ loading ? "Loading saved presets…" : "No matching presets." }}</div>
               </template>
             </div>
           </div>
@@ -111,7 +118,7 @@
           </div>
           <div class="flex items-center gap-2 justify-end shrink-0">
             <el-button size="small" @click="popoverVisible = false">Cancel</el-button>
-            <el-button size="small" type="primary" :disabled="!canPickModel || applying || !draftSelector || isCurrent(draftSelector) || contextInvalid || (showCatalog && !catalogBackend.available)" :loading="applying" @click="applySelection">{{ needsSave ? "Save & switch" : "Switch" }}</el-button>
+            <el-button size="small" type="primary" :disabled="!canPickModel || applying || !draftSelector || isCurrent(draftSelector) || contextInvalid || draftPresetData?.provider_missing || (showCatalog && !catalogBackend.available)" :loading="applying" @click="applySelection">{{ needsSave ? "Save & switch" : "Switch" }}</el-button>
           </div>
         </div>
       </div>
@@ -141,7 +148,7 @@ import { useSwitcherCatalog } from "./useSwitcherCatalog"
 // VS Code webview build, which installs no component resolver.
 const ctx = useModelSwitcherContext()
 
-const { models, initialLoading: loading, refreshing, ensureLoaded: loadModels, revalidateIfStale, refresh: refreshModels } = ctx.inventory
+const { models, initialLoading: loading, refreshing, error: inventoryError, ensureLoaded: loadModels, revalidateIfStale, refresh: refreshModels } = ctx.inventory
 
 const isTerrarium = ctx.isTerrarium
 const targetOptions = ctx.targetOptions
@@ -167,7 +174,7 @@ const drawerSize = computed(() => (isCompact.value ? "85%" : "min(640px, 90vw)")
 const draftProvider = ref("")
 const draftPreset = ref("")
 const draftSelections = reactive({})
-const catalog = useSwitcherCatalog(ctx.inventory.catalog, popoverVisible, draftProvider)
+const catalog = useSwitcherCatalog(ctx.inventory, popoverVisible, draftProvider)
 const catalogLimit = ref(50)
 watch([draftProvider, searchQuery, popoverVisible], () => {
   catalogLimit.value = 50
@@ -175,13 +182,19 @@ watch([draftProvider, searchQuery, popoverVisible], () => {
 const { backend: catalogBackend, visible: showCatalog, showSaved, selectedId, busy: catalogBusy, error: catalogError, providersError } = catalog
 const filteredCatalog = computed(() => {
   const q = searchQuery.value.toLowerCase().trim()
-  return catalog.rows.value.filter((row) => [row.name, row.id, draftProvider.value].some((s) => s?.toLowerCase().includes(q)))
+  return catalog.rows.value.filter((row) => [row.name, row.id, row.preset?.name, row.preset?.model, ...(row.preset_choices || []), draftProvider.value].some((s) => s?.toLowerCase().includes(q)))
 })
-const savedCatalogPreset = computed(() => {
-  const row = catalog.selected.value
-  return row && models.value.find((p) => (p.provider || p.login_provider) === draftProvider.value && p.name === row.preset.name && p.model === row.id)
-})
-const needsSave = computed(() => showCatalog.value && catalog.selected.value && !savedCatalogPreset.value)
+const needsSave = computed(() => showCatalog.value && catalog.selected.value && !catalog.selected.value.has_preset)
+async function selectSavedAlias(name) {
+  searchQuery.value = ""
+  showSaved.value = true
+  selectPreset(name)
+  if (!draftPresetData.value) {
+    await refreshModels()
+    if (draftPreset.value === name && !draftPresetData.value) ElMessage.error("Saved preset unavailable. Refresh the provider list.")
+  }
+  syncDraftChoices()
+}
 
 const currentParsed = computed(() => parseSelector(currentModel.value))
 const currentLabel = computed(() => {
@@ -238,7 +251,7 @@ const filteredPresets = computed(() => {
     .filter((m) => (m.provider || m.login_provider) === draftProvider.value)
     .filter((m) => {
       if (!query) return true
-      return `${m.name} ${m.model}`.toLowerCase().includes(query)
+      return `${m.name} ${m.model} ${draftProvider.value}`.toLowerCase().includes(query)
     })
     .sort((a, b) => {
       if (a.available !== b.available) return a.available ? -1 : 1
@@ -256,7 +269,12 @@ const filteredPresets = computed(() => {
 // variation panel instead of silently displaying the wrong provider's
 // data.
 const draftPresetData = computed(() => {
-  if (showCatalog.value) return savedCatalogPreset.value || catalog.selected.value?.preset
+  if (showCatalog.value) {
+    const row = catalog.selected.value
+    if (!row?.preset_choices?.length) return row?.preset
+    const current = currentPreset.value
+    return current && providerOf(current) === draftProvider.value && current.model === row.id && row.preset_choices.includes(current.name) ? current : null
+  }
   const provider = draftProvider.value
   const name = draftPreset.value
   if (!name) return null
@@ -312,7 +330,7 @@ const draftDefaultContext = computed(() => {
   return draft.max_context || 0
 })
 const draftContextWindow = computed(() => {
-  const own = draftPresetData.value?.context_window || (showCatalog.value ? catalog.selected.value?.context_window : null)
+  const own = draftPresetData.value?.context_window || (showCatalog.value && draftPresetData.value?.model === selectedId.value ? catalog.selected.value?.context_window : null)
   if (own) return own
   return (sameAsCurrent.value && toValue(ctx.currentContextWindow)) || null
 })
@@ -320,7 +338,7 @@ const contextDraft = useContextDraft(draftDefaultContext, draftContextWindow)
 const { text: contextInput, pinned: contextPinned, value: contextValue, invalid: contextInvalid, exceeds: contextExceeds, window: contextWindow, suggestions: contextSuggestions, placeholder: contextPlaceholder } = contextDraft
 
 const draftSelector = computed(() => {
-  const name = showCatalog.value ? draftPresetData.value?.name : draftPreset.value
+  const name = draftPresetData.value?.name
   const selector = joinSelector(draftProvider.value, name, draftSelections)
   return contextClash.value ? selector : withContext(selector, contextDraft.override.value)
 })
@@ -357,7 +375,8 @@ const providerOf = (preset) => preset.provider || preset.login_provider || ""
 const currentPreset = computed(() => {
   const { provider, name } = currentParsed.value
   if (!name) return null
-  return (provider && models.value.find((m) => providerOf(m) === provider && m.name === name)) || models.value.find((m) => m.name === name) || models.value.find((m) => m.model === name) || null
+  if (provider) return models.value.find((m) => providerOf(m) === provider && m.name === name) || null
+  return models.value.find((m) => m.name === name) || models.value.find((m) => m.model === name) || null
 })
 
 function isCurrentPreset(entry) {
@@ -377,8 +396,8 @@ function syncDraftChoices() {
 }
 
 function resetDraftFromCurrent() {
-  const matched = currentPreset.value || models.value[0]
-  draftProvider.value = matched ? providerOf(matched) : providerOptions.value[0]?.name || ""
+  const matched = currentPreset.value || (!currentParsed.value.provider && models.value[0])
+  draftProvider.value = matched ? providerOf(matched) : currentParsed.value.provider || providerOptions.value[0]?.name || ""
   draftPreset.value = matched?.name || ""
   if (!syncDraftChoices()) contextDraft.start("")
 }
@@ -405,7 +424,7 @@ function selectPreset(name) {
 watch(
   selectedId,
   (id) => {
-    if (id) Object.keys(draftSelections).forEach((k) => delete draftSelections[k])
+    if (id) syncDraftChoices()
   },
   { flush: "sync" },
 )
@@ -415,7 +434,7 @@ watch(showSaved, syncDraftChoices, { flush: "sync" })
 watch(catalog.rows, (rows) => {
   const entry = currentPreset.value
   if (!showCatalog.value || selectedId.value || !entry || providerOf(entry) !== draftProvider.value) return
-  const row = rows.find((r) => r.id === entry.model && r.preset?.name === entry.name)
+  const row = rows.find((r) => (r.preset_choices?.length ? r.id === entry.model && r.preset_choices.includes(entry.name) : r.preset?.model === entry.model && r.preset?.name === entry.name))
   if (!row) return
   selectedId.value = row.id
   syncDraftChoices()
@@ -446,11 +465,18 @@ function reconcileDraft() {
   }
 }
 
+async function refreshCatalogSelection() {
+  selectedId.value = ""
+  await Promise.all([refreshModels(), catalog.refresh()])
+}
+
 async function refreshInventory() {
-  if (showCatalog.value || providersError.value) {
-    catalog.refresh()
+  if (showCatalog.value) {
+    if (catalog.selected.value?.stalePreset) await refreshCatalogSelection()
+    else catalog.refresh()
     return
   }
+  if (providersError.value) catalog.refresh()
   await refreshModels()
   reconcileDraft()
 }
@@ -460,20 +486,32 @@ function onPickTarget(target) {
   ctx.selectTarget(target)
 }
 
+async function saveCatalogSelection(row) {
+  // Keep this catalog selection while the refresh adds the first saved preset.
+  showSaved.value = false
+  const owner = selectionVersion
+  try {
+    await ctx.inventory.catalog.saveProfile({ ...row.preset, create_only: true, catalog_model_id: row.id })
+  } catch (err) {
+    if (owner !== selectionVersion) return false
+    if (err?.response?.status !== 409) throw err
+    ElMessage.warning("Saved presets changed. Choose a preset again to switch.")
+    await refreshCatalogSelection()
+    return false
+  }
+  if (owner !== selectionVersion) return false
+  await refreshModels()
+  return owner === selectionVersion
+}
+
 async function applySelection() {
   const modelName = draftSelector.value
-  if (!canPickModel.value || applying.value || !modelName || isCurrent(modelName) || contextInvalid.value || (showCatalog.value && !catalogBackend.value.available)) return
+  if (!canPickModel.value || applying.value || !modelName || isCurrent(modelName) || contextInvalid.value || draftPresetData.value?.provider_missing || (showCatalog.value && !catalogBackend.value.available)) return
   const target = selectedTarget.value
   const wasTerrarium = isTerrarium.value
   applying.value = true
   try {
-    if (needsSave.value) {
-      const owner = selectionVersion
-      await ctx.inventory.catalog.saveProfile({ ...catalog.selected.value.preset, create_only: true })
-      if (owner !== selectionVersion) return
-      await refreshModels()
-      if (owner !== selectionVersion) return
-    }
+    if (needsSave.value && !(await saveCatalogSelection(catalog.selected.value))) return
     // The host context owns the route/session/target resolution and state
     // update; it returns the canonical ``provider/name[@variations]`` the
     // backend accepted so the pill matches what ``/model`` would show.

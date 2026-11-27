@@ -7,10 +7,11 @@ canonical profile identity is ``(provider, name)``.
 
 from typing import Any
 
-from kohakuterrarium.llm.discovery import DiscoveredModel, suggested_presets
+from kohakuterrarium.llm.discovery import DiscoveredModel
 from kohakuterrarium.llm.profiles.resolve import (
     create_preset,
     LLMPreset,
+    PresetAlreadyExists,
     _get_preset_definition,
     delete_profile,
     get_default_model,
@@ -47,6 +48,11 @@ def list_profiles_payload() -> list[dict[str, Any]]:
                 presets[key].variation_groups if key in presets else {}
             ),
             "selected_variations": p.selected_variations or {},
+            **(
+                {"provider_missing": True, "available": False}
+                if not p.backend_type
+                else {}
+            ),
         }
         for key, p in profiles.items()
     ]
@@ -90,17 +96,25 @@ def save_profile_record(
     context_aliases: dict[str, int] | None = None,
     *,
     create_only: bool = False,
+    catalog_model_id: str | None = None,
 ) -> LLMPreset:
     """Validate and persist a preset, raising ``ValueError`` for bad input.
 
     An omitted ``context_window`` keeps the one the stored or built-in preset has;
     so do its context aliases and a legacy ``context`` group it was folded from.
+    A create-only catalog save conflicts if another client saved a matching alias.
     """
     if not name or not model or not provider:
         raise ValueError("Name, model, and provider are required")
+    if catalog_model_id is not None and (
+        not create_only or not catalog_model_id.strip() or catalog_model_id != model
+    ):
+        raise ValueError(
+            "A catalog save requires create_only and its original model ID"
+        )
     if provider not in load_backends():
         raise ValueError(f"Provider not found: {provider}")
-    stored = _get_preset_definition(name, provider)
+    stored = None if create_only else _get_preset_definition(name, provider)
     if context_window is None:
         context_window = stored.context_window if stored else None
     preset = LLMPreset(
@@ -120,7 +134,14 @@ def save_profile_record(
     )
     preset.inherit_context_fold(stored)
     if create_only:
-        return create_preset(preset)[0]
+        result, created = create_preset(
+            preset, reuse_model=catalog_model_id is not None
+        )
+        if not created:
+            raise PresetAlreadyExists(
+                "A matching preset now exists. Refresh and choose the saved preset."
+            )
+        return result
     save_profile(preset)
     return preset
 
@@ -129,12 +150,7 @@ def save_discovered_model(
     provider: str, model: DiscoveredModel
 ) -> tuple[LLMPreset, bool]:
     """Reuse a scoped preset, or create a new one with the discovered defaults."""
-    (draft,) = suggested_presets(provider, [model])
-    # Match the editable preset form defaults when the catalog omits limits.
-    return create_preset(
-        LLMPreset(**{"max_context": 128000, "max_output": 16384, **draft}),
-        reuse_model=True,
-    )
+    return create_preset(model, provider=provider)
 
 
 def remove_profile(name: str, provider: str = "") -> bool:

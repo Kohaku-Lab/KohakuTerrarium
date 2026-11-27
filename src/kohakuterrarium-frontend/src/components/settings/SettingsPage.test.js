@@ -1,7 +1,7 @@
 import { flushPromises, shallowMount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
-import ElementPlus, { ElMessage } from "element-plus"
+import ElementPlus, { ElMessage, ElMessageBox } from "element-plus"
 
 vi.mock("@/utils/api", () => {
   const settingsAPI = {
@@ -9,6 +9,7 @@ vi.mock("@/utils/api", () => {
     writeConfigFile: vi.fn(),
     getKeys: vi.fn(),
     saveKey: vi.fn(),
+    deleteProfile: vi.fn(),
     getAntigravityStatus: vi.fn(),
     getGrokStatus: vi.fn(),
     getBackends: vi.fn(),
@@ -40,6 +41,8 @@ vi.mock("@/utils/i18n", () => ({
 import SettingsPage from "./SettingsPage.vue"
 import SettingsTab from "@/components/shell/tabs/SettingsTab.vue"
 import { useTabsStore } from "@/stores/tabs"
+import { useHostsStore } from "@/stores/hosts"
+import ModelsSection from "./sections/ModelsSection.vue"
 import { useDensity } from "@/composables/useDensity"
 import {
   registerSettingsSection,
@@ -105,6 +108,48 @@ describe("SettingsPage model presets", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it("isolates saved presets, drafts and pending deletes when switching hosts", async () => {
+    const hosts = useHostsStore()
+    const first = hosts.addHost({ name: "First", url: "https://first.example" })
+    const second = hosts.addHost({ name: "Second", url: "https://second.example" })
+    hosts.setActive(first)
+    const preset = { source: "user", name: "fast", provider: "gateway", model: "first-model" }
+    configAPI.getModels.mockImplementation(async () => {
+      if (hosts.activeHostId === second) throw new Error("second host offline")
+      return [preset]
+    })
+    vi.spyOn(ElMessage, "error").mockImplementation(() => {})
+    const confirmation = Promise.withResolvers()
+    vi.spyOn(ElMessageBox, "confirm").mockReturnValue(confirmation.promise)
+    selectSection("models")
+    const wrapper = shallowMount(SettingsTab, {
+      props: { tab: { id: "settings", kind: "settings" } },
+      global: {
+        stubs: {
+          SettingsPage: false,
+          SettingsLayout: { template: "<div><slot /></div>" },
+          SectionShell: { template: "<section><slot /></section>" },
+          ModelsSection: false,
+        },
+      },
+    })
+    await flushPromises()
+    const firstModels = wrapper.getComponent(ModelsSection).vm.models
+    expect(firstModels.presets.value).toEqual([preset])
+    firstModels.select(preset)
+    const pendingDelete = firstModels.remove(preset)
+    hosts.setActive(second)
+    await flushPromises()
+    const secondModels = wrapper.getComponent(ModelsSection).vm.models
+    expect(secondModels.presets.value).toEqual([])
+    expect(secondModels.editing.value).toBeNull()
+    expect(secondModels.open.value).toBe(false)
+    confirmation.resolve("confirm")
+    await pendingDelete
+    expect(settingsAPI.deleteProfile).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it("requires a successful image-context load before saving an edited count", async () => {

@@ -1,4 +1,4 @@
-import { computed, ref } from "vue"
+import { computed, onScopeDispose, ref } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import {
@@ -27,15 +27,26 @@ export function useModelPresets() {
     groups.value.reduce((sum, group) => sum + group.presets.length, 0),
   )
 
+  let loadVersion = 0
+  let disposed = false
+  onScopeDispose(() => {
+    disposed = true
+    loadVersion++
+  }, true)
   async function load() {
+    if (disposed) return
+    const version = ++loadVersion
     try {
       const data = await configAPI.getModels()
-      presets.value = Array.isArray(data) ? data : []
+      if (version !== loadVersion) return
+      if (!Array.isArray(data)) throw new Error(t("discovery.failed"))
+      presets.value = data
       const match =
         selectedKey.value && presets.value.find((p) => presetKey(p) === selectedKey.value)
       if (match) editing.value = match
-    } catch {
-      presets.value = []
+    } catch (err) {
+      if (version === loadVersion)
+        ElMessage.error(err?.response?.data?.detail || err?.message || t("discovery.failed"))
     }
   }
 
@@ -62,10 +73,22 @@ export function useModelPresets() {
     ElMessage.info(t("settings.models.cloned", { name: base.name }))
   }
 
+  async function openExisting(key) {
+    const find = () => presets.value.find((p) => p.provider === key.provider && p.name === key.name)
+    if (!find()) await load()
+    const existing = find()
+    if (existing) select(existing)
+    else ElMessage.error(t("settings.models.noMatch"))
+  }
+
   function startDiscovered(draft) {
     const sameProvider = presets.value.filter((p) => p.provider === draft.provider)
-    const matches = sameProvider.filter((p) => p.model === draft.model)
-    const existing = matches.find((p) => p.source === "user") || matches[0]
+    const matches = sameProvider.filter((p) => p.model === draft.model && p.source === "user")
+    const existing =
+      sameProvider.find(
+        (p) => p.name === draft.name && (p.source === "user" || p.model === draft.model),
+      ) ||
+      (matches.length === 1 && matches[0])
     if (existing) return select(existing)
     startBlank()
     const name = sameProvider.some((p) => p.name === draft.name)
@@ -87,9 +110,8 @@ export function useModelPresets() {
 
   async function save(payload) {
     try {
-      await settingsAPI.saveProfile(
-        mode.value === "new" ? { ...payload, create_only: true } : payload,
-      )
+      const createOnly = mode.value === "new" || presetKey(payload) !== selectedKey.value
+      await settingsAPI.saveProfile(createOnly ? { ...payload, create_only: true } : payload)
       ElMessage.success(t("settings.models.saved", { name: payload.name }))
       selectedKey.value = `${payload.provider}/${payload.name}`
       await load()
@@ -129,6 +151,7 @@ export function useModelPresets() {
     } catch {
       return
     }
+    if (disposed) return
     try {
       await settingsAPI.deleteProfile(preset.name, preset.provider)
       ElMessage.success(t("settings.models.deleted", { name: preset.name }))
@@ -152,6 +175,7 @@ export function useModelPresets() {
     load,
     select,
     startBlank,
+    openExisting,
     startDiscovered,
     startFrom,
     close,

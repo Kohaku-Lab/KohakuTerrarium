@@ -120,3 +120,45 @@ export function _resetProviderModelsForTests() {
   providerEpochs.clear()
   globalEpoch = 0
 }
+
+// Catalogs and the saved inventory refresh independently. Bind cached rows to
+// the current provider's local identities before displaying or switching them.
+export function bindProviderPresets(rows, presets, provider, inventoryLoaded = false) {
+  const byName = new Map()
+  const userByModel = new Map()
+  for (const preset of presets) {
+    if ((preset.provider || preset.login_provider) !== provider) continue
+    byName.set(preset.name, preset)
+    if (preset.source !== "user") continue
+    if (!userByModel.has(preset.model)) userByModel.set(preset.model, [])
+    userByModel.get(preset.model).push(preset)
+  }
+  return rows.map((row) => {
+    const exact = byName.get(row.id.replace(/[/@]/g, "-"))
+    const aliases = userByModel.get(row.id) || []
+    const draft = byName.get(row.preset?.name)
+    if (exact?.source !== "user") {
+      if (aliases.length > 1)
+        return { ...row, has_preset: true, preset_choices: aliases.map((p) => p.name).sort() }
+      if (!aliases.length && row.preset_choices?.length && !inventoryLoaded) return row
+    }
+    const saved =
+      exact?.source === "user" ? exact : aliases[0] || (draft?.model === row.id && draft)
+    if (inventoryLoaded && !saved && row.has_preset) {
+      // Refresh before reusing fields from a preset that vanished since discovery.
+      return { ...row, preset: null, preset_choices: undefined, stalePreset: true }
+    }
+    const preset = saved || row.preset
+    // A same-name override can point at a completely different model.
+    const bound = saved ? { ...row, preset, has_preset: true, preset_choices: undefined } : row
+    if (preset?.model && preset.model !== row.id) {
+      return {
+        ...bound,
+        context_window: preset.context_window,
+        max_context: preset.max_context,
+        reasoning_levels: [],
+      }
+    }
+    return bound
+  })
+}

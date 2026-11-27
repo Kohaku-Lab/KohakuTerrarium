@@ -12,6 +12,8 @@ from fastapi import HTTPException
 
 from kohakuterrarium.api.routes.identity.llm import ProfileRequest, create_profile
 from kohakuterrarium.llm.discovery import DiscoveredModel
+from kohakuterrarium.llm.presets.drafts import catalog_rows
+from kohakuterrarium.llm.profiles.resolve import list_all
 from kohakuterrarium.llm.presets.store import load_presets
 from kohakuterrarium.llm.profiles.backends import load_yaml_store, save_yaml_store
 
@@ -159,6 +161,135 @@ class TestContextWindowOnSave:
         assert preset.reasoning_effort == "medium"
         stored = load_presets()[("codex", "gpt-6.9-sol")]
         assert stored.variation_groups == preset.variation_groups
+
+
+async def test_stale_catalog_create_requires_a_new_choice_and_preserves_aliases():
+    model = DiscoveredModel("fly/raw")
+    (row,) = catalog_rows("qwen", [model])
+    assert not row["has_preset"]
+    stale = ProfileRequest(
+        **row["preset"], create_only=True, catalog_model_id=row["id"]
+    )
+
+    # A different client creates a manual alias after the switcher loaded.
+    for name, limit in (("personal", 262144), ("short", 32000)):
+        await create_profile(
+            ProfileRequest(
+                name=name,
+                model=model.id,
+                provider="qwen",
+                max_context=limit,
+                create_only=True,
+            )
+        )
+        before = load_yaml_store()
+        with pytest.raises(HTTPException) as error:
+            await create_profile(stale)
+        assert error.value.status_code == 409
+        assert load_yaml_store() == before
+    (current,) = catalog_rows("qwen", [model])
+    assert current["preset_choices"] == ["personal", "short"]
+
+
+async def test_catalog_create_accepts_unmatched_models_only_in_the_named_provider():
+    save_profile_record("elsewhere", "fly/raw", "anthropic")
+    (row,) = catalog_rows("qwen", [DiscoveredModel("fly/raw")])
+    req = ProfileRequest(**row["preset"], create_only=True, catalog_model_id=row["id"])
+    assert (await create_profile(req))["name"] == "fly-raw"
+    with pytest.raises(HTTPException) as duplicate:
+        await create_profile(req)
+    assert duplicate.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "create_only,model_id", [(False, "fly/raw"), (True, "other"), (True, "")]
+)
+async def test_invalid_catalog_guard_never_modifies_an_existing_preset(
+    create_only, model_id
+):
+    save_profile_record("mine", "fly/raw", "qwen", max_context=262144)
+    before = load_yaml_store()
+    req = ProfileRequest(
+        name="mine",
+        model="fly/raw",
+        provider="qwen",
+        create_only=create_only,
+        catalog_model_id=model_id,
+    )
+    with pytest.raises(HTTPException) as invalid:
+        await create_profile(req)
+    assert invalid.value.status_code == 400
+    assert load_yaml_store() == before
+
+
+def test_catalog_name_collision_reuses_the_users_actual_route_without_writing():
+    save_profile_record("fly-model", "private-route", "qwen", max_context=262144)
+    save_profile_record("alias", "fly/model", "qwen")
+    before = load_yaml_store()
+    model = DiscoveredModel("fly/model", max_context=10000)
+    (row,) = catalog_rows("qwen", [model])
+    assert row["has_preset"]
+    assert (row["preset"]["name"], row["preset"]["model"]) == (
+        "fly-model",
+        "private-route",
+    )
+    assert "context_window" not in row["preset"]
+    reused, created = save_discovered_model("qwen", model)
+    assert (created, reused.name, reused.model, reused.max_context) == (
+        False,
+        "fly-model",
+        "private-route",
+        262144,
+    )
+    assert load_yaml_store() == before
+
+
+def test_shadowed_builtin_routes_to_user_definition_on_both_surfaces():
+    save_profile_record("gpt-6-astra", "private-astra", "codex", max_context=262144)
+    model = DiscoveredModel("gpt-6-astra")
+    (row,) = catalog_rows("codex", [model])
+    assert row["has_preset"] and row["preset"]["model"] == "private-astra"
+    preset, created = save_discovered_model("codex", model)
+    assert not created and preset.model == "private-astra"
+
+
+def test_catalog_lists_scoped_alias_choices_and_refuses_an_implicit_choice():
+    save_profile_record("fast", "private-raw", "openai", temperature=0.5)
+    save_profile_record("careful", "private-raw", "openai", temperature=0.1)
+    save_profile_record("other", "private-raw", "anthropic")
+    before = load_yaml_store()
+    model = DiscoveredModel("private-raw")
+    (row,) = catalog_rows("openai", [model])
+    assert row["has_preset"]
+    assert row["preset_choices"] == ["careful", "fast"]
+    assert row["preset"]["name"] == "private-raw"
+    with pytest.raises(ValueError, match="openai/careful, openai/fast"):
+        save_discovered_model("openai", model)
+    assert load_yaml_store() == before
+
+
+def test_unresolved_user_preset_stays_in_inventories_until_provider_returns():
+    data = {
+        "presets": {
+            "offline": {"custom": {"model": "fly/model", "max_context": 262144}}
+        }
+    }
+    save_yaml_store(data)
+    for rows in (list_profiles_payload(), list_all()):
+        (mine,) = [r for r in rows if r["provider"] == "offline"]
+        assert mine["provider_missing"] and not mine["available"]
+        assert (mine["name"], mine["model"], mine["max_context"]) == (
+            "custom",
+            "fly/model",
+            262144,
+        )
+    assert get_profile_for_identifier("offline/custom") is None
+    assert load_yaml_store() == data
+    save_yaml_store({**data, "backends": {"offline": {"backend_type": "openai"}}})
+    assert get_profile_for_identifier("offline/custom").max_context == 262144
+    assert not next(r for r in list_all() if r["provider"] == "offline").get(
+        "provider_missing"
+    )
 
 
 class TestLegacyContextGroupOnSave:

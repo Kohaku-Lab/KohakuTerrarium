@@ -51,6 +51,9 @@ class ProfileRequest(BaseModel):
     model: str
     provider: str = ""
     create_only: bool = False
+    catalog_model_id: str | None = Field(
+        default=None, description="Original model ID for a create-only discovery save."
+    )
     max_context: int = 128000
     max_output: int = 16384
     context_window: int | None = None
@@ -149,6 +152,7 @@ async def create_profile(req: ProfileRequest):
         await asyncio.to_thread(
             save_profile_record,
             create_only=req.create_only,
+            catalog_model_id=req.catalog_model_id,
             name=req.name,
             model=req.model,
             provider=req.provider,

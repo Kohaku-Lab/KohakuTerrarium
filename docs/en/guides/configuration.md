@@ -73,11 +73,21 @@ one page at a time. If the endpoint rejects listing, the picker shows the error.
 Saved presets stay local and can be selected by their full `provider/name`
 even when the catalog is offline.
 
-In the desktop or web chat model switcher, select a provider to see its
-current catalog by display name and API model ID. **Refresh** checks that
-provider again. **Save & switch** creates a preset for the chosen model and
-applies it to the selected creature. **Saved presets** includes your existing
-profiles and their custom settings, including when the provider is offline.
+In the desktop or web chat switcher, a provider with user presets opens on
+**Saved presets**. Choose **Provider models** to browse the endpoint, or
+**Saved presets** to choose a local configuration. The switcher keeps your
+explicit choice when you move to another provider that supports it.
+Saved presets remain visible when discovery is offline.
+
+A saved preset is identified by `provider/name`. When a catalog suggestion
+has the same name as your preset, switching uses your preset's model and
+settings. Multiple names can point to the same model ID with different
+context limits or variations. Choose the desired name in **Saved presets**.
+**Save & switch** creates a preset when you select a new model.
+To keep both targets after a name collision, open **Settings → Models → New →
+Blank preset**. Choose the same provider, enter a different preset name and
+the model ID from the catalog, then save. You can now switch between the two
+names in **Saved presets**.
 
 In `kt-cli` or `kt-tui`, open `/config`, choose **Browse provider models**,
 filter the provider’s catalog, and confirm the preset. Open `/model` to select it.
