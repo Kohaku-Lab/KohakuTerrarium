@@ -1,5 +1,6 @@
 """Bounded historical image repair and durable branch checkpoints."""
 
+import threading
 from copy import deepcopy
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from kohakuterrarium.errors import ConflictError, MediaReferenceError
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.conversation.continuation import persist_branch_view
 from kohakuterrarium.core.config.types import AgentConfig
+from kohakuterrarium.core.conversation import media
 from kohakuterrarium.core.conversation.media import (
     missing_history_images,
     repair_history_images,
@@ -263,4 +265,73 @@ async def test_restored_file_invalidates_confirmation(history_agent):
     before = agent.controller.conversation.snapshot_messages()
     with pytest.raises(ConflictError, match="changed"):
         await repair_history_images(agent, token)
+    assert agent.controller.conversation.snapshot_messages() == before
+
+
+async def test_repair_reads_event_fields_off_the_event_loop(history_agent, monkeypatch):
+    agent = history_agent
+    store = agent.session_store
+    store.append_event(
+        "media",
+        "tool_result",
+        {"output": "x" * 4096, "job_id": "read_9"},
+        turn_index=2,
+        branch_id=1,
+        parent_branch_path=[(1, 1)],
+    )
+    whole = store.get_events("media")
+    loop_thread = threading.get_ident()
+    reads = []
+    read_fields = store.get_event_fields
+
+    def spy(agent_name, fields):
+        rows = read_fields(agent_name, fields)
+        reads.append((threading.get_ident(), rows))
+        return rows
+
+    def whole_events(*args, **kwargs):
+        raise AssertionError("repair must not load whole events")
+
+    monkeypatch.setattr(store, "get_event_fields", spy)
+    monkeypatch.setattr(store, "get_events", whole_events)
+    found, token = await repair_history_images(agent)
+    assert [item.turn_index for item in found] == [1]
+    assert len(reads) == 1 and reads[0][0] != loop_thread
+    assert all("output" not in row and "content" not in row for row in reads[0][1])
+    kept = {"event_id", "type", "turn_index", "branch_id"}
+    assert [{k: v for k, v in row.items() if k in kept} for row in reads[0][1]] == [
+        {k: v for k, v in event.items() if k in kept} for event in whole
+    ]
+    paths = [
+        row["parent_branch_path"]
+        for row in reads[0][1]
+        if row.get("parent_branch_path")
+    ]
+    assert len(paths) == 2 and all(path == ((1, 1),) for path in paths)
+    assert all(path is paths[0] for path in paths)
+    await repair_history_images(agent, token)
+    assert "Historical image unavailable" in str(
+        agent.controller.conversation.to_messages()
+    )
+
+
+async def test_history_changed_during_the_scan_is_a_conflict(
+    history_agent, monkeypatch
+):
+    agent = history_agent
+    _, token = await repair_history_images(agent)
+    before = agent.controller.conversation.snapshot_messages()
+    loop_thread = threading.get_ident()
+    scan_threads = []
+
+    def scan_then_advance(*args):
+        scan_threads.append(threading.get_ident())
+        found = missing_history_images(*args)
+        agent._turn_index += 1
+        return found
+
+    monkeypatch.setattr(media, "missing_history_images", scan_then_advance)
+    with pytest.raises(ConflictError, match="changed during the scan"):
+        await repair_history_images(agent, token)
+    assert scan_threads and scan_threads[0] != loop_thread
     assert agent.controller.conversation.snapshot_messages() == before

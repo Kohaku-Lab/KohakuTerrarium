@@ -1,5 +1,6 @@
 """Explicit removal of missing local images from completed historical turns."""
 
+import asyncio
 import hashlib
 import json
 from copy import deepcopy
@@ -17,6 +18,20 @@ from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store.records.snapshot import (
     save_agent_snapshot,
     snapshot_tag,
+)
+
+# The event fields branch selection and turn eligibility read.
+_SELECTION_FIELDS = frozenset(
+    {
+        "event_id",
+        "type",
+        "turn_index",
+        "branch_id",
+        "parent_branch_path",
+        "call_id",
+        "job_id",
+        "origin_known",
+    }
 )
 
 
@@ -124,13 +139,29 @@ async def repair_history_images(
         output = getattr(agent, "_session_output", None)
         if output is not None:
             await output.drain()
+        events = await store.run(
+            store.get_event_fields, agent.config.name, _SELECTION_FIELDS
+        )
         agent._ensure_history_mutation_idle()
         require_no_running_jobs(agent)
         conversation = agent.controller.conversation
         messages = conversation.snapshot_messages(preserve_pending_tail=True)
-        events = store.get_events(agent.config.name)
         branch = live_branch_path(agent)
-        found = missing_history_images(messages, events, branch, agent._turn_index)
+        turn = agent._turn_index
+        found = await asyncio.to_thread(
+            missing_history_images, messages, events, branch, turn
+        )
+        agent._ensure_history_mutation_idle()
+        require_no_running_jobs(agent)
+        if (
+            agent.controller.conversation is not conversation
+            or agent._turn_index != turn
+            or live_branch_path(agent) != branch
+            or conversation.snapshot_messages(preserve_pending_tail=True) != messages
+        ):
+            raise ConflictError(
+                "History changed during the scan. Run /repair-images again."
+            )
         encoded = json.dumps(
             [
                 str(store.path),

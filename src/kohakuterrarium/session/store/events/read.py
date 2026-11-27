@@ -33,6 +33,33 @@ class EventReadMixin:
         """
         return list(self._iter_events(agent, since_event_id))
 
+    def get_event_fields(self, agent: str, fields: frozenset[str]) -> list[dict]:
+        """Get every event of an agent reduced to ``fields``, ordered by sequence.
+
+        Each event is trimmed as it is read and equal list values come back as
+        one shared tuple, so memory follows the event count rather than the
+        recorded payloads or the repeated branch paths.
+        """
+        shared: dict[tuple, tuple] = {}
+        rows = []
+        for evt in self._iter_events(agent):
+            if not isinstance(evt, dict):
+                continue
+            row = {}
+            for name in fields:
+                if name not in evt:
+                    continue
+                value = evt[name]
+                if isinstance(value, list):
+                    try:
+                        frozen = _freeze(value)
+                        value = shared.setdefault(frozen, frozen)
+                    except TypeError:
+                        pass
+                row[name] = value
+            rows.append(row)
+        return rows
+
     def _iter_events(
         self, agent: str, since_event_id: int | None = None
     ) -> Iterator[dict]:
@@ -111,3 +138,8 @@ class EventReadMixin:
         """Event keys as text; buffered keys are flushed so they are visible."""
         self._flush_events_cache()
         return [key_text(key) for key in scan_keys(self.events)]
+
+
+def _freeze(value: list) -> tuple:
+    """Turn nested lists into tuples so equal values can be shared."""
+    return tuple(_freeze(item) if isinstance(item, list) else item for item in value)
