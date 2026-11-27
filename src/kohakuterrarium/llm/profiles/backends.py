@@ -10,6 +10,7 @@ import os
 import tempfile
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 from itertools import chain
 from pathlib import Path
@@ -41,6 +42,9 @@ logger = get_logger(__name__)
 PROFILES_PATH = KT_DIR / "llm_profiles.yaml"
 _SCHEMA_VERSION = 3
 _REPLACE_ATTEMPTS = 6
+_snapshot: ContextVar[tuple[dict[str, Any], bool] | None] = ContextVar(
+    "profile_store_snapshot", default=None
+)
 
 
 def _profiles_path() -> Path:
@@ -94,15 +98,32 @@ def _normalize_backend_type(value: str) -> str:
 
 
 def load_yaml_store() -> dict[str, Any]:
-    """Read the shared ``llm_profiles.yaml`` — returns ``{}`` on missing/bad file."""
+    """Read the profile YAML, using the locked snapshot throughout an edit."""
+    snapshot = _snapshot.get()
+    if snapshot is not None:
+        return snapshot[0]
+
+    return _read_yaml_store(strict=False)
+
+
+def _read_yaml_store(*, strict: bool) -> dict[str, Any]:
     path = _profiles_path()
     try:
         # Release the handle before parsing so a Windows writer can replace it.
         content = path.read_text(encoding="utf-8")
-        return yaml.safe_load(content) or {}
+        data = yaml.safe_load(content)
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise ValueError("Expected a YAML mapping")
+        return data
     except FileNotFoundError:
         return {}
-    except Exception as e:
+    except (OSError, yaml.YAMLError, ValueError) as e:
+        if strict:
+            raise ConfigError(
+                "Cannot read llm_profiles.yaml. Check the YAML and file permissions."
+            ) from e
         logger.warning("Failed to load LLM profiles", error=str(e))
         return {}
 
@@ -124,6 +145,31 @@ def profile_transaction():
         yield
     finally:
         lock.release()
+
+
+def editing_profiles() -> bool:
+    snapshot = _snapshot.get()
+    return snapshot is not None and snapshot[1]
+
+
+@contextmanager
+def profile_snapshot(*, for_update: bool = False):
+    """Resolve the full inventory from one successful read of the store."""
+    if not for_update and _snapshot.get() is not None:
+        yield
+        return
+    token = _snapshot.set((_read_yaml_store(strict=True), for_update))
+    try:
+        yield
+    finally:
+        _snapshot.reset(token)
+
+
+@contextmanager
+def profile_update():
+    """Keep the read snapshot and its subsequent write under the same lock."""
+    with profile_transaction(), profile_snapshot(for_update=True):
+        yield
 
 
 def write_profile_bytes(path: Path, content: bytes) -> None:

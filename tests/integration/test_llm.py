@@ -900,8 +900,14 @@ class TestLlmIntegration:
         backends_mod._profiles_path().write_text(
             "this: is: not: valid: yaml: [", encoding="utf-8"
         )
+        damaged = backends_mod._profiles_path().read_bytes()
         assert backends_mod.load_yaml_store() == {}
         assert load_profiles() == {}
+        with pytest.raises(ValueError, match="Cannot read llm_profiles.yaml"):
+            list_all()
+        with pytest.raises(ValueError, match="Cannot read llm_profiles.yaml"):
+            save_profile(LLMPreset(name="new", model="gpt-new", provider="openai"))
+        assert backends_mod._profiles_path().read_bytes() == damaged
 
         # 9. A NESTED-shape presets file (the current write format) is
         #    read back by ``load_presets`` directly — both layouts are

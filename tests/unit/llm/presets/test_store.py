@@ -1,8 +1,7 @@
 """Unit tests for ``llm/presets/store.py`` — preset YAML I/O + migration.
 
 Behavior-first: assert the exact ``(provider, name)``-keyed presets read
-from both the nested and legacy-flat YAML layouts, the nested-vs-flat
-heuristic, provider-priority resolution, and the serialised payload
+from both the nested and legacy-flat YAML layouts, migration, provider-priority resolution, and the serialised payload
 shape. ``PROFILES_PATH`` is redirected to a per-test tmp file.
 """
 
@@ -10,11 +9,14 @@ import sys
 
 import pytest
 
+from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.llm.profiles.backends import save_yaml_store
+from kohakuterrarium.llm.profiles.resolve import (
+    create_preset,
+    list_all,
+    set_default_model,
+)
 from kohakuterrarium.llm.presets.store import (
-    _load_flat_presets_legacy,
-    _load_nested_presets,
-    _looks_nested,
     load_presets,
     preset_from_data,
     serialize_user_data,
@@ -51,40 +53,89 @@ class TestPresetFromData:
         assert preset.model == "gpt-4o"
 
 
-class TestPresetLoaders:
-    def test_nested_loader_non_dict_input_returns_empty(self):
-        assert _load_nested_presets("not a dict") == {}
-
-    def test_flat_loader_non_dict_input_returns_empty(self):
-        assert _load_flat_presets_legacy(None) == {}
-
-    def test_nested_loader_skips_non_dict_bucket(self):
-        out = _load_nested_presets(
-            {"openai": {"good": {"model": "m"}}, "broken": "scalar"}
-        )
-        assert list(out) == [("openai", "good")]
-
-    def test_flat_loader_skips_non_dict_entry(self):
-        out = _load_flat_presets_legacy(
-            {"good": {"model": "m", "provider": "openai"}, "junk": "scalar"}
-        )
-        assert list(out) == [("openai", "good")]
-
-
-class TestLooksNested:
-    def test_nested_layout_detected(self):
-        stored = {"openai": {"gpt-x": {"model": "gpt-x"}}}
-        assert _looks_nested(stored) is True
-
-    def test_flat_layout_detected_by_model_key(self):
-        stored = {"gpt-x": {"model": "gpt-x", "provider": "openai"}}
-        assert _looks_nested(stored) is False
-
-    def test_non_dict_value_means_not_nested(self):
-        assert _looks_nested({"x": "scalar"}) is False
-
-
 class TestLoadPresets:
+    def test_valid_name_model_and_its_sibling_survive_later_creations(self):
+        for name in ("custom", "model", "added-later"):
+            create_preset(LLMPreset(name=name, provider="openai", model="remote-id"))
+        assert set(load_presets()) == {
+            ("openai", "custom"),
+            ("openai", "model"),
+            ("openai", "added-later"),
+        }
+
+    def test_current_and_legacy_presets_survive_rewrite_with_current_keys_winning(self):
+        save_yaml_store(
+            {
+                "version": 3,
+                "profiles": {
+                    "older": {"provider": "openai", "model": "legacy-only"},
+                    "both": {"provider": "openai", "model": "legacy-value"},
+                },
+                "presets": {
+                    "openai": {"both": {"model": "current-value", "temperature": 0.25}},
+                    "other": {"provider": "openai", "model": "flat-in-presets"},
+                },
+            }
+        )
+        set_default_model("openai/both")
+        loaded = load_presets()
+        assert {key: p.model for key, p in loaded.items()} == {
+            ("openai", "both"): "current-value",
+            ("openai", "older"): "legacy-only",
+            ("openai", "other"): "flat-in-presets",
+        }
+        assert loaded[("openai", "both")].temperature == 0.25
+
+    @pytest.mark.parametrize(
+        "unreadable",
+        [
+            "malformed bucket",
+            {"stray": {"model": "no-provider"}},
+            {"openai": {"broken": "invalid entry"}},
+        ],
+    )
+    def test_partial_migrations_never_discard_the_unreadable_record(
+        self, tmp_path, unreadable
+    ):
+        save_yaml_store(
+            {
+                "presets": {"openai": {"visible": {"model": "working"}}},
+                "profiles": unreadable,
+            }
+        )
+        path = tmp_path / "llm_profiles.yaml"
+        original = path.read_bytes()
+        assert ("openai", "visible") in load_presets()
+        with pytest.raises(ConfigError, match="llm_profiles.yaml"):
+            create_preset(LLMPreset(name="new", model="new", provider="openai"))
+        assert path.read_bytes() == original
+
+    def test_failed_file_read_leaves_store_intact_and_is_reported_by_inventory(
+        self, tmp_path, monkeypatch
+    ):
+        save_yaml_store(
+            {"presets": {"openai": {"manual": {"model": "private-model-name"}}}}
+        )
+        path = tmp_path / "llm_profiles.yaml"
+        original = path.read_bytes()
+        read_text = type(path).read_text
+
+        def deny_profile_read(file, *args, **kwargs):
+            if file == path:
+                raise PermissionError("private-model-name")
+            return read_text(file, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(type(path), "read_text", deny_profile_read)
+            for action in (list_all, lambda: set_default_model("openai/manual")):
+                with pytest.raises(
+                    ConfigError, match="Cannot read llm_profiles.yaml"
+                ) as caught:
+                    action()
+                assert "private-model-name" not in str(caught.value)
+        assert path.read_bytes() == original
+        assert ("openai", "manual") in load_presets()
+
     def test_nested_layout_loaded_with_provider_name_keys(self):
         save_yaml_store(
             {"presets": {"openai": {"my-gpt": {"model": "gpt-4o", "max_context": 100}}}}

@@ -33,7 +33,8 @@ from kohakuterrarium.llm.profiles.backends import (
 )
 from kohakuterrarium.llm.profiles.backends import load_yaml_store as _load_yaml
 from kohakuterrarium.llm.profiles.backends import (
-    profile_transaction,
+    profile_snapshot,
+    profile_update,
     write_yaml_locked as _save_yaml,
 )
 from kohakuterrarium.llm.profiles.backends import (
@@ -75,7 +76,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-@profile_transaction()
+@profile_update()
 def save_backend(backend: LLMBackend) -> None:
     """Persist a user provider after normalizing its backend type."""
     backend.backend_type = validate_backend_type(backend.backend_type)
@@ -99,7 +100,7 @@ def save_backend(backend: LLMBackend) -> None:
     )
 
 
-@profile_transaction()
+@profile_update()
 def delete_backend(name: str) -> bool:
     backend = load_backends(include_remote=False).get(name)
     if backend and is_builtin_backend(backend):
@@ -235,7 +236,7 @@ def _upgrade_bare_default(bare: str) -> str:
     return f"{sorted(hits)[0]}/{bare}"
 
 
-@profile_transaction()
+@profile_update()
 def set_default_model(model_name: str) -> None:
     _save_yaml(
         _serialize_user_data(
@@ -248,7 +249,7 @@ def set_default_model(model_name: str) -> None:
     )
 
 
-@profile_transaction()
+@profile_update()
 def save_profile(profile: LLMProfile | LLMPreset) -> None:
     """Persist a provider-scoped preset while preserving existing variations."""
     _write_profile(profile)
@@ -258,7 +259,7 @@ class PresetAlreadyExists(ValueError):
     """A create-only operation collided with a provider-scoped preset."""
 
 
-@profile_transaction()
+@profile_update()
 def create_preset(
     preset: LLMPreset, *, reuse_model: bool = False
 ) -> tuple[LLMPreset, bool]:
@@ -338,7 +339,7 @@ def _write_profile(profile: LLMProfile | LLMPreset) -> None:
     )
 
 
-@profile_transaction()
+@profile_update()
 def delete_profile(name: str, provider: str = "") -> bool:
     """Delete one user preset, refusing ambiguous bare-name matches."""
     data = _load_yaml()
@@ -647,6 +648,7 @@ def _is_available(
     return False
 
 
+@profile_snapshot()
 def list_all() -> list[dict[str, Any]]:
     """List resolved presets, with user entries overriding exact built-in keys."""
     result: list[dict[str, Any]] = []
