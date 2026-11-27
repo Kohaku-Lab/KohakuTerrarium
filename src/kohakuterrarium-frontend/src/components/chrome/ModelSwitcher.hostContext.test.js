@@ -168,6 +168,36 @@ describe("shared ModelSwitcher host context", () => {
     })
   })
 
+  it("switches to the first user preset after saving from the default provider catalog", async () => {
+    const options = { hostKey: ref("first-saved-preset"), models: [] }
+    const context = makeContext(options)
+    const preset = { provider: "codex", name: "first", model: "first" }
+    const saveProfile = vi.fn(async () => {
+      options.models = [{ ...preset, available: true, source: "user" }]
+    })
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", available: true, model_discovery: true }],
+      }),
+      discoverModels: async () => ({ models: [{ id: "first", preset }] }),
+      saveProfile,
+    }
+    const wrapper = mountShared(context)
+    await openDrawer(wrapper)
+    await wrapper.get('[aria-label="Provider models"] .model-row').trigger("click")
+    await buttonByText(wrapper, "Save & switch").trigger("click")
+    await flushPromises()
+    expect(saveProfile).toHaveBeenCalledExactlyOnceWith({ ...preset, create_only: true })
+    expect(context.inventory.models.value).toEqual(options.models)
+    expect(context.switchModel).toHaveBeenCalledExactlyOnceWith({
+      target: "beta",
+      selector: "codex/first",
+    })
+    await openDrawer(wrapper)
+    expect(wrapper.get('[aria-label="Saved presets"] .model-row').text()).toContain("first")
+    wrapper.unmount()
+  })
+
   it("opens on manual presets and preserves an explicit source across shared-gateway providers", async () => {
     const id = "fly/slurm/inkling2-finetuned"
     const models = [

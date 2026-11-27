@@ -10,7 +10,8 @@ import {
 // contacts its upstream, and only an explicit save can create a preset.
 // Catalogs come from the shared provider-models cache: cached rows show at
 // once and a stale list revalidates in the background.
-export function useSwitcherCatalog(api, open, provider, presets) {
+export function useSwitcherCatalog(inventory, open, provider) {
+  const { catalog: api, models: presets, hasLoaded } = inventory
   const providers = ref([])
   const entry = shallowRef(null)
   const rows = computed(() =>
@@ -28,9 +29,10 @@ export function useSwitcherCatalog(api, open, provider, presets) {
   const showSaved = computed({
     get: () =>
       sourceOverride.value ??
-      presets.value.some(
-        (p) => (p.provider || p.login_provider) === provider.value && p.source === "user",
-      ),
+      (hasLoaded?.value === false ||
+        presets.value.some(
+          (p) => (p.provider || p.login_provider) === provider.value && p.source === "user",
+        )),
     set: (saved) => {
       sourceOverride.value = saved
     },

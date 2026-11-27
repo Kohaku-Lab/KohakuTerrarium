@@ -15,7 +15,7 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
-function setup(names = ["mimo", "qwen"]) {
+function setup(names = ["mimo", "qwen"], loaded = true) {
   const pending = []
   const api = {
     getBackends: vi.fn(async () => ({
@@ -30,8 +30,9 @@ function setup(names = ["mimo", "qwen"]) {
   const open = ref(false)
   const provider = ref(names[0])
   const scope = effectScope()
-  const catalog = scope.run(() => useSwitcherCatalog(api, open, provider, ref([])))
-  return { api, pending, open, provider, catalog, scope }
+  const inventory = { catalog: api, models: ref([]), hasLoaded: ref(loaded) }
+  const catalog = scope.run(() => useSwitcherCatalog(inventory, open, provider))
+  return { api, pending, open, provider, inventory, catalog, scope }
 }
 
 const rows = (...ids) => ids.map((id) => ({ id, name: id }))
@@ -48,6 +49,33 @@ afterEach(() => {
 })
 
 describe("useSwitcherCatalog", () => {
+  it.each([
+    ["user preset", [{ provider: "mimo", name: "mine", source: "user" }], 0],
+    ["empty inventory", [], 1],
+  ])("waits for the first saved inventory before discovering: %s", async (_, presets, count) => {
+    const { api, open, inventory, scope } = setup(["mimo"], false)
+    open.value = true
+    await flushPromises()
+    expect(api.getBackends).toHaveBeenCalledOnce()
+    expect(api.discoverModels).not.toHaveBeenCalled()
+    inventory.models.value = presets
+    inventory.hasLoaded.value = true
+    expect(api.discoverModels).toHaveBeenCalledTimes(count)
+    scope.stop()
+  })
+
+  it("honors an explicit catalog choice before the saved inventory loads", async () => {
+    const { api, open, inventory, catalog, scope } = setup(["mimo"], false)
+    open.value = true
+    await flushPromises()
+    catalog.showSaved.value = false
+    expect(api.discoverModels).toHaveBeenCalledExactlyOnceWith("mimo")
+    inventory.models.value = [{ provider: "mimo", name: "mine", source: "user" }]
+    inventory.hasLoaded.value = true
+    expect(catalog.visible.value).toBe(true)
+    scope.stop()
+  })
+
   it("shows cached rows at once on provider switch and reopen, loading only when nothing is cached", async () => {
     const { api, pending, open, provider, catalog, scope } = setup()
     open.value = true

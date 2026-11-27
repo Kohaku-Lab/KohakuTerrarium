@@ -84,6 +84,10 @@ has the same name as your preset, switching uses your preset's model and
 settings. Multiple names can point to the same model ID with different
 context limits or variations. Choose the desired name in **Saved presets**.
 **Save & switch** creates a preset when you select a new model.
+To keep both targets after a name collision, open **Settings → Models → New →
+Blank preset**. Choose the same provider, enter a different preset name and
+the model ID from the catalog, then save. You can now switch between the two
+names in **Saved presets**.
 
 In `kt-cli` or `kt-tui`, open `/config`, choose **Browse provider models**,
 filter the provider’s catalog, and confirm the preset. Open `/model` to select it.

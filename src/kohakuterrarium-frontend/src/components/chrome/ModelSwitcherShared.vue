@@ -77,7 +77,7 @@
                   </div>
                   <div class="text-[10px] text-warm-400 font-mono truncate w-full">{{ preset.model }}<span v-if="preset.provider_missing"> · Provider missing</span></div>
                 </button>
-                <div v-if="!filteredPresets.length && !inventoryError" class="text-warm-400 text-[11px] italic p-2 text-center">No matching presets.</div>
+                <div v-if="!filteredPresets.length && !inventoryError" class="text-warm-400 text-[11px] italic p-2 text-center">{{ loading ? "Loading saved presets…" : "No matching presets." }}</div>
               </template>
             </div>
           </div>
@@ -173,7 +173,7 @@ const drawerSize = computed(() => (isCompact.value ? "85%" : "min(640px, 90vw)")
 const draftProvider = ref("")
 const draftPreset = ref("")
 const draftSelections = reactive({})
-const catalog = useSwitcherCatalog(ctx.inventory.catalog, popoverVisible, draftProvider, models)
+const catalog = useSwitcherCatalog(ctx.inventory, popoverVisible, draftProvider)
 const catalogLimit = ref(50)
 watch([draftProvider, searchQuery, popoverVisible], () => {
   catalogLimit.value = 50
@@ -487,6 +487,8 @@ async function applySelection() {
   applying.value = true
   try {
     if (needsSave.value) {
+      // Keep this catalog selection while the refresh adds the first saved preset.
+      showSaved.value = false
       const owner = selectionVersion
       await ctx.inventory.catalog.saveProfile({ ...catalog.selected.value.preset, create_only: true })
       if (owner !== selectionVersion) return

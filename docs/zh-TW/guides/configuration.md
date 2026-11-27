@@ -49,6 +49,8 @@ kt run path/to/creature --llm gpt-5.4
 
 同一個 provider 內，如果目錄建議的名稱與手動 preset 同名，切換時會使用手動設定的實際模型與參數。同一個模型 ID 可有多個別名，在 **Saved presets** 可依名稱選用不同的上下文長度或 variations。
 
+如果同名時也想保留目錄中的原始模型，在 **設定 → 模型 → 新增 → 空白預設** 選擇同一個 provider，另取一個名稱，模型 ID 填入目錄中的原值。儲存後，就能在 **Saved presets** 中依名稱切換這兩個模型。
+
 如果想全部寫死在 config 裡、不要 profile 檔，就用 `model` + `api_key_env` + `base_url`：
 
 ```yaml
