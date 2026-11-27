@@ -167,9 +167,10 @@ def has_api_key(provider_or_env: str) -> bool:
 
 
 def local_backend_key(name: str, env_var: str) -> str:
-    """Resolve the stored provider key or the exact environment setting it declares."""
-    key = _load_api_keys().get(name) or os.environ.get(env_var, "")
-    return interpolate_env_vars(key)
+    """Resolve a key stored under the provider or its env-var name, then that setting."""
+    keys = _load_api_keys()
+    stored = keys.get(name) or (keys.get(env_var) if env_var else "")
+    return interpolate_env_vars(stored or os.environ.get(env_var, ""))
 
 
 def backend_api_key(name: str, env_var: str) -> str:
