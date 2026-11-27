@@ -5,10 +5,12 @@ Read and write provider-scoped presets while accepting legacy flat layouts.
 
 from typing import Any
 
+from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.llm.catalog_endpoints import CATALOG_ENDPOINTS
 from kohakuterrarium.llm.profiles.backends import (
     _BUILTIN_PROVIDER_NAMES,
     catalog_backend,
+    editing_profiles,
     _SCHEMA_VERSION,
 )
 from kohakuterrarium.llm.profiles.backends import (
@@ -43,51 +45,63 @@ def clear_remote_presets() -> None:
     _remote_presets.clear()
 
 
-def _load_nested_presets(stored: Any) -> dict[tuple[str, str], LLMPreset]:
-    """Read a presets block in nested ``{provider: {name: data}}`` shape."""
-    presets: dict[tuple[str, str], LLMPreset] = {}
-    if not isinstance(stored, dict):
-        return presets
-    for provider, bucket in stored.items():
-        if not isinstance(bucket, dict):
-            continue
-        for name, pdata in bucket.items():
-            if isinstance(pdata, dict):
-                presets[(provider, name)] = preset_from_data(name, pdata, provider)
-    return presets
-
-
-def _load_flat_presets_legacy(stored: Any) -> dict[tuple[str, str], LLMPreset]:
-    """Read flat legacy presets and reconstruct provider/name keys."""
-    presets: dict[tuple[str, str], LLMPreset] = {}
-    if not isinstance(stored, dict):
-        return presets
-    for name, pdata in stored.items():
-        if not isinstance(pdata, dict):
-            continue
-        inferred = _legacy_provider_from_data(pdata)
-        preset = preset_from_data(
-            name, pdata, inferred if inferred in CATALOG_ENDPOINTS else ""
+def _unreadable_entry(location: str) -> None:
+    # Read-only callers can still use the other presets. Editing a partial
+    # inventory would permanently discard the entry on the next rewrite.
+    if editing_profiles():
+        raise ConfigError(
+            f"Cannot read {location} in llm_profiles.yaml; settings were not saved."
         )
-        if not preset.provider:
+
+
+def _presets_from_section(
+    stored: Any, section: str
+) -> dict[tuple[str, str], LLMPreset]:
+    """Read flat entries and nested provider buckets, including mixed layouts."""
+    presets: dict[tuple[str, str], LLMPreset] = {}
+    if not isinstance(stored, dict):
+        _unreadable_entry(section)
+        return presets
+    for key, entry in stored.items():
+        if not isinstance(key, str) or not key or not isinstance(entry, dict):
+            _unreadable_entry(f"{section}.{key}")
             continue
-        presets[(preset.provider, preset.name)] = preset
+        # A string model is a legacy preset. A mapping named "model" can
+        # itself be a user preset inside a current-format provider bucket.
+        if isinstance(entry.get("model"), str):
+            # An inline transport may share a key with a provider bucket.
+            # A sibling preset cannot be folded into the flat record.
+            if editing_profiles():
+                for name, value in entry.items():
+                    if name in {
+                        "extra_body",
+                        "variation_groups",
+                        "retry_policy",
+                        "context_aliases",
+                    }:
+                        continue
+                    if isinstance(value, dict) and isinstance(value.get("model"), str):
+                        _unreadable_entry(f"{section}.{key}.{name}")
+            inferred = _legacy_provider_from_data(entry)
+            preset = preset_from_data(
+                key, entry, inferred if inferred in CATALOG_ENDPOINTS else ""
+            )
+            if preset.provider:
+                presets.setdefault((preset.provider, key), preset)
+            else:
+                _unreadable_entry(f"{section}.{key}")
+            continue
+        for name, body in entry.items():
+            if (
+                not isinstance(name, str)
+                or not name
+                or not isinstance(body, dict)
+                or not isinstance(body.get("model"), str)
+            ):
+                _unreadable_entry(f"{section}.{key}.{name}")
+                continue
+            presets[(key, name)] = preset_from_data(name, body, key)
     return presets
-
-
-def _looks_nested(stored: dict[str, Any]) -> bool:
-    """Detect nested provider buckets, treating empty data as legacy-compatible."""
-    if not stored:
-        return False
-    for value in stored.values():
-        if not isinstance(value, dict):
-            return False
-        if "model" in value:
-            return False
-        for child in value.values():
-            if isinstance(child, dict):
-                return True
-    return True
 
 
 def _string_mapping(stored: Any) -> dict[str, str]:
@@ -117,15 +131,8 @@ def get_child_models() -> dict[str, str]:
 def load_presets(*, include_remote: bool = True) -> dict[tuple[str, str], LLMPreset]:
     """Load nested or legacy presets, with worker-local entries overriding host fallbacks."""
     data = _load_yaml()
-    stored = data.get("presets", {})
-    if isinstance(stored, dict) and _looks_nested(stored):
-        presets = _load_nested_presets(stored)
-    else:
-        presets = _load_flat_presets_legacy(stored)
-        legacy = data.get("profiles", {})
-        if isinstance(legacy, dict) and not _looks_nested(legacy):
-            for key, preset in _load_flat_presets_legacy(legacy).items():
-                presets.setdefault(key, preset)
+    presets = _presets_from_section(data.get("profiles", {}), "profiles")
+    presets.update(_presets_from_section(data.get("presets", {}), "presets"))
     if include_remote and _remote_presets:
         return {**_remote_presets, **presets}
     return presets
