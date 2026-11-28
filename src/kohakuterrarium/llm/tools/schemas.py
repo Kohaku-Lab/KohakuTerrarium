@@ -339,6 +339,15 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             "before": {"type": "integer", "minimum": 0, "maximum": 10},
             "after": {"type": "integer", "minimum": 0, "maximum": 10},
             "offset": {"type": "integer", "minimum": 0},
+            "scope": {
+                "type": "string",
+                "enum": ["selected", "raw"],
+                "description": (
+                    "Anchor context only: selected (default) follows the pinned "
+                    "branch view; raw reads physical neighbors across branches "
+                    "or unknown lineage."
+                ),
+            },
             "mode": {
                 "type": "string",
                 "enum": ["fts", "semantic", "hybrid", "auto"],

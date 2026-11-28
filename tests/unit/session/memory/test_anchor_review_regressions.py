@@ -166,8 +166,7 @@ async def test_peer_hits_receive_anchors_without_indexing_unrelated_agents(
         assert again.error is None and _anchor_from(again.output)
         assert observed.count("bob") == 0
 
-        # Certification is process-local, but cannot remain true after the
-        # peer's physical event frontier advances in the same live Store.
+        # Existing peer anchors do not require a peer refresh after append.
         reopened.append_event(
             "bob", "user_input", {"content": "BOB_APPENDED_AFTER_CERT"}
         )
@@ -217,10 +216,11 @@ async def test_full_anchor_cache_expansion_protects_active_cursor(tmp_path):
         _close(store, context)
 
 
-async def test_peer_certification_failure_retains_ordinary_search(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("stale_peer", [False, True])
+async def test_peer_physical_anchors_do_not_require_history_scan(
+    tmp_path, monkeypatch, stale_peer
 ):
-    """Failure in a *new* peer proof step must not turn Search into an error."""
+    """Physical source validation is independent for each returned hit."""
     path = tmp_path / "peer-fault.kohakutr"
     store = SessionStore(path)
     store.init_meta("s", "agent", "", str(tmp_path), ["alice", "bob"])
@@ -240,6 +240,11 @@ async def test_peer_certification_failure_retains_ordinary_search(
 
     reopened = SessionStore(path)
     context = _ctx(reopened, "alice")
+    if stale_peer:
+        reopened.events["bob:e000000"] = {
+            **reopened.events["bob:e000000"],
+            "content": "Changed source",
+        }
     original = reopened._event_rows
 
     def fail_peer_read(agent, *args, **kwargs):
@@ -255,16 +260,20 @@ async def test_peer_certification_failure_retains_ordinary_search(
         assert result.error is None, result.error
         assert "BOB_VALID_OLD_INDEX" in result.output
         assert "ALICE_VALID_LOCAL" in result.output
-        assert (
-            "Anchors unavailable for some hits (UNVERIFIABLE_SOURCE)" in result.output
-        )
-        anchor = _anchor_from(result.output)
-        window = await SearchMemoryTool().execute(
-            {"anchor": anchor, "before": 0, "after": 0}, context=context
-        )
-        assert window.error is None
-        assert "ALICE_VALID_LOCAL" in window.output
-        assert "BOB_VALID_OLD_INDEX" not in window.output
+        anchors = re.findall(r"^anchor: (\S+)$", result.output, re.M)
+        assert len(anchors) == (1 if stale_peer else 2)
+        if stale_peer:
+            assert "Anchors unavailable for some hits (STALE_INDEX)" in result.output
+        contents = []
+        for anchor in anchors:
+            window = await SearchMemoryTool().execute(
+                {"anchor": anchor, "before": 0, "after": 0}, context=context
+            )
+            assert window.error is None
+            contents.append(window.output)
+        joined = chr(10).join(contents)
+        assert "ALICE_VALID_LOCAL" in joined
+        assert ("BOB_VALID_OLD_INDEX" in joined) is not stale_peer
     finally:
         _close(reopened, context)
 

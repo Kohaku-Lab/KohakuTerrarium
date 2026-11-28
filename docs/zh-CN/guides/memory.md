@@ -69,6 +69,17 @@ kt embedding swe.kohakutr \
 
 增量建立：再次执行 `kt embedding` 时，只会索引新增事件。
 
+### 从检索结果展开上下文
+
+`search_memory(anchor=..., scope="selected")` 默认沿 Anchor 保存的
+分支视图读取。旧历史的 ancestry 若不能在预算内推导，返回的上下文可能
+不完整。
+
+`search_memory(anchor=..., scope="raw")` 有界读取同一 Agent 的物理
+相邻历史，包括其他分支和归属未知的事件，并显示记录的 Turn/Branch
+坐标。此开关不会扩大关键字或语义检索范围。两种模式均验证物理来源，
+支持连续导航和 Offset 分页。
+
 ## 为旧 Session 重建记忆索引
 
 先关闭使用该 Session 的全部 Agent、Studio、独立 Memory Reader 以及

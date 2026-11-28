@@ -39,7 +39,7 @@ class SearchMemoryTool(BaseTool):
     def description(self) -> str:
         return (
             "Search this session's history by keyword or meaning. "
-            "Use it to recall prior turns and explore context via anchors. "
+            "Explore context via anchors; scope=raw reads physical history. "
             "Not for files - use grep."
         )
 
@@ -54,6 +54,12 @@ class SearchMemoryTool(BaseTool):
             return ToolResult(
                 error="Provide exactly one of query or anchor in search_memory."
             )
+
+        scope = args.get("scope", "selected")
+        if scope not in ("selected", "raw"):
+            return ToolResult(error="INVALID_SCOPE: scope must be selected or raw")
+        if query and scope == "raw":
+            return ToolResult(error="INVALID_SCOPE: raw scope requires an anchor")
 
         mode = args.get("mode", "auto")
         k = int(args.get("k", 5))
@@ -79,6 +85,7 @@ class SearchMemoryTool(BaseTool):
                     before=args.get("before", 3),
                     after=args.get("after", 3),
                     offset=args.get("offset"),
+                    scope=scope,
                 )
                 return ToolResult(output=self._format_window(window), exit_code=0)
             except MemoryNavigationError as exc:
@@ -126,13 +133,13 @@ class SearchMemoryTool(BaseTool):
                 results = await memory.attach_anchors(results, query)
             except MemoryNavigationError as exc:
                 # An incompatible historical index must not break legacy search.
-                scope = (
+                affected = (
                     " for some hits"
                     if any(getattr(r, "anchor", "") for r in results)
                     else ""
                 )
                 warning = (warning + "\n" if warning else "") + (
-                    f"Anchors unavailable{scope} ({exc.code}): {exc}"
+                    f"Anchors unavailable{affected} ({exc.code}): {exc}"
                 )
 
         lines = [f"Found {len(results)} result(s) for: {query}\n"]
@@ -185,9 +192,20 @@ class SearchMemoryTool(BaseTool):
 
     @staticmethod
     def _format_window(window) -> str:
-        lines = [f"Memory context ({len(window.events)} events, chronological):"]
+        lines = [
+            f"Memory context ({len(window.events)} events, chronological, scope={window.scope}):"
+        ]
+        if window.notice:
+            lines.append(window.notice)
+        if window.scope == "raw":
+            lines.append("Physical history; events are not filtered by branch.")
         for event in window.events:
-            lines.append(f"[{event.role}] {event.kind}")
+            header = f"[{event.role}] {event.kind}"
+            if window.scope == "raw":
+                turn = event.turn if type(event.turn) is int else "?"
+                branch = event.branch if type(event.branch) is int else "?"
+                header += f" turn={turn} branch={branch}"
+            lines.append(header)
             lines.append(f"anchor: {event.anchor}")
             lines.append(event.content)
             if event.truncated:
@@ -195,11 +213,12 @@ class SearchMemoryTool(BaseTool):
                     f"content_slice={event.start}:{event.end}/{event.total}"
                     f" next_offset={event.end if event.end < event.total else 'none'}"
                 )
-                if event.truncated and event.end < event.total:
+                if event.end < event.total:
+                    scope_arg = ', scope="raw"' if window.scope == "raw" else ""
                     lines.append(
                         "Continue: "
                         f'search_memory(anchor="{event.anchor}", '
-                        f"before=0, after=0, offset={event.end})"
+                        f"before=0, after=0, offset={event.end}{scope_arg})"
                     )
             lines.append("")
         before = (
@@ -207,6 +226,15 @@ class SearchMemoryTool(BaseTool):
         )
         after = "unknown" if window.has_after is None else str(window.has_after).lower()
         lines.append(f"has_before={before} has_after={after}")
+        if (
+            window.scope == "selected"
+            and not window.notice
+            and (window.has_before is None or window.has_after is None)
+        ):
+            lines.append(
+                "Selected context is limited by the scan budget or unknown lineage; "
+                'use scope="raw" to inspect physical history.'
+            )
         return "\n".join(lines)
 
     async def _get_memory(self, context: ToolContext) -> Any:

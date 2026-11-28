@@ -4,6 +4,9 @@ import re
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
+
+import kohakuterrarium.session.memory.navigation as navigation
 
 from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool
 from kohakuterrarium.core.session import Session
@@ -219,7 +222,7 @@ async def test_old_unannotated_index_requires_explicit_migration(tmp_path):
         _close(store, ctx)
 
 
-async def test_anchor_withheld_when_saved_branch_differs_from_legacy_index(tmp_path):
+async def test_physical_anchor_survives_saved_branch_index_mismatch(tmp_path):
     from kohakuterrarium.core.conversation.continuation import persist_branch_view
 
     store, ctx, tool = _env(tmp_path)
@@ -241,11 +244,17 @@ async def test_anchor_withheld_when_saved_branch_differs_from_legacy_index(tmp_p
             {"query": "LATEST_INDEX_SELECTION", "mode": "fts"}, context=ctx
         )
         assert result.error is None
-        # A previously indexed latest-branch hit remains a normal FTS hit,
-        # but must not authorize expanding its foreign physical context.
         assert "LATEST_INDEX_SELECTION" in result.output
-        assert "UNVERIFIABLE_SOURCE" in result.output
-        assert not re.search(r"^anchor:", result.output, re.M)
+        token = _token(result.output)
+        args = {"anchor": token, "before": 1, "after": 0}
+        selected = await tool.execute(args, context=ctx)
+        assert selected.error is None
+        assert "LATEST_INDEX_SELECTION" not in selected.output
+        assert "has_after=unknown" in selected.output
+        raw = await tool.execute({**args, "scope": "raw"}, context=ctx)
+        assert raw.error is None
+        assert "OLDER_SAVED_SELECTION" in raw.output
+        assert "LATEST_INDEX_SELECTION" in raw.output
     finally:
         _close(store, ctx)
 
@@ -284,14 +293,17 @@ async def test_accepted_zero_zero_bookkeeping_does_not_block_valid_anchors(
         _close(store, ctx)
 
 
-async def test_direct_anchor_not_issued_from_incomplete_keyword_checkpoint(tmp_path):
-    from kohakuterrarium.session.memory.navigation import (
-        MemoryNavigationError,
-    )
-
+async def test_pending_index_excludes_hits_but_not_verified_physical_anchor(tmp_path):
     store, ctx, tool = _env(tmp_path)
     try:
-        store.append_event("alice", "user_input", {"content": "PENDING_INDEX_SOURCE"})
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "PENDING_INDEX_SOURCE"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
         first = await tool.execute(
             {"query": "PENDING_INDEX_SOURCE", "mode": "fts"}, context=ctx
         )
@@ -299,8 +311,14 @@ async def test_direct_anchor_not_issued_from_incomplete_keyword_checkpoint(tmp_p
         live = ctx.session._memory
         hits = live._memory.search("PENDING_INDEX_SOURCE", mode="fts")
         live._memory._state["alice:cursor:keywords:pending"] = True
-        with __import__("pytest").raises(MemoryNavigationError, match="incomplete"):
-            live._navigator.register_hits(hits, "PENDING_INDEX_SOURCE")
+        assert not live._memory.search("PENDING_INDEX_SOURCE", mode="fts")
+        hits = live._navigator.register_hits(hits, "PENDING_INDEX_SOURCE")
+        args = {"anchor": hits[0].anchor, "before": 0, "after": 0}
+        selected = await tool.execute(args, context=ctx)
+        assert selected.error is None
+        assert "PENDING_INDEX_SOURCE" not in selected.output
+        raw = await tool.execute({**args, "scope": "raw"}, context=ctx)
+        assert raw.error is None and "PENDING_INDEX_SOURCE" in raw.output
     finally:
         _close(store, ctx)
 
@@ -355,11 +373,16 @@ async def test_zero_neighbor_window_survives_unverifiable_further_continuity(
         _close(store, ctx)
 
 
-async def test_old_all_branch_cursor_withholds_anchor_until_rebuild(tmp_path):
+async def test_old_all_branch_cursor_allows_raw_physical_navigation(tmp_path):
     store, ctx, tool = _env(tmp_path)
     try:
         store.append_event(
-            "alice", "user_input", {"content": "ALL_BRANCH_INDEX_MISMATCH"}
+            "alice",
+            "user_input",
+            {"content": "ALL_BRANCH_INDEX_MISMATCH"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
         )
         first = await tool.execute(
             {"query": "ALL_BRANCH_INDEX_MISMATCH", "mode": "fts"}, context=ctx
@@ -376,8 +399,13 @@ async def test_old_all_branch_cursor_withholds_anchor_until_rebuild(tmp_path):
             context=ctx,
         )
         assert result.error is None
-        assert "ANCHOR_REBUILD_REQUIRED" in result.output
-        assert not re.search(r"^anchor:", result.output, re.M)
+        token = _token(result.output)
+        args = {"anchor": token, "before": 0, "after": 0}
+        selected = await tool.execute(args, context=ctx)
+        assert selected.error is None and "has_after=unknown" in selected.output
+        assert "ALL_BRANCH_INDEX_MISMATCH" not in selected.output
+        raw = await tool.execute({**args, "scope": "raw"}, context=ctx)
+        assert raw.error is None and "ALL_BRANCH_INDEX_MISMATCH" in raw.output
     finally:
         _close(store, ctx)
 
@@ -404,5 +432,134 @@ async def test_legacy_inferred_ancestry_uses_mainline_selection(tmp_path):
         assert window.error is None
         assert "LEGACY_TURN_1" in window.output
         assert "LEGACY_TURN_2" in window.output
+    finally:
+        _close(store, ctx)
+
+
+@pytest.mark.parametrize("regenerate", [False, True])
+async def test_late_legacy_result_does_not_require_another_search(
+    tmp_path, monkeypatch, regenerate
+):
+    store, ctx, tool = _env(tmp_path)
+    try:
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "FIRST_TURN"},
+            turn_index=1,
+            branch_id=1,
+        )
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "SECOND_TURN"},
+            turn_index=2,
+            branch_id=1,
+        )
+        store.append_event(
+            "alice",
+            "tool_call",
+            {"name": "bash", "args": {"command": "LEGACY_CALL"}},
+            turn_index=2,
+            branch_id=1,
+        )
+        store.append_event("alice", "processing_end", {}, turn_index=2, branch_id=1)
+        result = await tool.execute(
+            {"query": "LEGACY_CALL", "mode": "fts"}, context=ctx
+        )
+        token = _token(result.output)
+        if regenerate:
+            store.append_event(
+                "alice",
+                "user_input",
+                {"content": "SIBLING_ROOT"},
+                turn_index=1,
+                branch_id=2,
+                parent_branch_path=[],
+            )
+        store.append_event(
+            "alice",
+            "tool_result",
+            {"name": "bash", "output": "LATE_LEGACY_OUTPUT"},
+            turn_index=2,
+            branch_id=1,
+        )
+        for _ in range(navigation.MAX_LEGACY_PREFIX + 1):
+            store.append_event("alice", "processing_start", {})
+        sizes = []
+        infer = navigation.index_parent_paths
+
+        def observe(rows):
+            sizes.append(len(rows))
+            return infer(rows)
+
+        monkeypatch.setattr(navigation, "index_parent_paths", observe)
+        window = await tool.execute(
+            {"anchor": token, "before": 0, "after": 1}, context=ctx
+        )
+        assert sizes == [navigation.MAX_LEGACY_PREFIX]
+        assert window.error is None
+        assert ("LATE_LEGACY_OUTPUT" in window.output) is not regenerate
+        assert "SIBLING_ROOT" not in window.output
+        raw = await tool.execute(
+            {"anchor": token, "before": 0, "after": 3, "scope": "raw"}, context=ctx
+        )
+        assert raw.error is None and "LATE_LEGACY_OUTPUT" in raw.output
+        assert sizes == [navigation.MAX_LEGACY_PREFIX]
+    finally:
+        _close(store, ctx)
+
+
+@pytest.mark.parametrize("explicit_focus", [False, True])
+async def test_deep_legacy_anchor_has_bounded_selected_and_raw_context(
+    tmp_path, monkeypatch, explicit_focus
+):
+    store, ctx, tool = _env(tmp_path)
+    try:
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "FIRST_TURN"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store._event_seq["alice"] = 500
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "DEEP_LEGACY_FOCUS"},
+            turn_index=2,
+            branch_id=1,
+            parent_branch_path=[(1, 1)] if explicit_focus else None,
+        )
+        store.append_event(
+            "alice",
+            "text",
+            {"content": "DEEP_LEGACY_NEIGHBOR"},
+            turn_index=2,
+            branch_id=1,
+        )
+        result = await tool.execute(
+            {"query": "DEEP_LEGACY_FOCUS", "mode": "fts"}, context=ctx
+        )
+        token = _token(result.output)
+
+        def forbid(*args, **kwargs):
+            raise AssertionError("Context must not scan the complete event history")
+
+        monkeypatch.setattr(store, "_event_rows", forbid)
+        args = {"anchor": token, "before": 0, "after": 1}
+        selected = await tool.execute(args, context=ctx)
+        assert selected.error is None
+        assert "DEEP_LEGACY_NEIGHBOR" not in selected.output
+        assert ("DEEP_LEGACY_FOCUS" in selected.output) is explicit_focus
+        assert "has_after=unknown" in selected.output
+        assert 'scope="raw"' in selected.output
+        raw = await tool.execute({**args, "scope": "raw"}, context=ctx)
+        assert raw.error is None
+        assert "DEEP_LEGACY_FOCUS" in raw.output
+        assert "DEEP_LEGACY_NEIGHBOR" in raw.output
+        assert "turn=2 branch=1" in raw.output
     finally:
         _close(store, ctx)

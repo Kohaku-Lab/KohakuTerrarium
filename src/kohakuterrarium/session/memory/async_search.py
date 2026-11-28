@@ -79,22 +79,22 @@ class LiveSessionMemory:
         return await self._store.run(self._navigator.register_hits, hits, query)
 
     async def read_context(
-        self, anchor: str, *, before: int = 3, after: int = 3, offset: int | None = None
+        self,
+        anchor: str,
+        *,
+        before: int = 3,
+        after: int = 3,
+        offset: int | None = None,
+        scope: str = "selected",
     ):
         return await self._store.run(
-            self._navigator.expand, anchor, before, after, offset
+            self._navigator.expand, anchor, before, after, offset, scope
         )
 
     def _index_keywords(self, names: list[str]) -> None:
         for name in names:
             events = sourced_events(self._store, name)
             self._memory._index_keywords(name, events)
-            try:
-                self._navigator.observe_source(name, events)
-            except Exception as exc:
-                logger.warning(
-                    "Memory source evidence unavailable", agent=name, error=str(exc)
-                )
 
     def _vector_batch(self, name: str):
         events = sourced_events(self._store, name)

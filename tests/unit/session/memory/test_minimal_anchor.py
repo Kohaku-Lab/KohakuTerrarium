@@ -122,6 +122,35 @@ async def test_selected_lineage_skips_sibling_content(tmp_path):
         assert "SECRET_A_NEEDLE" not in window.output
         assert "ANSWER_BRANCH_2" in window.output
         assert "ANSWER_BRANCH_1" not in window.output
+
+        raw = await tool.execute(
+            {"anchor": tokens[0], "before": 10, "after": 10, "scope": "raw"},
+            context=ctx,
+        )
+        assert raw.error is None
+        assert "SECRET_A_NEEDLE" in raw.output
+        assert "ANSWER_BRANCH_1" in raw.output
+        assert "VISIBLE_B_NEEDLE" in raw.output
+        assert raw.output.index("SECRET_A_NEEDLE") < raw.output.index(
+            "VISIBLE_B_NEEDLE"
+        )
+        assert "turn=1 branch=1" in raw.output and "turn=1 branch=2" in raw.output
+        sibling_anchor = _anchors(raw.output)[0]
+        default = await tool.execute(
+            {"anchor": sibling_anchor, "before": 0, "after": 0}, context=ctx
+        )
+        assert default.error is None and "SECRET_A_NEEDLE" not in default.output
+        assert 'scope="raw"' in default.output
+        sibling = await tool.execute(
+            {"anchor": sibling_anchor, "before": 0, "after": 0, "scope": "raw"},
+            context=ctx,
+        )
+        assert sibling.error is None and "SECRET_A_NEEDLE" in sibling.output
+        # Query mode still uses selected-lineage search, not raw retrieval.
+        invalid = await tool.execute(
+            {"query": "SECRET_A_NEEDLE", "mode": "fts", "scope": "raw"}, context=ctx
+        )
+        assert invalid.error and "scope" in invalid.error.lower()
     finally:
         _close(store, ctx)
 
@@ -155,6 +184,15 @@ async def test_large_tool_output_offset_and_explicit_stale_event(tmp_path):
         malformed = await tool.execute({"anchor": token, "offset": -1}, context=ctx)
         assert "INVALID_OFFSET" in malformed.error
 
+        raw_page = await tool.execute(
+            {"anchor": token, "before": 0, "after": 0, "offset": 0, "scope": "raw"},
+            context=ctx,
+        )
+        assert raw_page.error is None
+        assert 'offset=900, scope="raw")' in raw_page.output
+        bad_scope = await tool.execute({"anchor": token, "scope": "other"}, context=ctx)
+        assert "INVALID_SCOPE" in bad_scope.error
+
         store.events["alice:e000001"] = {
             **store.events["alice:e000001"],
             "output": "TAMPERED_SOURCE",
@@ -163,6 +201,10 @@ async def test_large_tool_output_offset_and_explicit_stale_event(tmp_path):
             {"anchor": token, "before": 0, "after": 0}, context=ctx
         )
         assert "ANCHOR_EXPIRED" in stale.error
+        stale_raw = await tool.execute(
+            {"anchor": token, "before": 0, "after": 0, "scope": "raw"}, context=ctx
+        )
+        assert "ANCHOR_EXPIRED" in stale_raw.error
     finally:
         _close(store, ctx)
 

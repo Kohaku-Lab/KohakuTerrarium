@@ -69,6 +69,18 @@ kt embedding swe.kohakutr \
 
 Incremental: running `kt embedding` again only indexes new events.
 
+### Navigate from a search hit
+
+`search_memory(anchor=..., scope="selected")` follows the selected branch
+view saved with the Anchor. If legacy ancestry cannot be resolved within
+the read budget, selected context may be partial.
+
+`search_memory(anchor=..., scope="raw")` reads bounded physical context
+from the same Agent, including other branches and unknown lineage, with
+recorded turn/branch coordinates. It does not broaden keyword or semantic
+search. Both scopes verify the exact source and support continuation and
+offset pagination.
+
 ## Rebuild memory indexes for an older Session
 
 Close all agents, Studio instances and standalone Memory readers/writers

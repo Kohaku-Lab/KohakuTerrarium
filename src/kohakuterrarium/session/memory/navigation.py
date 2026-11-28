@@ -6,7 +6,7 @@ rebuild can upgrade their derived source-bound Anchors.
 
 import re
 import secrets
-from collections import Counter, OrderedDict
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from kohakuterrarium.session.history.branch_paths import (
@@ -21,7 +21,6 @@ from kohakuterrarium.session.memory.blocks import (
     _content_to_text,
     _extract_blocks,
 )
-from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +29,7 @@ MAX_ANCHORS = 2048
 MAX_WINDOW_SIDE = 10
 MAX_PREVIEW = 900
 MAX_SCANNED_PER_SIDE = 256
+MAX_LEGACY_PREFIX = 256
 CONTEXT_TYPES = frozenset(
     {
         "user_input",
@@ -57,7 +57,7 @@ class MemoryNavigationError(ValueError):
 class _Location:
     agent: str
     fingerprint: str
-    view: tuple[tuple[int, int], ...]
+    view: tuple[tuple[int, int], ...] | None
     ref: str
     focus: str = ""
 
@@ -72,6 +72,8 @@ class ContextEvent:
     start: int
     end: int
     total: int
+    turn: int | None = None
+    branch: int | None = None
 
 
 @dataclass(frozen=True)
@@ -79,14 +81,8 @@ class ContextWindow:
     events: list[ContextEvent]
     has_before: bool | None
     has_after: bool | None
-
-
-@dataclass
-class _LineageEvidence:
-    frontier: int | None
-    legacy_paths: dict[str, tuple]
-    ambiguous_ids: set[int]
-    ambiguous_scopes: set[tuple[int, int]]
+    scope: str = "selected"
+    notice: str = ""
 
 
 def _scope(event: dict) -> tuple[int, int] | None:
@@ -112,44 +108,27 @@ def _explicit_path(event: dict, turn: int) -> tuple | None:
     return tuple(sorted(parents.items()))
 
 
-def _lineage_evidence(events: list[dict], frontier: int | None) -> _LineageEvidence:
-    """Keep evidence for legacy ancestry and ambiguous coordinates."""
-    ids = Counter(
-        event["event_id"]
-        for event in events
-        if isinstance(event, dict) and type(event.get("event_id")) is int
-    )
-    ambiguous_ids = {eid for eid, count in ids.items() if count > 1}
-    inferred = None
-    legacy_paths = {}
-    scope_paths: dict[tuple[int, int], dict[int, int]] = {}
-    ambiguous_scopes = set()
-    for event in events:
-        scope = _scope(event)
-        if scope is None:
+def _legacy_paths(store, agent: str, frontier: int) -> dict[int, tuple]:
+    """Resolve ancestry from a bounded physical prefix, using unique row positions."""
+    rows = []
+    for seq in range(min(frontier, MAX_LEGACY_PREFIX)):
+        try:
+            event = store.events[f"{agent}:e{seq:06d}"]
+        except KeyError:
             continue
-        turn, _ = scope
-        eid = event.get("event_id")
-        if type(eid) is not int or eid in ambiguous_ids:
-            continue
-        raw = event.get("parent_branch_path")
-        if raw is None or raw == [] or raw == ():
-            if turn == 1:
-                path = ()
-            else:
-                if inferred is None:
-                    inferred = index_parent_paths(events)
-                path = inferred.get(eid)
-                ref = getattr(event, "source_ref", "")
-                if ref and path is not None:
-                    legacy_paths[ref] = path
-        else:
-            path = _explicit_path(event, turn)
-        if path is not None:
-            parents = scope_paths.setdefault(scope, {})
-            if any(parents.setdefault(t, b) != b for t, b in path):
-                ambiguous_scopes.add(scope)
-    return _LineageEvidence(frontier, legacy_paths, ambiguous_ids, ambiguous_scopes)
+        except Exception:
+            break
+        if not isinstance(event, dict):
+            break
+        rows.append(
+            {
+                "event_id": seq,
+                "turn_index": event.get("turn_index"),
+                "branch_id": event.get("branch_id"),
+                "parent_branch_path": event.get("parent_branch_path"),
+            }
+        )
+    return index_parent_paths(rows)
 
 
 def _event_text(event: dict) -> str:
@@ -191,26 +170,10 @@ class MemoryNavigator:
     def __init__(self, store, memory=None):
         self._store = store
         self._memory = memory
-        self._lineage: dict[str, _LineageEvidence] = {}
         self._anchors: OrderedDict[str, _Location] = OrderedDict()
-
-    def observe_source(self, agent: str, events: list[dict]) -> None:
-        """Reuse the index refresh's event read for lineage evidence."""
-        frontier = self._store._event_seq.get(agent)
-        previous = self._lineage.get(agent)
-        if previous is not None and previous.frontier == frontier:
-            return
-        self._lineage[agent] = _lineage_evidence(events, frontier)
-
-    def _evidence_for(self, agent: str) -> _LineageEvidence:
-        previous = self._lineage.get(agent)
-        if previous is None or previous.frontier != self._store._event_seq.get(agent):
-            self.observe_source(agent, sourced_events(self._store, agent))
-        return self._lineage[agent]
 
     def close(self) -> None:
         self._anchors.clear()
-        self._lineage.clear()
 
     def _remember(self, loc: _Location) -> str:
         token = secrets.token_urlsafe(24)
@@ -258,8 +221,17 @@ class MemoryNavigator:
         return hits
 
     def expand(
-        self, anchor: str, before: int = 3, after: int = 3, offset: int | None = None
+        self,
+        anchor: str,
+        before: int = 3,
+        after: int = 3,
+        offset: int | None = None,
+        scope: str = "selected",
     ) -> ContextWindow:
+        if scope not in ("selected", "raw"):
+            raise MemoryNavigationError(
+                "INVALID_SCOPE", "scope must be selected or raw"
+            )
         if (
             type(before) is not int
             or type(after) is not int
@@ -272,7 +244,7 @@ class MemoryNavigator:
         if not isinstance(anchor, str) or anchor not in self._anchors:
             raise MemoryNavigationError("INVALID_ANCHOR", "Unknown or expired anchor")
         loc = self._anchors[anchor]
-        return self._expand_direct(anchor, loc, before, after, offset)
+        return self._expand_direct(anchor, loc, before, after, offset, scope)
 
     @staticmethod
     def _ref_sequence(agent: str, ref: str) -> int:
@@ -293,64 +265,16 @@ class MemoryNavigator:
             )
         return int(suffix)
 
-    @staticmethod
-    def _visible_scoped(
-        event: dict,
-        ref: str,
-        view: dict[int, int],
-        compatibility: SelectionCompatibility,
-        evidence: _LineageEvidence,
-    ) -> bool:
-        """Check an event against the index's pinned selected lineage."""
-        if event.get("type") not in CONTEXT_TYPES:
-            return False
-        turn, branch = event.get("turn_index"), event.get("branch_id")
-        if turn is None and branch is None:
-            return True
-        if type(turn) is int and type(branch) is int and (turn, branch) == (0, 0):
-            return True
-        scope = _scope(event)
-        eid = event.get("event_id")
-        if (
-            scope is None
-            or view.get(turn) != branch
-            or type(eid) is not int
-            or eid in evidence.ambiguous_ids
-            or scope in evidence.ambiguous_scopes
-        ):
-            return False
-        raw = event.get("parent_branch_path")
-        if raw is None or raw == [] or raw == ():
-            path = () if turn == 1 else evidence.legacy_paths.get(ref)
-        else:
-            path = _explicit_path(event, turn)
-        return path is not None and compatibility.matches(path, turn)
-
-    def _index_view(self, agent: str) -> tuple[tuple[int, int], ...]:
-        if self._memory is None:
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Memory index was not attached."
-            )
+    def _index_view(self, agent: str) -> tuple[tuple[int, int], ...] | None:
+        """Capture the selected index view if available; raw navigation needs none."""
+        if self._memory is None or not self._memory._valid_index(agent, "keywords"):
+            return None
         checkpoint = self._memory._state.get(f"{agent}:cursor:keywords")
-        if not self._memory._valid_index(agent, "keywords"):
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Keyword index update is incomplete."
-            )
-        if not isinstance(checkpoint, dict):
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Missing selected-index checkpoint."
-            )
-        if checkpoint.get("all_branches"):
-            raise MemoryNavigationError(
-                "ANCHOR_REBUILD_REQUIRED",
-                "This index uses a legacy all-branch projection; "
-                "run 'kt memory rebuild SESSION' to restore selected-lineage indexing.",
-            )
+        if not isinstance(checkpoint, dict) or checkpoint.get("all_branches"):
+            return None
         raw = checkpoint.get("branches")
         if not isinstance(raw, dict):
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Selected-lineage proof is not available."
-            )
+            return None
         try:
             selected = _coerce_branch_view(
                 {
@@ -362,15 +286,10 @@ class MemoryNavigator:
             requested = _coerce_branch_view(
                 self._store.state.get(f"{agent}:branch_view")
             )
-        except InvalidBranchViewError as exc:
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Invalid branch selection."
-            ) from exc
+        except InvalidBranchViewError:
+            return None
         if any(selected.get(turn) != branch for turn, branch in requested.items()):
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE",
-                "Indexed lineage differs from the active selected branch.",
-            )
+            return None
         return tuple(sorted(selected.items()))
 
     def _direct_hit(self, hit, query: str) -> _Location:
@@ -387,15 +306,6 @@ class MemoryNavigator:
             raise MemoryNavigationError(
                 "STALE_INDEX", "Indexed source and physical event do not agree."
             )
-        view = self._index_view(hit.agent)
-        evidence = self._evidence_for(hit.agent)
-        selected = dict(view)
-        if not self._visible_scoped(
-            event, ref, selected, SelectionCompatibility(selected), evidence
-        ):
-            raise MemoryNavigationError(
-                "UNVERIFIABLE_SOURCE", "Hit is outside certified selected lineage."
-            )
         try:
             part = int(hit.block_id.rsplit(":p", 1)[1])
         except (ValueError, IndexError) as exc:
@@ -406,12 +316,23 @@ class MemoryNavigator:
             raise MemoryNavigationError(
                 "STALE_INDEX", "Indexed block is not derived from its physical source."
             )
-        # Paragraph index only proves the hit belongs to the event. The
-        # resulting Anchor identifies the whole physical event, not a part.
+        try:
+            view = self._index_view(hit.agent)
+        except Exception as exc:
+            logger.warning(
+                "Selected Memory view unavailable", agent=hit.agent, error=str(exc)
+            )
+            view = None
         return _Location(hit.agent, hit.source_fingerprint, view, ref, query[:100])
 
     def _expand_direct(
-        self, anchor: str, loc: _Location, before: int, after: int, offset: int | None
+        self,
+        anchor: str,
+        loc: _Location,
+        before: int,
+        after: int,
+        offset: int | None,
+        scope: str,
     ) -> ContextWindow:
         """Use exact-key probes with strict bounds on keys examined."""
         start_seq = self._ref_sequence(loc.agent, loc.ref)
@@ -422,21 +343,55 @@ class MemoryNavigator:
             raise MemoryNavigationError(
                 "ANCHOR_EXPIRED", "Physical event was deleted."
             ) from exc
-        view = dict(loc.view)
-        compatibility = SelectionCompatibility(view)
-        evidence = self._lineage[loc.agent]
-        if (
-            not isinstance(raw, dict)
-            or _anchor(raw) != loc.fingerprint
-            or not self._visible_scoped(raw, loc.ref, view, compatibility, evidence)
-        ):
-            raise MemoryNavigationError(
-                "ANCHOR_EXPIRED", "Anchor source or visibility changed."
-            )
+        if not isinstance(raw, dict) or _anchor(raw) != loc.fingerprint:
+            raise MemoryNavigationError("ANCHOR_EXPIRED", "Anchor source changed.")
         frontier = self._store._event_seq.get(loc.agent)
         if type(frontier) is not int or frontier <= start_seq:
             raise MemoryNavigationError(
                 "UNVERIFIABLE_SOURCE", "Physical event high-watermark unavailable."
+            )
+
+        view = dict(loc.view or ()) if scope == "selected" else {}
+        compatibility = SelectionCompatibility(view)
+        paths = None
+
+        def visible(event: dict, seq: int) -> bool | None:
+            nonlocal paths
+            if event.get("type") not in CONTEXT_TYPES:
+                return False
+            if scope == "raw":
+                return True
+            turn, branch = event.get("turn_index"), event.get("branch_id")
+            if turn is None and branch is None:
+                return True
+            if type(turn) is int and type(branch) is int and (turn, branch) == (0, 0):
+                return True
+            if _scope(event) is None or loc.view is None:
+                return None
+            if view.get(turn) != branch:
+                return False
+            ancestry = event.get("parent_branch_path")
+            if ancestry is None or ancestry == [] or ancestry == ():
+                if turn == 1:
+                    path = ()
+                elif seq >= MAX_LEGACY_PREFIX:
+                    return None
+                else:
+                    if paths is None:
+                        paths = _legacy_paths(self._store, loc.agent, frontier)
+                    path = paths.get(seq)
+            else:
+                path = _explicit_path(event, turn)
+            return None if path is None else compatibility.matches(path, turn)
+
+        if visible(raw, start_seq) is not True:
+            return ContextWindow(
+                [],
+                None,
+                None,
+                scope,
+                "Anchor is outside the selected view or its lineage is unknown. "
+                'Use scope="raw" to inspect the physical event.',
             )
 
         def side(direction: int, count: int):
@@ -452,10 +407,12 @@ class MemoryNavigator:
                     event = self._store.events[ref]
                 except KeyError:
                     event = None
-                if isinstance(event, dict) and self._visible_scoped(
-                    event, ref, view, compatibility, evidence
-                ):
-                    found.append((ref, event))
+                if isinstance(event, dict):
+                    eligible = visible(event, seq)
+                    if eligible is None:
+                        return found[:count], None
+                    if eligible:
+                        found.append((ref, event))
                 seq += direction
             return found[:count], len(found) > count
 
@@ -499,6 +456,8 @@ class MemoryNavigator:
                     start,
                     end,
                     len(content),
+                    event.get("turn_index"),
+                    event.get("branch_id"),
                 )
             )
-        return ContextWindow(out, has_before, has_after)
+        return ContextWindow(out, has_before, has_after, scope)

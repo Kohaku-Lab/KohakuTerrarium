@@ -1781,6 +1781,13 @@ class TestSessionIntegration:
             assert warning is None
             assert hits[0].content == "the authentication subsystem has a bug"
             assert hits[0].source_ref and hits[0].source_fingerprint
+            hits = await live.attach_anchors(hits, "authentication")
+            anchor = hits[0].anchor
+            for scope in ("selected", "raw"):
+                window = await live.read_context(anchor, before=0, after=1, scope=scope)
+                assert window.scope == scope
+                assert window.events[0].content == hits[0].content
+                assert window.events[0].anchor == anchor
         finally:
             rebuilt_store.close()
 
