@@ -6,9 +6,15 @@ The actual indexing logic lives in
 module is strictly the rich-CLI presentation layer.
 """
 
+import sys
+
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.rebuild import (
+    inspect_index,
+    rebuild_session_memory,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import build_index
 from kohakuterrarium.utils.logging import get_logger
@@ -65,6 +71,92 @@ def embedding_cli(
     return 0
 
 
+def rebuild_memory_cli(
+    session_query: str,
+    *,
+    vectors: str = "auto",
+    provider: str | None = None,
+    model: str | None = None,
+    dimensions: int | None = None,
+    dry_run: bool = False,
+) -> int:
+    """Restore the Session's derived Search index without altering event history.
+
+    Interactive users can choose how to treat existing vectors; automation
+    must provide an explicit choice when semantic rows are present.
+    """
+    path = _resolve_session(session_query)
+    if path is None:
+        print(f"Session not found: {session_query}")
+        return 1
+    try:
+        current = inspect_index(path)
+        print(f"Session: {path.name}")
+        print(f"Existing FTS: {current.fts_rows} indexed blocks")
+        if current.vector_rows:
+            print(
+                "Existing vectors: "
+                + ", ".join(
+                    f"{count} blocks ({dims}d)" for dims, count in current.vector_rows
+                )
+            )
+        else:
+            print("Existing vectors: none")
+        print("Plan: rebuild current selected-lineage Search index for all agents.")
+        print("Search coverage can change if the old index included other branches.")
+        print("Source history will remain unchanged; original database is backed up.")
+        if dry_run:
+            if current.vectors_present and vectors == "auto":
+                print("Action required: choose --vectors rebuild or --vectors drop.")
+            return 0
+
+        if vectors == "auto" and current.vectors_present:
+            if not sys.stdin.isatty():
+                print(
+                    "Existing semantic index requires a choice: "
+                    "--vectors rebuild (may incur model/API cost), or "
+                    "--vectors drop (disables old semantic index)."
+                )
+                return 1
+            print(
+                "Existing vectors need re-embedding for the current index "
+                "format; old vectors will not be reused without proof."
+            )
+            choice = input("Rebuild vectors [r], drop old vectors [d], abort [Enter]? ")
+            if choice.strip().lower() in ("r", "rebuild"):
+                vectors = "rebuild"
+            elif choice.strip().lower() in ("d", "drop"):
+                vectors = "drop"
+            else:
+                print("Cancelled without modifying the Session.")
+                return 1
+
+        result = rebuild_session_memory(
+            path,
+            vectors=vectors,
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
+        )
+        print(
+            f"Rebuilt {result.fts_rows} FTS and {result.vector_rows} vector blocks "
+            f"from {result.events} events across {len(result.agents)} agents."
+        )
+        if result.vector_policy == "drop":
+            print("Old vector index explicitly disabled; re-embed later to restore it.")
+        print(f"Original database backup: {result.backup}")
+        print("Done. Search and Anchor metadata now use the current index format.")
+        return 0
+    except Exception as exc:
+        # Report provider and index maintenance failures with retry guidance.
+        print(f"Rebuild refused or incomplete: {exc}")
+        print(
+            "Check that the Session is closed and the embedding provider is "
+            "available, then retry. Any existing backup is left intact."
+        )
+        return 1
+
+
 def search_cli(
     session_query: str,
     query: str,
@@ -101,9 +193,15 @@ def search_cli(
             mode = "fts"
 
         results = memory.search(query, mode=mode, k=k, agent=agent)
+        if getattr(results, "warning", None):
+            print(f"Warning: {results.warning}")
 
         if not results:
-            print("No results found.")
+            print(
+                "No eligible hits within the scanned candidate budget."
+                if getattr(results, "warning", None)
+                else "No results found."
+            )
             return 0
 
         print(f"Found {len(results)} result(s) for: {query}")

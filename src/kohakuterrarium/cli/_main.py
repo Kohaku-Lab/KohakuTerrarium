@@ -35,7 +35,7 @@ from kohakuterrarium.cli.identity.mcp import list_for_agent_cli as mcp_list_cli
 from kohakuterrarium.cli.lab_client import add_lab_client_subparser, lab_client_cli
 from kohakuterrarium.cli.marketplace import marketplace_cli
 from kohakuterrarium.cli.mcp.serve import add_mcp_serve_subparser, mcp_serve_cli
-from kohakuterrarium.cli.memory import embedding_cli, search_cli
+from kohakuterrarium.cli.memory import embedding_cli, search_cli, rebuild_memory_cli
 from kohakuterrarium.cli.model import model_cli
 from kohakuterrarium.cli.packages import (
     edit_cli,
@@ -329,6 +329,32 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dimensions", type=int, default=None, help="Embedding dimensions (Matryoshka)"
     )
 
+    memory_parser = subparsers.add_parser(
+        "memory", help="Maintain the current Session memory index"
+    )
+    memory_sub = memory_parser.add_subparsers(dest="memory_command", required=True)
+    rebuild_parser = memory_sub.add_parser(
+        "rebuild", help="Rebuild a Session's derived search index safely"
+    )
+    rebuild_parser.add_argument("session", help="Session path or name/prefix")
+    rebuild_parser.add_argument(
+        "--vectors",
+        choices=["auto", "drop", "rebuild"],
+        default="auto",
+        help="Vector treatment: prompt when needed, drop old vectors, or re-embed",
+    )
+    rebuild_parser.add_argument(
+        "--provider",
+        choices=["auto", "model2vec", "sentence-transformer", "api"],
+        default=None,
+        help="Vector rebuild provider (default: saved provider)",
+    )
+    rebuild_parser.add_argument("--model", default=None)
+    rebuild_parser.add_argument("--dimensions", type=int, default=None)
+    rebuild_parser.add_argument(
+        "--dry-run", action="store_true", help="Inspect the plan without changes"
+    )
+
     search_parser = subparsers.add_parser("search", help="Search a session's memory")
     search_parser.add_argument("session", help="Session name/prefix or path")
     search_parser.add_argument("query", help="Search query")
@@ -563,6 +589,18 @@ def _dispatch_embedding(args: argparse.Namespace) -> int:
     return embedding_cli(args.session, args.provider, args.model, args.dimensions)
 
 
+def _dispatch_memory(args: argparse.Namespace) -> int:
+    """Run explicit Session-wide derived memory maintenance."""
+    return rebuild_memory_cli(
+        args.session,
+        vectors=args.vectors,
+        provider=args.provider,
+        model=args.model,
+        dimensions=args.dimensions,
+        dry_run=args.dry_run,
+    )
+
+
 def _dispatch_search(args: argparse.Namespace) -> int:
     """Handle the 'search' command."""
     return search_cli(args.session, args.query, args.mode, args.agent, args.k)
@@ -632,6 +670,7 @@ COMMANDS: dict[str, callable] = {
     "update": lambda args: update_cli(args.target, args.all),
     "edit": lambda args: edit_cli(args.target),
     "embedding": _dispatch_embedding,
+    "memory": _dispatch_memory,
     "search": _dispatch_search,
     "web": _dispatch_web,
     "app": _dispatch_app,

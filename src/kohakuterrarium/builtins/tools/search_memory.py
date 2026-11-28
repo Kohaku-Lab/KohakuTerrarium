@@ -14,6 +14,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.navigation import MemoryNavigationError
 from kohakuterrarium.session.memory.async_search import (
     LiveSessionMemory,
     live_memory_for_store,
@@ -37,8 +38,9 @@ class SearchMemoryTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Search this session's earlier events by keyword or meaning. Use it to "
-            "recall details dropped from context. Not for searching files - use grep."
+            "Search this session's history by keyword or meaning. "
+            "Explore context via anchors; scope=raw reads physical history. "
+            "Not for files - use grep."
         )
 
     @property
@@ -47,10 +49,17 @@ class SearchMemoryTool(BaseTool):
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         query = args.get("query", "")
-        if not query:
+        anchor = args.get("anchor", "")
+        if bool(query) == bool(anchor):
             return ToolResult(
-                error="No query provided. Usage: search_memory(query='...')"
+                error="Provide exactly one of query or anchor in search_memory."
             )
+
+        scope = args.get("scope", "selected")
+        if scope not in ("selected", "raw"):
+            return ToolResult(error="INVALID_SCOPE: scope must be selected or raw")
+        if query and scope == "raw":
+            return ToolResult(error="INVALID_SCOPE: raw scope requires an anchor")
 
         mode = args.get("mode", "auto")
         k = int(args.get("k", 5))
@@ -66,6 +75,21 @@ class SearchMemoryTool(BaseTool):
                 error="Session memory not available. "
                 "No session store attached or embedding not configured."
             )
+
+        if anchor:
+            if not isinstance(memory, LiveSessionMemory):
+                return ToolResult(error="Anchors require an attached live session.")
+            try:
+                window = await memory.read_context(
+                    anchor,
+                    before=args.get("before", 3),
+                    after=args.get("after", 3),
+                    offset=args.get("offset"),
+                    scope=scope,
+                )
+                return ToolResult(output=self._format_window(window), exit_code=0)
+            except MemoryNavigationError as exc:
+                return ToolResult(error=f"{exc.code}: {exc}")
 
         warning = None
         try:
@@ -89,16 +113,34 @@ class SearchMemoryTool(BaseTool):
                 results = await asyncio.to_thread(
                     memory.search, query, mode=mode, k=k, agent=agent
                 )
+                warning = getattr(results, "warning", None)
         except Exception as e:
             return ToolResult(error=f"Search failed: {e}")
 
         if not results:
+            no_hits = (
+                "No eligible hits within the scanned candidate budget."
+                if getattr(results, "warning", None)
+                else "No results found."
+            )
             return ToolResult(
-                output=(
-                    f"{warning}\nNo results found." if warning else "No results found."
-                ),
+                output="\n".join((warning, no_hits)) if warning else no_hits,
                 exit_code=0,
             )
+
+        if isinstance(memory, LiveSessionMemory):
+            try:
+                results = await memory.attach_anchors(results, query)
+            except MemoryNavigationError as exc:
+                # An incompatible historical index must not break legacy search.
+                affected = (
+                    " for some hits"
+                    if any(getattr(r, "anchor", "") for r in results)
+                    else ""
+                )
+                warning = (warning + "\n" if warning else "") + (
+                    f"Anchors unavailable{affected} ({exc.code}): {exc}"
+                )
 
         lines = [f"Found {len(results)} result(s) for: {query}\n"]
         if warning:
@@ -113,6 +155,8 @@ class SearchMemoryTool(BaseTool):
             if age:
                 header += f" {age}"
             lines.append(header)
+            if getattr(r, "anchor", ""):
+                lines.append(f"anchor: {r.anchor}")
             # Bound each result so one event cannot consume the tool-result context.
             content = r.content
             if len(content) > SEARCH_RESULT_DISPLAY_CHARS:
@@ -123,7 +167,75 @@ class SearchMemoryTool(BaseTool):
             lines.append(content)
             lines.append("")
 
+        tool_call = next(
+            (
+                r
+                for r in results
+                if getattr(r, "anchor", "")
+                and r.block_type == "tool"
+                and r.content.startswith("[tool:")
+            ),
+            None,
+        )
+        if tool_call:
+            lines.extend(
+                (
+                    "Navigation (optional): Follow this tool call to its "
+                    "recorded output, which may not be directly searchable:",
+                    f'search_memory(anchor="{tool_call.anchor}", before=0, after=3)',
+                    "Continue from the last returned event's anchor if more "
+                    "neighboring events are needed.",
+                )
+            )
+
         return ToolResult(output="\n".join(lines), exit_code=0)
+
+    @staticmethod
+    def _format_window(window) -> str:
+        lines = [
+            f"Memory context ({len(window.events)} events, chronological, scope={window.scope}):"
+        ]
+        if window.notice:
+            lines.append(window.notice)
+        if window.scope == "raw":
+            lines.append("Physical history; events are not filtered by branch.")
+        for event in window.events:
+            header = f"[{event.role}] {event.kind}"
+            if window.scope == "raw":
+                turn = event.turn if type(event.turn) is int else "?"
+                branch = event.branch if type(event.branch) is int else "?"
+                header += f" turn={turn} branch={branch}"
+            lines.append(header)
+            lines.append(f"anchor: {event.anchor}")
+            lines.append(event.content)
+            if event.truncated:
+                lines.append(
+                    f"content_slice={event.start}:{event.end}/{event.total}"
+                    f" next_offset={event.end if event.end < event.total else 'none'}"
+                )
+                if event.end < event.total:
+                    scope_arg = ', scope="raw"' if window.scope == "raw" else ""
+                    lines.append(
+                        "Continue: "
+                        f'search_memory(anchor="{event.anchor}", '
+                        f"before=0, after=0, offset={event.end}{scope_arg})"
+                    )
+            lines.append("")
+        before = (
+            "unknown" if window.has_before is None else str(window.has_before).lower()
+        )
+        after = "unknown" if window.has_after is None else str(window.has_after).lower()
+        lines.append(f"has_before={before} has_after={after}")
+        if (
+            window.scope == "selected"
+            and not window.notice
+            and (window.has_before is None or window.has_after is None)
+        ):
+            lines.append(
+                "Selected context is limited by the scan budget or unknown lineage; "
+                'use scope="raw" to inspect physical history.'
+            )
+        return "\n".join(lines)
 
     async def _get_memory(self, context: ToolContext) -> Any:
         """Return the store-owned index without initializing an embedding model."""

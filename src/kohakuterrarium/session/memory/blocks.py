@@ -79,6 +79,7 @@ def extract_batch(
     blocks = _extract_blocks(
         agent, events[count:], count, cursor=state, live_ids=live_ids
     )
+    blocks = [block for block in blocks if block.tool_name != "search_memory"]
     if start_from > count:
         blocks = [
             b
@@ -108,6 +109,8 @@ class Block:
     tool_args: dict[str, Any] = field(default_factory=dict)
     channel: str = ""
     block_id: str = ""
+    source_ref: str = ""
+    source_fingerprint: str = ""
 
 
 def _content_to_text(content: Any) -> str:
@@ -271,8 +274,12 @@ def _extract_blocks(
         elif etype == "processing_end":
             in_round = False
 
+        source_ref = getattr(evt, "source_ref", "")
+        source_fingerprint = _anchor(evt) if source_ref else ""
         for part, block in enumerate(blocks[first_block:]):
             block.block_id = f"{agent}:e{event_offset + i}:p{part}"
+            block.source_ref = source_ref
+            block.source_fingerprint = source_fingerprint
 
     state.update(round=round_num, block=block_num, in_round=in_round)
     return blocks

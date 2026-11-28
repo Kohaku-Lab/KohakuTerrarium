@@ -6,6 +6,7 @@ released automatically when a process exits.
 
 import os
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import SessionLockedError
@@ -27,6 +28,18 @@ TABLE_ATTRS: tuple[str, ...] = (
     "conversation",
     "turn_rollup",
 )
+
+
+def unique_lock_authorities(targets: list[Path], suffix: str) -> list[str]:
+    """Return listed targets deduplicated by their physical lock-file identities."""
+    identities = {
+        os.path.normcase(str(path.parent.resolve() / path.name)) for path in targets
+    }
+    by_lock = {}
+    for path in sorted(identities):
+        key = os.path.normcase(str(Path(path + suffix).resolve()))
+        by_lock.setdefault(key, path)
+    return [by_lock[key] for key in sorted(by_lock)]
 
 
 def acquire_writer_lock(path: str) -> FileLock:

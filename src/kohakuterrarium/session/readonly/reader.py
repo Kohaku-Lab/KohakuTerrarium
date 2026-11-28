@@ -12,6 +12,7 @@ from kohakuterrarium.session.history.replay import (
     select_live_event_ids,
 )
 from kohakuterrarium.session.memory.index import SearchResult, SessionMemory
+from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -153,7 +154,7 @@ class SessionReader:
         try:
             total = 0
             for name in self.agents:
-                total += memory.index_events(name, self._store.get_events(name))
+                total += memory.index_events(name, sourced_events(self._store, name))
             return total
         finally:
             memory.close()

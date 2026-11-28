@@ -12,7 +12,7 @@ from kohakuterrarium.session.store.events.discovery import (
     discover_agents,
     discover_attached_agents,
 )
-from kohakuterrarium.session.store.events.values import _iter_event_values
+from kohakuterrarium.session.store.events.values import _iter_event_rows
 from kohakuterrarium.session.vault.io import key_text, read_prefix, scan_keys
 
 
@@ -64,9 +64,15 @@ class EventReadMixin:
         self, agent: str, since_event_id: int | None = None
     ) -> Iterator[dict]:
         """Iterate values in physical-key order inside the owning store operation."""
+        return (event for _, event in self._event_rows(agent, since_event_id))
+
+    def _event_rows(
+        self, agent: str, since_event_id: int | None = None, *, strict: bool = False
+    ) -> Iterator[tuple[Any, dict]]:
+        """Read physical keys and payloads in the owning store operation."""
         self._flush_events_cache()
         keys = scan_keys(self.events, f"{agent}:e")
-        return _iter_event_values(self.events, keys, since_event_id)
+        return _iter_event_rows(self.events, keys, since_event_id, strict=strict)
 
     def max_event_id(self, agent: str) -> int:
         """Return the session-global max ``event_id`` (monotonic, per-session).

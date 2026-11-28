@@ -71,6 +71,7 @@ from kohakuterrarium.session.history.replay import (
     replay_conversation,
 )
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.rebuild import rebuild_session_memory
 from kohakuterrarium.session.memory.async_search import live_memory_for_store
 from kohakuterrarium.session.readonly.candidate import read_metadata_candidate
 from kohakuterrarium.session.migrations import (
@@ -1804,9 +1805,47 @@ class TestSessionIntegration:
         reopened = SessionStore.open_readonly(session_path)
         try:
             assert try_fast(session_path, eligible=True).reason == "legacy_enrolled"
-            assert reopened.get_events("seeker")
+            saved_events = reopened.get_events("seeker")
+            assert saved_events
         finally:
             reopened.close()
+
+        rebuilt = await asyncio.to_thread(
+            rebuild_session_memory,
+            session_path,
+            vectors="rebuild",
+            embedder=_HashEmbedder(),
+        )
+        assert rebuilt.agents == ("seeker",)
+        assert rebuilt.fts_rows == rebuilt.vector_rows > 0
+        backup = SessionStore.open_readonly(rebuilt.backup)
+        try:
+            assert backup.get_events("seeker") == saved_events
+        finally:
+            backup.close()
+        rebuilt_store = SessionStore(session_path)
+        try:
+            assert rebuilt_store.get_events("seeker") == saved_events
+            live = await rebuilt_store.run(live_memory_for_store, rebuilt_store)
+            hits, warning = await live.search(
+                "authentication",
+                names=["seeker"],
+                config={},
+                create_embedder=lambda _: _HashEmbedder(),
+                mode="fts",
+            )
+            assert warning is None
+            assert hits[0].content == "the authentication subsystem has a bug"
+            assert hits[0].source_ref and hits[0].source_fingerprint
+            hits = await live.attach_anchors(hits, "authentication")
+            anchor = hits[0].anchor
+            for scope in ("selected", "raw"):
+                window = await live.read_context(anchor, before=0, after=1, scope=scope)
+                assert window.scope == scope
+                assert window.events[0].content == hits[0].content
+                assert window.events[0].anchor == anchor
+        finally:
+            rebuilt_store.close()
 
     async def test_fork_at_event_copies_lineage(
         self, patched_llm, tmp_path, monkeypatch

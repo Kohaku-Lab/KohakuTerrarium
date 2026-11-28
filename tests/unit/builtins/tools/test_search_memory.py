@@ -191,22 +191,24 @@ class TestSearchMemoryDisplay:
 
 
 class TestEnsureIndexedOffLoop:
-    async def test_index_refresh_does_not_block_event_loop(self, tmp_path):
-        # S5 negative case: the full-table event scan for index refresh
+    async def test_index_refresh_does_not_block_event_loop(self, tmp_path, monkeypatch):
+        from kohakuterrarium.session.memory import async_search as live_search
+
+        # S5 negative case: the source-bound event read for index refresh
         # runs on the store's affinity thread while the loop stays live.
         store = SessionStore(str(tmp_path / "tool-slow.kohakutr"))
         try:
             store.init_meta("sess", "agent", "/p", "/w", ["alice"])
             store.append_event("alice", "user_input", {"content": "hi"})
             store.flush()
-            real_get_events = store.get_events
+            real_sourced_events = live_search.sourced_events
             witness = LoopWitness(asyncio.get_running_loop())
 
-            def observed_get_events(agent, **kwargs):
+            def observed_source_read(source_store, agent):
                 witness.observe()
-                return real_get_events(agent, **kwargs)
+                return real_sourced_events(source_store, agent)
 
-            store.get_events = observed_get_events
+            monkeypatch.setattr(live_search, "sourced_events", observed_source_read)
 
             agent = type("A", (), {"session_store": store, "config": None})()
             ctx = ToolContext(

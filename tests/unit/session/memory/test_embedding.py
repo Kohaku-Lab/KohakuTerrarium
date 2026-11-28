@@ -366,3 +366,38 @@ class TestAPIEmbedderEncode:
         vecs = emb.encode(["x"])
         assert vecs.shape == (1, 4)
         assert emb.dimensions == 4
+
+
+@pytest.mark.parametrize(
+    ("provider", "default"),
+    [
+        ("model2vec", DEFAULT_M2V_MODEL),
+        ("sentence-transformer", DEFAULT_ST_MODEL),
+    ],
+)
+@pytest.mark.parametrize("missing_model", [None, ""])
+def test_saved_empty_model_uses_provider_default(
+    monkeypatch, provider, default, missing_model
+):
+    """Old embedding_config persists a model key whose value is None."""
+    captured = {}
+
+    def fake_m2v_init(self, model_name=DEFAULT_M2V_MODEL):
+        captured["model"] = model_name
+        self.dimensions = 4
+
+    def fake_st_init(self, model_name=DEFAULT_ST_MODEL, dimensions=None, device="cpu"):
+        captured["model"] = model_name
+        self.dimensions = 4
+
+    monkeypatch.setattr(Model2VecEmbedder, "__init__", fake_m2v_init)
+    monkeypatch.setattr(SentenceTransformerEmbedder, "__init__", fake_st_init)
+    result = create_embedder({"provider": provider, "model": missing_model})
+    assert isinstance(result, BaseEmbedder)
+    assert captured["model"] == default
+
+
+def test_saved_empty_api_embedding_model_uses_default():
+    result = create_embedder({"provider": "api", "api_key": "test", "model": None})
+    assert isinstance(result, APIEmbedder)
+    assert result._model == "text-embedding-3-small"

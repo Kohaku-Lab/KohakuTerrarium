@@ -234,7 +234,8 @@ def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
 
     ``auto`` selects the best installed local provider. ``none`` or missing config
     returns :class:`NullEmbedder`; API providers may load their key from an
-    environment variable.
+    environment variable. Legacy saved configs may contain a null model:
+    missing, null and empty model names select the provider's default.
     """
     if not config:
         return NullEmbedder()
@@ -246,14 +247,14 @@ def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
 
     match provider:
         case "model2vec":
-            model = config.get("model", DEFAULT_M2V_MODEL)
+            model = config.get("model") or DEFAULT_M2V_MODEL
             preset = _resolve_preset(model, MODEL2VEC_PRESETS)
             if preset:
                 model = preset["model"]
             return Model2VecEmbedder(model_name=model)
 
         case "sentence-transformer":
-            model = config.get("model", DEFAULT_ST_MODEL)
+            model = config.get("model") or DEFAULT_ST_MODEL
             dims = config.get("dimensions")
             device = config.get("device", "cpu")
             preset = _resolve_preset(model, ST_PRESETS)
@@ -273,7 +274,7 @@ def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
                 raise ValueError("API embedding requires api_key or api_key_env")
             return APIEmbedder(
                 api_key=api_key,
-                model=config.get("model", "text-embedding-3-small"),
+                model=config.get("model") or "text-embedding-3-small",
                 base_url=config.get("base_url", "https://api.openai.com/v1"),
                 dimensions=config.get("dimensions"),
             )

@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.navigation import MemoryNavigator
+from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -59,6 +61,7 @@ class LiveSessionMemory:
     def __init__(self, store):
         self._store = store
         self._memory = SessionMemory(store.path)
+        self._navigator = MemoryNavigator(store, self._memory)
         self._worker = _EmbeddingWorker()
         self._semantic_lock = asyncio.Lock()
         self._embedder: BaseEmbedder | None = None
@@ -69,14 +72,32 @@ class LiveSessionMemory:
         if not self._closed:
             self._closed = True
             self._worker.close()
+            self._navigator.close()
             self._memory.close()
+
+    async def attach_anchors(self, hits: list, query: str) -> list:
+        return await self._store.run(self._navigator.register_hits, hits, query)
+
+    async def read_context(
+        self,
+        anchor: str,
+        *,
+        before: int = 3,
+        after: int = 3,
+        offset: int | None = None,
+        scope: str = "selected",
+    ):
+        return await self._store.run(
+            self._navigator.expand, anchor, before, after, offset, scope
+        )
 
     def _index_keywords(self, names: list[str]) -> None:
         for name in names:
-            self._memory._index_keywords(name, self._store.get_events(name))
+            events = sourced_events(self._store, name)
+            self._memory._index_keywords(name, events)
 
     def _vector_batch(self, name: str):
-        events = self._store.get_events(name)
+        events = sourced_events(self._store, name)
         start, blocks = self._memory._vector_batch(name, events)
         return start, len(events), blocks
 
@@ -108,7 +129,7 @@ class LiveSessionMemory:
                             results = await self._store.run(
                                 self._memory._search_fts, query, k, agent
                             )
-                            return results, None
+                            return results, getattr(results, "warning", None)
                         raise ValueError("semantic search needs an embedding model")
                     for name in names:
                         start, count, blocks = await self._store.run(
@@ -137,11 +158,12 @@ class LiveSessionMemory:
                         agent,
                     )
                     if mode == "semantic":
-                        return results, None
+                        return results, getattr(results, "warning", None)
                     keywords = await self._store.run(
                         self._memory._search_fts, query, k * 2, agent
                     )
-                    return self._memory._fuse_results(keywords, results, k), None
+                    fused = self._memory._fuse_results(keywords, results, k)
+                    return fused, getattr(fused, "warning", None)
             except Exception as exc:
                 if self._closed or (mode == "semantic" and not semantic_fallback):
                     raise
@@ -151,7 +173,10 @@ class LiveSessionMemory:
                     error=str(exc) or type(exc).__name__,
                 )
         results = await self._store.run(self._memory._search_fts, query, k, agent)
-        return results, warning
+        notices = [
+            notice for notice in (warning, getattr(results, "warning", None)) if notice
+        ]
+        return results, chr(10).join(notices) if notices else None
 
 
 def live_memory_for_store(store) -> LiveSessionMemory:

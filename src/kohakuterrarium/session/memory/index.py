@@ -4,8 +4,9 @@ Events are grouped into rounds and searchable text, tool, trigger, or user block
 """
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from kohakuvault import KVault, TextVault, VectorKVault
 
@@ -24,6 +25,55 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Search calls/results are retained as recorded events, but must not crowd
+# actual evidence out of a query's top-k. Vault search only exposes ranked
+# prefixes, so progressively widen the candidate window *before* truncating.
+_MAX_RANKED_CANDIDATES = 8192
+# sqlite-vec vec0 rejects KNN requests with k > 4096, even on small tables.
+_MAX_VECTOR_CANDIDATES = 4096
+_RankedHit = TypeVar("_RankedHit")
+
+
+def _without_search_echo(
+    retrieve: Callable[[int], list[_RankedHit]],
+    *,
+    k: int,
+    agent: str | None,
+    max_candidates: int | None = None,
+    eligible: Callable[[str], bool] | None = None,
+) -> tuple[list[_RankedHit], bool]:
+    """Return visible ranked prefix and whether the backend cap hid its tail.
+
+    A full budget does not imply a failure: callers return the verified subset
+    with a warning if fewer than k eligible hits could be established.
+    """
+    if k <= 0:
+        return [], False
+    budget = _MAX_RANKED_CANDIDATES if max_candidates is None else max_candidates
+    limit = min(budget, max(32, k * 2))
+    while True:
+        candidates = retrieve(limit)
+        visible = [
+            hit
+            for hit in candidates
+            if hit[2].get("tool_name") != "search_memory"
+            and (agent is None or hit[2].get("agent") == agent)
+            and (eligible is None or eligible(hit[2].get("agent", "")))
+        ]
+        if len(visible) >= k or len(candidates) < limit:
+            return visible[:k], False
+        if limit >= budget:
+            return visible[:k], True
+        limit = min(budget, limit * 2)
+
+
+def _incomplete_warning(backend: str, limit: int, found: int, requested: int) -> str:
+    return (
+        f"Search results may be incomplete: {backend} candidate limit "
+        f"({limit}) reached after filtering; returning {found} of "
+        f"{requested} requested hits. Narrow the query for better coverage."
+    )
+
 
 @dataclass
 class SearchResult:
@@ -39,6 +89,9 @@ class SearchResult:
     tool_name: str = ""
     channel: str = ""
     block_id: str = ""
+    anchor: str = ""
+    source_ref: str = ""
+    source_fingerprint: str = ""
 
     @property
     def age_str(self) -> str:
@@ -53,6 +106,14 @@ class SearchResult:
         return f"{elapsed / 3600:.1f}h ago"
 
 
+class SearchHits(list[SearchResult]):
+    """List-compatible search hits with a per-query, nonfatal notice."""
+
+    def __init__(self, items=(), *, warning: str | None = None) -> None:
+        super().__init__(items)
+        self.warning = warning
+
+
 @dataclass
 class _IndexBatch:
     start: int
@@ -60,6 +121,7 @@ class _IndexBatch:
     generation: int
     embedder: object
     checkpoint: dict
+    reset: bool
 
 
 class SessionMemory:
@@ -104,6 +166,7 @@ class SessionMemory:
 
         # Dimension-specific tables prevent incompatible embedding models from mixing.
         self._vec: VectorKVault | None = None
+        self._active_vector_dims = 0
         if self._has_vectors and self._embedder.dimensions > 0:
             dims = self._embedder.dimensions
             self._vec = self._resources.open(
@@ -112,6 +175,7 @@ class SessionMemory:
                 table=f"memory_vec_{dims}d",
                 dimensions=dims,
             )
+            self._active_vector_dims = dims
             self._state["vec_dimensions"] = dims
         elif not self._has_vectors:
             # Existing vector tables remain queryable without a configured embedder.
@@ -124,6 +188,7 @@ class SessionMemory:
                         table=f"memory_vec_{saved_dims}d",
                         dimensions=saved_dims,
                     )
+                    self._active_vector_dims = saved_dims
             except (KeyError, Exception):
                 pass
 
@@ -158,28 +223,60 @@ class SessionMemory:
     def _clear_fts(self, agent: str) -> None:
         self._clear_index(agent, "keywords")
 
-    def _clear_index(self, agent: str, kind: str) -> None:
-        vault = self._fts if kind == "keywords" else self._vec
+    def _index_rows(self, kind: str, vault=None):
+        """Iterate persisted row ids and metadata in one index table."""
+        if vault is None:
+            vault = self._fts if kind == "keywords" else self._vec
         if kind == "keywords":
             ids = vault.keys(limit=vault.count())
         else:
             dims = int(kind.split(":")[1])
-            # VectorKVault has no keys API. TextVault.keys performs a plain
-            # rowid SELECT on the existing table through the same native SQLite
-            # library; its CREATE IF NOT EXISTS leaves the vec0 table intact.
-            # Python sqlite3 must not open a live vault: separate SQLite copies
-            # can invalidate each other's WAL/locking state on POSIX.
             reader = self._resources.open(
                 TextVault, self._path, table=f"memory_vec_{dims}d"
             )
             try:
-                ids = reader.keys(limit=vault.count())
+                ids = list(reader.keys(limit=vault.count()))
             finally:
                 self._resources.drop(reader)
         for row_id in ids:
             _, meta = vault.get_by_id(row_id)
-            if isinstance(meta, dict) and meta.get("agent") == agent:
+            yield row_id, meta
+
+    def _clear_index(self, agent: str | None, kind: str, vault=None) -> None:
+        if vault is None:
+            vault = self._fts if kind == "keywords" else self._vec
+        if agent is None and kind == "keywords":
+            vault.clear()
+            return
+        for row_id, meta in self._index_rows(kind, vault):
+            if agent is None or (isinstance(meta, dict) and meta.get("agent") == agent):
                 vault.delete(row_id)
+
+    def _valid_index(self, agent: str, kind: str) -> bool:
+        key = f"{agent}:cursor:{kind}"
+        if self._state.get(f"{key}:pending", False):
+            return False
+        checkpoint = self._state.get(key)
+        return (
+            not isinstance(checkpoint, dict)
+            or "generation" not in checkpoint
+            or checkpoint["generation"] == self._generation(agent)
+        )
+
+    def _ranked_candidates(self, retrieve, *, k, agent, kind, max_candidates=None):
+        validity = {}
+
+        def ready(name):
+            if name not in validity:
+                validity[name] = self._valid_index(name, kind)
+            return validity[name]
+
+        result = _without_search_echo(
+            retrieve, k=k, agent=agent, max_candidates=max_candidates, eligible=ready
+        )
+        if any(not valid for valid in validity.values()):
+            logger.debug("Skipped invalidated memory index rows", index_kind=kind)
+        return result
 
     def _prepare(self, agent: str, events: list[dict], kind: str, start_from: int):
         key = f"{agent}:cursor:{kind}"
@@ -202,7 +299,6 @@ class SessionMemory:
                 reset = True
         if reset:
             self._state[f"{key}:pending"] = True
-            self._clear_index(agent, kind)
             revision += 1
             self._state[f"{key}:revision"] = revision
             checkpoint = None
@@ -215,6 +311,7 @@ class SessionMemory:
                 generation,
                 self._embedder,
                 next_state,
+                reset,
             ),
             blocks,
         )
@@ -258,6 +355,8 @@ class SessionMemory:
         ):
             return 0
         self._state[f"{agent}:cursor:keywords:pending"] = True
+        if batch.reset:
+            self._clear_index(agent, "keywords")
         for block in blocks:
             self._fts.insert(block.content, _block_metadata(block))
         self._finish_batch(agent, "keywords", batch)
@@ -276,6 +375,7 @@ class SessionMemory:
             )
             if previous is not None:
                 self._resources.drop(previous)
+            self._active_vector_dims = embedder.dimensions
             self._state["vec_dimensions"] = embedder.dimensions
 
     def _vector_batch(self, agent: str, events: list[dict], start_from: int = 0):
@@ -303,6 +403,8 @@ class SessionMemory:
         ):
             return
         self._state[f"{key}:pending"] = True
+        if start.reset:
+            self._clear_index(agent, kind)
         for vector, block in zip(vectors, blocks):
             self._vec.insert(vector, _block_metadata(block, include_content=True))
         self._finish_batch(agent, kind, start)
@@ -347,8 +449,19 @@ class SessionMemory:
 
     def _search_fts(self, query: str, k: int, agent: str | None) -> list[SearchResult]:
         """FTS5 keyword search."""
-        results = self._fts.search(query, k=k * 2)  # Agent filtering may discard rows.
-        out = []
+        results, incomplete = self._ranked_candidates(
+            lambda limit: self._fts.search(query, k=limit),
+            k=k,
+            agent=agent,
+            kind="keywords",
+        )
+        out = SearchHits(
+            warning=(
+                _incomplete_warning("FTS", _MAX_RANKED_CANDIDATES, len(results), k)
+                if incomplete
+                else None
+            )
+        )
         for row_id, score, meta in results:
             if agent and meta.get("agent") != agent:
                 continue
@@ -365,6 +478,8 @@ class SessionMemory:
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
                     block_id=meta.get("block_id", ""),
+                    source_ref=meta.get("source_ref", ""),
+                    source_fingerprint=meta.get("source_fingerprint", ""),
                 )
             )
             if len(out) >= k:
@@ -384,8 +499,20 @@ class SessionMemory:
     def _search_vector(
         self, query_vec, k: int, agent: str | None
     ) -> list[SearchResult]:
-        results = self._vec.search(query_vec, k=k * 2)
-        out = []
+        results, incomplete = self._ranked_candidates(
+            lambda limit: self._vec.search(query_vec, k=limit),
+            k=k,
+            agent=agent,
+            kind=f"vectors:{self._active_vector_dims}",
+            max_candidates=_MAX_VECTOR_CANDIDATES,
+        )
+        out = SearchHits(
+            warning=(
+                _incomplete_warning("Semantic", _MAX_VECTOR_CANDIDATES, len(results), k)
+                if incomplete
+                else None
+            )
+        )
         for _, distance, meta in results:
             if agent and meta.get("agent") != agent:
                 continue
@@ -402,6 +529,8 @@ class SessionMemory:
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
                     block_id=meta.get("block_id", ""),
+                    source_ref=meta.get("source_ref", ""),
+                    source_fingerprint=meta.get("source_fingerprint", ""),
                 )
             )
             if len(out) >= k:
@@ -438,7 +567,15 @@ class SessionMemory:
             r = result_map[key]
             r.score = score
             out.append(r)
-        return out
+        warnings = [
+            warning
+            for warning in (
+                getattr(fts_results, "warning", None),
+                getattr(sem_results, "warning", None),
+            )
+            if warning
+        ]
+        return SearchHits(out, warning="\n".join(warnings) if warnings else None)
 
     def get_stats(self) -> dict[str, Any]:
         """Get index statistics."""
@@ -467,6 +604,9 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
         "channel": block.channel,
         "block_id": block.block_id,
     }
+    if block.source_ref and block.source_fingerprint:
+        meta["source_ref"] = block.source_ref
+        meta["source_fingerprint"] = block.source_fingerprint
     if include_content:
         meta["content"] = block.content
     return meta

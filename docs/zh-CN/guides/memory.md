@@ -69,6 +69,60 @@ kt embedding swe.kohakutr \
 
 增量建立：再次执行 `kt embedding` 时，只会索引新增事件。
 
+### 从检索结果展开上下文
+
+`search_memory(anchor=..., scope="selected")` 默认沿 Anchor 保存的
+分支视图读取。旧历史的 ancestry 若不能在预算内推导，返回的上下文可能
+不完整。
+
+`search_memory(anchor=..., scope="raw")` 有界读取同一 Agent 的物理
+相邻历史，包括其他分支和归属未知的事件，并显示记录的 Turn/Branch
+坐标。此开关不会扩大关键字或语义检索范围。两种模式均验证物理来源，
+支持连续导航和 Offset 分页。
+
+## 为旧 Session 重建记忆索引
+
+先关闭使用该 Session 的全部 Agent、Studio、独立 Memory Reader 以及
+其他读写进程。对**整个 Session** 执行一次重建，不需要逐个指定 Agent：
+
+```bash
+kt memory rebuild /path/to/session.kohakutr
+```
+
+命令首先检查旧索引。若存在旧向量记录，交互式 CLI 会让你明确选择：
+**重新计算 Embedding**（可能下载模型或产生 API 费用），或者**舍弃旧
+Semantic 索引**。在非交互环境中，应显式选择：
+
+```bash
+kt memory rebuild /path/to/session.kohakutr --dry-run
+kt memory rebuild /path/to/session.kohakutr --vectors drop
+kt memory rebuild /path/to/session.kohakutr --vectors rebuild --provider sentence-transformer --model @best
+```
+
+新索引将从原始事件重建当前选中分支的 FTS 和 Source Anchor。对于原先
+使用全分支索引的 Session，新的检索覆盖范围可能缩小，但**原始事件
+不会被删除**。若已索引的 Agent 完全没有对应的物理事件，命令会拒绝
+清空其 FTS/Vector 索引；也会复用 Session 原有的格式门禁，拒绝含未来
+版本成员的文件族。这里仅保护派生的 Search 索引，**不负责检查或修复
+Session 事件历史的完整性**。
+
+重建通过原有 Store 与 Memory 接口操作原始 Session，先创建并验证
+SQLite 逻辑备份（包含已提交的 WAL 数据），不替换 Session 文件，也不改动
+外部 artifacts 或重写原始事件。索引更新中断后，已知失效的索引需要刷新
+或重建，可使用相同的向量策略重试。备份保留旧索引，包括付费生成的向量。
+
+不会在格式不兼容时静默复用旧向量；显式舍弃向量后，需要重新建立
+Embedding 索引才能恢复语义检索。重新计算向量时，会先完成对应 Agent
+的新 Embedding 计算，再清除其旧向量记录。
+
+旧 Session 保存了 Embedding Provider 但未保存模型名称时，使用该 Provider
+的默认模型。模型加载失败后可以重试。SQLite 自行管理 WAL／SHM，
+**不要手动删除 Sidecar 文件**。离线维护要求关闭所有读写进程，包括不
+参与 Session 写锁协调的消费者。
+
+未重建的旧索引可能返回 `ANCHOR_REBUILD_REQUIRED`。普通 Search 不会
+自动启动重建。
+
 ## 从 CLI 搜索
 
 ```bash

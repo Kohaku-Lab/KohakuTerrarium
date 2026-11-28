@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -187,7 +188,7 @@ def build_index(
             # Count first so indexing progress has a stable denominator.
             agent_events: dict[str, list[dict]] = {}
             for agent_name in agents:
-                events = store.get_events(agent_name) or []
+                events = sourced_events(store, agent_name)
                 agent_events[agent_name] = events
                 total_events_seen += len(events)
             emit(
